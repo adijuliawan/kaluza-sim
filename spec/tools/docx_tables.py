@@ -34,7 +34,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import docx_lib as dl  # noqa: E402
 
-TOOL_VERSION = "1.0"
+TOOL_VERSION = "1.1"
 NBSP = " "
 
 
@@ -263,14 +263,29 @@ def extract_24008(items) -> dict[str, list[dict]]:
             for row in it.rows:
                 for c in row:
                     lines += c.text.replace(NBSP, " ").split("\n")
-    # The NOTE before the lists names the containers whose length field is two
-    # octets (octets z+3, z+4) instead of one; the codec needs that.
-    two_octet: set[str] = set()
+    # The NOTE to figure 10.5.136 names, per direction, the containers whose
+    # length field is two octets (octets z+3, z+4) instead of one: a list after
+    # "If the container ID is:", closed by "for network to MS direction" or "for
+    # MS to network direction". The names do not decide it: "QoS rules with the
+    # length of two octets support indicator" (MS to network) has a one-octet length.
+    two_octet: dict[str, set[str]] = {"UE-to-network": set(), "network-to-UE": set()}
+    pending: set[str] | None = None
     for text in lines:
-        if "with the length of two octets" in text or "with length of two octets" in text:
-            m = _CONTAINER.match(_trim(text))
-            if m:
-                two_octet.add(m.group(1))
+        t = text.strip()
+        if "If the container ID is" in t:
+            pending = set()
+            continue
+        if pending is None:
+            continue
+        if "for network to MS direction" in t or "for MS to network direction" in t:
+            two_octet["network-to-UE" if "network to MS" in t else "UE-to-network"] |= pending
+            pending = None
+            continue
+        m = re.match(r"-?\s*([0-9A-Fa-f]{4})H\b", t)
+        if m:
+            pending.add(m.group(1).upper())
+    if not all(two_octet.values()):
+        raise dl.ExtractError("24.008: the two-octet length NOTE of 10.5.6.3 not found for both directions")
     rows, direction = [], ""
     for text in lines:
         head = text.strip().lower()
@@ -285,7 +300,7 @@ def extract_24008(items) -> dict[str, list[dict]]:
         m = _CONTAINER.match(_trim(text))
         if m:
             rows.append({"direction": direction, "id_hex": m.group(1), "name": norm(m.group(2)),
-                         "length_octets": 2 if m.group(1) in two_octet else 1})
+                         "length_octets": 2 if m.group(1).upper() in two_octet[direction] else 1})
     if not rows:
         raise dl.ExtractError("24.008: no container identifiers found in 10.5.6.3")
     return {"epco_containers": rows}

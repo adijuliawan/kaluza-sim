@@ -202,6 +202,70 @@ def cmd_probes(a) -> int:
     return 0 if not bad else 1
 
 
+def cmd_l3roundtrip(a) -> int:
+    """The M11 check: every v1 NAS and SMS type, corpus vectors and generated values."""
+    from ksimoracle import nasrt
+    report = ROOT / "build" / "oracle" / "l3roundtrip.tsv"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    rows, totals = [], collections.Counter()
+    by_type = collections.defaultdict(list)
+    for proto in ("nas", "sms"):
+        for row in corpus(proto):
+            by_type[row["pdu"]].append(row)
+    with Codec(Path(a.codec) if a.codec else None) as codec:
+        if a.selftest:
+            results = nasrt.selftest(codec)
+            for name, caught in results:
+                print(f"L3SELFTEST {'CAUGHT' if caught else 'MISSED'} {name}")
+            ok = all(c for _, c in results)
+            print(f"L3SELFTEST={'PASS' if ok else 'FAIL'} cases={len(results)}")
+            return 0 if ok else 1
+        ie_checked = field_checked = epco_checked = 0
+        for proto in ("5gmm", "5gsm", "sms"):
+            c = collections.Counter()
+            types = v1_types(proto)
+            if a.pdu:
+                types = [t for t in types if t in a.pdu]
+            no_indep = 0
+            for name in types:
+                kind = "nas" if proto != "sms" else nasrt.SMS_CLASSES[name][0]
+                rows_for = by_type.get(name) or by_type.get(name.split(" (")[0], [])
+                cases = [(r["id"], bytes.fromhex(r["hex"]), False) for r in rows_for]
+                if not cases:
+                    no_indep += 1
+                modes = ("min", "max", "table") if kind == "nas" and "PROTECTED" not in name else ("min", "max")
+                for mode in modes:
+                    try:
+                        cases.append((f"gen-{mode}", nasrt.generate(kind, name, mode), True))
+                    except Exception as e:  # noqa: BLE001
+                        c["GEN_ERROR"] += 1
+                        rows.append([proto, name, f"gen-{mode}", "GEN_ERROR", "", "", "", "", f"{type(e).__name__}: {e}"[:200]])
+                for src, data, gen in cases:
+                    r = nasrt.check(codec, kind, name, data, gen, use_pycrate=src != "gen-table")
+                    c[r.status] += 1
+                    ie_checked += r.tshark_ie_count
+                    field_checked += r.field_count
+                    epco_checked += r.epco_count
+                    rows.append([proto, name, src, r.status, int(r.ours_roundtrip), int(r.pycrate_ok),
+                                 "" if r.ies_match is None else int(r.ies_match), int(r.tshark_clean),
+                                 "; ".join(dict.fromkeys(r.notes))[:400]])
+            totals += c
+            print(f"L3ROUNDTRIP proto={proto} types={len(types)} without_independent_vector={no_indep} "
+                  + " ".join(f"{k}={n}" for k, n in sorted(c.items())))
+    with report.open("w") as f:
+        f.write("# tests/oracles/oracle.py l3roundtrip (plan M11). Generated; not committed.\n")
+        f.write("protocol\tpdu\tsource\tstatus\tours_roundtrip\tpycrate_ok\ties_match\ttshark_clean\tnotes\n")
+        for r in rows:
+            f.write("\t".join(str(x) for x in r) + "\n")
+    fails = [r for r in rows if r[3] in ("FAIL", "GEN_ERROR")]
+    for r in fails[: a.show]:
+        print(f"FAILURE {r[0]} {r[1]} {r[2]} {r[3]} {r[8][:200]}")
+    print("L3ROUNDTRIP_TOTAL " + " ".join(f"{k}={n}" for k, n in sorted(totals.items()))
+          + f" tshark_ies_matched={ie_checked} epco_units_matched={epco_checked} sms_fields_matched={field_checked}"
+          + f" report={report.relative_to(ROOT)}")
+    return 0 if not fails else 1
+
+
 def cmd_allowlists(a) -> int:
     import io
     out = ROOT / "spec" / "oracle"
@@ -273,6 +337,11 @@ def main() -> None:
     rt.add_argument("--pdu", action="append")
     rt.add_argument("--codec", help="ksim-codec binary (default: build/dev, or $KSIM_CODEC)")
     rt.add_argument("--show", type=int, default=40)
+    l3 = sub.add_parser("l3roundtrip")
+    l3.add_argument("--pdu", action="append")
+    l3.add_argument("--codec")
+    l3.add_argument("--show", type=int, default=40)
+    l3.add_argument("--selftest", action="store_true", help="the must-fail mutations only")
     pr = sub.add_parser("probes")
     pr.add_argument("--codec")
     lo = sub.add_parser("localize")
@@ -284,7 +353,7 @@ def main() -> None:
     al.add_argument("--check", action="store_true")
     sub.add_parser("selftest")
     a = ap.parse_args()
-    sys.exit({"gen": cmd_gen, "check": cmd_check, "sweep": cmd_sweep, "roundtrip": cmd_roundtrip, "localize": cmd_localize, "probes": cmd_probes,
+    sys.exit({"gen": cmd_gen, "check": cmd_check, "sweep": cmd_sweep, "roundtrip": cmd_roundtrip, "localize": cmd_localize, "probes": cmd_probes, "l3roundtrip": cmd_l3roundtrip,
               "allowlists": cmd_allowlists, "selftest": cmd_selftest}[a.cmd](a))
 
 

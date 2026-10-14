@@ -2,13 +2,16 @@
 # SPDX-FileCopyrightText: 2026 Adi Juliawan
 # SPDX-License-Identifier: LicenseRef-kaluza-sim-private
 #
-# CI hook (plan M7): the extracted NAS/SMS tables and KATs equal a fresh
+# CI hook (plans M7, M11): the extracted NAS/SMS tables and KATs equal a fresh
 # extraction from the pinned documents, the second readings of the NAS tables
-# have no unclassified difference, and spec/v1-pdus.tsv is current.
+# have no unclassified difference, spec/v1-pdus.tsv is current, and
+# spec/nas/24501/ie_types.tsv (tools/nasgen.py) is current with no problem.
 # Exit 77 (SKIP) on a fresh clone without the fetched documents.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 -m unittest discover -s "$ROOT/tests/spec_tools" -p 'test_*.py' -q 2>&1 | tail -n 3 || exit 1
+# The NAS IE types (plan M11) agree with the committed message tables.
+python3 -I "$ROOT/tools/nasgen.py" --check || exit 1
 if ! compgen -G "$ROOT/spec/3gpp/24/24501-*.zip" >/dev/null; then
     echo "SPEC_TABLES=SKIP (no fetched documents; run spec/tools/fetch.py)"; exit 77
 fi

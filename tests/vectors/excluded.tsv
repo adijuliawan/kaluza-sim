@@ -34,6 +34,8 @@ testkit:ngap/asn1c-w35/ng-setup-request-wagf-1.bin	ng-setup-request-wagf-1.bin	a
 testkit:ngap/asn1c-w35/pdu-session-resource-notify-2.bin	pdu-session-resource-notify-2.bin	asn1c-w35: a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
 testkit:ngap/asn1c-w35/pdu-session-resource-notify-transfer-1.bin	pdu-session-resource-notify-transfer-1.bin	asn1c-w35: a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
 testkit:ngap/asn1c-w35/uli-wagf-1.bin	uli-wagf-1.bin	asn1c-w35: a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
+testkit:ngap/free5gc/downlink-nas-transport-old-amf-1.bin (NAS-PDU in ngap-free5gc-007)	downlink-nas-transport-old-amf-1.bin	NAS-PDU of 3 octets, under the 7 of the mandatory part of AUTHENTICATION REQUEST (a test filler)
+testkit:ngap/free5gc/downlink-nas-transport-ue-ambr-1.bin (NAS-PDU in ngap-free5gc-008)	downlink-nas-transport-ue-ambr-1.bin	NAS-PDU of 3 octets, under the 5 of the mandatory part of REGISTRATION ACCEPT (a test filler)
 testkit:ngap/live-n3iwf/downlink-nas-transport-1.bin	downlink-nas-transport-1.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
 testkit:ngap/live-n3iwf/downlink-nas-transport-2.bin	downlink-nas-transport-2.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
 testkit:ngap/live-n3iwf/downlink-nas-transport-3.bin	downlink-nas-transport-3.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name

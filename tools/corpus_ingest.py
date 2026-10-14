@@ -29,6 +29,7 @@ import io
 import re
 import sys
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -284,6 +285,232 @@ def build_local() -> tuple[list[dict], list[dict], Counter]:
     return rows, manifest, skipped
 
 
+# ---- NAS and SMS (plan M11) ------------------------------------------------------------
+
+LAB_PLMNS = {"00101", "99970"}   # the lab's test PLMNs: downlink there is kaluza-core's (ADR 0005)
+
+
+def nas_messages() -> dict[tuple[str, int], dict]:
+    lines = [ln for ln in (ROOT / "spec" / "nas" / "24501" / "messages.tsv").open() if not ln.startswith("#")]
+    rows = list(csv.DictReader(lines, delimiter="\t"))
+    names = Counter(r["message"] for r in rows)
+    out = {}
+    for r in rows:
+        if r["message_type_hex"]:
+            name = r["message"] if names[r["message"]] == 1 else f"{r['message']} ({r['key']})"
+            out[(r["protocol"], int(r["message_type_hex"], 16))] = {**r, "v1_name": name,
+                                                                     "direction": nas_direction(r["direction"])}
+    return out
+
+
+def nas_direction(text: str) -> str:
+    """uplink, downlink or unknown from a message table's 'Direction:' line, which
+    TS 24.501 spells several ways (UE to network, UE to AMF, Network to UE, both)."""
+    t = text.strip().lower()
+    if t.startswith("ue to "):
+        return "uplink"
+    if t.endswith(" to ue"):
+        return "downlink"
+    return "unknown"
+
+
+@lru_cache(maxsize=None)
+def nas_min_octets() -> dict[str, int]:
+    """Message key -> octets of its mandatory part (TS 24.501 clause 8 tables)."""
+    lines = [ln for ln in (ROOT / "spec" / "nas" / "24501" / "message_ies.tsv").open() if not ln.startswith("#")]
+    halves: Counter = Counter()
+    for r in csv.DictReader(lines, delimiter="\t"):
+        if r["presence"].startswith("M"):
+            t = r["length"].replace(" ", "")
+            halves[r["key"]] += 1 if t == "1/2" else 2 * int(t.split("-")[0])
+    return {k: (h + 1) // 2 for k, h in halves.items()}
+
+
+def nas_name(data: bytes) -> tuple[str, str] | None:
+    """(v1 name, direction) of a NAS PDU from its header octets alone. A security
+    protected message takes the direction of its plain inner message when the
+    protection is integrity only (security header type 1 or 3), else 'both'."""
+    msgs = nas_messages()
+    if len(data) >= 3 and data[0] == 0x7E:
+        if data[1] & 0x0F:
+            inner = nas_name(data[7:]) if (data[1] & 0x0F) in (1, 3) and not (data[8:9] and data[8] & 0x0F) else None
+            return "SECURITY PROTECTED 5GS NAS MESSAGE", inner[1] if inner else "unknown"
+        r = msgs.get(("5GMM", data[2]))
+    elif len(data) >= 4 and data[0] == 0x2E:
+        r = msgs.get(("5GSM", data[3]))
+    else:
+        return None
+    return (r["v1_name"], r["direction"]) if r else None
+
+
+def _walk_nas(o, v, out: list[bytes]) -> None:
+    """Every NAS-PDU octet string in a pycrate NGAP value."""
+    sys.path.insert(0, str(ROOT / "tests" / "oracles"))
+    from ksimoracle.jer import _types
+    from ksimoracle.valuegen import type_name
+    t = o.TYPE
+    if t == "OCTET STRING" and type_name(o) == "NAS-PDU" and isinstance(v, (bytes, bytearray)):
+        out.append(bytes(v))
+    elif t == "OPEN_TYPE" and isinstance(v, tuple) and len(v) == 2:
+        if v[0] == "NAS-PDU" and isinstance(v[1], (bytes, bytearray)):
+            out.append(bytes(v[1]))
+        else:
+            sub = _types("ngap").get(v[0])
+            if sub is not None:
+                _walk_nas(sub, v[1], out)
+    elif t == "SEQUENCE" and isinstance(v, dict):
+        for k, x in v.items():
+            if k in o._cont:
+                _walk_nas(o._cont[k], x, out)
+    elif t == "CHOICE" and isinstance(v, tuple) and v[0] in o._cont:
+        _walk_nas(o._cont[v[0]], v[1], out)
+    elif t in ("SEQUENCE OF", "SET OF") and isinstance(v, list):
+        for x in v:
+            _walk_nas(o._cont, x, out)
+
+
+def nas_from_ngap(ngap_rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """NAS-PDUs carried in the NGAP corpus: their producer is the NGAP vector's.
+    A NAS-PDU shorter than its message's mandatory part is a test filler (free5gc
+    puts a bare header in its NGAP tests) and is excluded."""
+    sys.path.insert(0, str(ROOT / "tests" / "oracles"))
+    from ksimoracle import asn
+    o, enc = asn.top("ngap")
+    rows, excluded, seen = [], [], set()
+    keys = {r["v1_name"]: r["key"] for r in nas_messages().values()}
+    keys["SECURITY PROTECTED 5GS NAS MESSAGE"] = "8.2.28"
+    mins = nas_min_octets()
+    for r in ngap_rows:
+        try:
+            v = asn.decode(o, bytes.fromhex(r["hex"]), enc)
+        except Exception:  # noqa: BLE001
+            continue
+        found: list[bytes] = []
+        _walk_nas(o, v, found)
+        for nas in found:
+            named = nas_name(nas)
+            if named is None or nas in seen:
+                continue
+            seen.add(nas)
+            need = mins.get(keys.get(named[0], ""), 0)
+            if len(nas) < need:
+                excluded.append({"source": f"{r['source']} (NAS-PDU in {r['id']})", "locator": r["locator"],
+                                 "reason": f"NAS-PDU of {len(nas)} octets, under the {need} of the mandatory part "
+                                           f"of {named[0]} (a test filler)"})
+                continue
+            rows.append({
+                "id": f"nas-{r['id']}-{len(rows) + 1:03d}", "proto": "nas", "pdu": named[0], "octets": len(nas),
+                "sha256": hashlib.sha256(nas).hexdigest(), "producer": r["producer"],
+                "direction": named[1], "same_compiler": "no",
+                "source": f"{r['source']} (NAS-PDU in {r['id']})", "locator": r["locator"],
+                "licence": r["licence"], "hex": nas.hex()})
+    return rows, excluded
+
+
+def _capture_plmn(recs) -> str | None:
+    """The first PLMN a capture's SIB1 broadcasts (MCC+MNC digits), or None."""
+    sys.path.insert(0, str(ROOT / "tests" / "oracles"))
+    from ksimoracle import asn
+    o = asn.obj("rrc", "NR_RRC_Definitions", "BCCH_DL_SCH_Message")
+    for _, tag, data in recs:
+        if tag != "nr-rrc.bcch.dl.sch":
+            continue
+        try:
+            o.from_uper(data)
+            v = o.get_val()["message"]
+            sib1 = v[1][1]
+            pid = sib1["cellAccessRelatedInfo"]["plmn-IdentityInfoList"][0]["plmn-IdentityList"][0]
+            return "".join(str(d) for d in pid.get("mcc", [])) + "".join(str(d) for d in pid["mnc"])
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def _sms_layers(payload: bytes) -> list[tuple[str, bytes, str]]:
+    """(v1 name, octets, layer) for the CP, RP and TPDU inside an SMS payload container."""
+    out = []
+    if len(payload) < 2 or (payload[0] & 0x0F) != 0x9:
+        return out
+    cp_type = {0x01: "CP-DATA", 0x04: "CP-ACK", 0x10: "CP-ERROR"}.get(payload[1])
+    if cp_type is None:
+        return out
+    out.append((cp_type, payload, "cp"))
+    if cp_type != "CP-DATA" or len(payload) < 3:
+        return out
+    rp = payload[3:3 + payload[2]]
+    if not rp:
+        return out
+    mti = rp[0] & 0x07
+    rp_name = {0: "RP-DATA", 1: "RP-DATA", 2: "RP-ACK", 3: "RP-ACK", 4: "RP-ERROR", 5: "RP-ERROR", 6: "RP-SMMA"}.get(mti)
+    if rp_name is None:
+        return out
+    out.append((rp_name, rp, "rp"))
+    if mti in (0, 1) and len(rp) > 2:
+        pos = 2
+        for _ in range(2):                       # originator, destination address (LV)
+            pos += 1 + rp[pos] if pos < len(rp) else 0
+        if pos < len(rp):
+            tpdu = rp[pos + 1:pos + 1 + rp[pos]]
+            if tpdu:
+                tp_mti = tpdu[0] & 0x03
+                name = ({0: "SMS-DELIVER", 1: "SMS-SUBMIT-REPORT", 2: "SMS-STATUS-REPORT"} if mti == 1 else
+                        {0: "SMS-DELIVER-REPORT", 1: "SMS-SUBMIT", 2: "SMS-COMMAND"}).get(tp_mti)
+                if name:
+                    out.append((name, tpdu, "tpdu"))
+    return out
+
+
+def build_local_l3() -> tuple[list[dict], list[dict], Counter]:
+    """NAS and SMS from the phone captures: uplink always (the phone's modem);
+    downlink only where SIB1 shows an operator PLMN (the lab's is kaluza-core's)."""
+    sys.path.insert(0, str(ROOT / "tests" / "oracles"))
+    from ksimoracle import pcap
+    nas_rows, sms_rows, skipped, seen = [], [], Counter(), set()
+    for base, root in LOCAL_BASES.items():
+        if not root.is_dir():
+            continue
+        for f in sorted(root.rglob("*_l3.pcap")):
+            rel = f.relative_to(root).as_posix()
+            run = f.parent.relative_to(root).as_posix()
+            recs = pcap.read_exported_pdu(f.read_bytes())
+            plmn = _capture_plmn(recs)
+            lab = plmn is None or plmn in LAB_PLMNS
+            for frame, tag, data in recs:
+                if tag != "nas-5gs" or data in seen:
+                    continue
+                seen.add(data)
+                named = nas_name(data)
+                if named is None:
+                    skipped["nas: not a 5GMM or 5GSM message type in TS 24.501"] += 1
+                    continue
+                name, direction = named
+                ul = direction == "uplink"
+                if not ul and lab:
+                    skipped["nas: downlink or two-way message in a lab capture (kaluza-core's)"] += 1
+                    continue
+                if sum(1 for r in nas_rows if r["pdu"] == name) >= LOCAL_CAP_PER_TYPE:
+                    continue
+                producer = (f"UE modem ({run})" if ul else f"operator core, PLMN {plmn} ({run})" if direction != "unknown"
+                            else f"UE modem or operator core, PLMN {plmn} ({run}); the capture has no direction")
+                nas_rows.append({"id": f"nas-local-{len(nas_rows) + 1:04d}", "proto": "nas", "pdu": name,
+                                 "octets": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                                 "producer": producer, "direction": direction,
+                                 "source": f"{base}:{rel}", "locator": f"frame {frame}", "hex": data.hex()})
+                # SMS in an UL/DL NAS TRANSPORT payload container of type SMS (2)
+                if name in ("UL NAS TRANSPORT", "DL NAS TRANSPORT") and len(data) > 6 and (data[3] & 0x0F) == 0x2:
+                    plen = (data[4] << 8) | data[5]
+                    for sms_name, octets, layer in _sms_layers(data[6:6 + plen]):
+                        if sum(1 for r in sms_rows if r["pdu"] == sms_name) >= LOCAL_CAP_PER_TYPE:
+                            continue
+                        sms_rows.append({"id": f"sms-local-{len(sms_rows) + 1:04d}", "proto": "sms",
+                                         "pdu": sms_name, "octets": len(octets),
+                                         "sha256": hashlib.sha256(octets).hexdigest(), "producer": producer,
+                                         "direction": "uplink" if ul else "downlink", "source": f"{base}:{rel}",
+                                         "locator": f"frame {frame} ({layer} in the SMS payload container)",
+                                         "hex": octets.hex()})
+    return nas_rows, sms_rows, skipped
+
+
 def render(rows: list[dict], fields: list[str], header: str) -> str:
     buf = io.StringIO()
     buf.write(header + "\n")
@@ -303,11 +530,26 @@ def main() -> None:
         files[ROOT / "tests" / "vectors" / proto / "index.tsv"] = render(
             rows, FIELDS, "# External-origin vectors (tools/corpus_ingest.py, rules in tests/vectors/rules.tsv). "
                           "Do not edit.")
+    if "ngap" in by_proto:
+        by_proto["nas"], nas_excluded = nas_from_ngap(by_proto["ngap"])
+        excluded += nas_excluded
+        files[ROOT / "tests" / "vectors" / "nas" / "index.tsv"] = render(
+            by_proto["nas"], FIELDS, "# NAS-PDUs carried in the NGAP corpus (tools/corpus_ingest.py); the producer "
+                                     "is the NGAP vector's. Do not edit.")
     files[ROOT / "tests" / "vectors" / "excluded.tsv"] = render(
         sorted(excluded, key=lambda x: (x["source"], x["locator"])), ["source", "locator", "reason"],
         "# Candidates the sender rules exclude (tools/corpus_ingest.py). Do not edit.")
     local_rows, manifest, skipped = build_local()
+    nas_local, sms_local, l3_skipped = build_local_l3()
+    local_rows_all = local_rows + nas_local + sms_local
+    manifest = [{k: r[k] for k in LOCAL_FIELDS} for r in local_rows_all]
     local_files = {}
+    if nas_local:
+        local_files[ROOT / "tests" / "vectors" / "local" / "nas" / "index.tsv"] = render(
+            nas_local, LOCAL_FIELDS + ["hex"], "# Local-only vectors. Never commit. Do not edit.")
+    if sms_local:
+        local_files[ROOT / "tests" / "vectors" / "local" / "sms" / "index.tsv"] = render(
+            sms_local, LOCAL_FIELDS + ["hex"], "# Local-only vectors. Never commit. Do not edit.")
     if local_rows:
         files[ROOT / "tests" / "vectors" / "local-manifest.tsv"] = render(
             manifest, LOCAL_FIELDS, "# Local-only vectors (tools/corpus_ingest.py): the octets stay under "
@@ -323,6 +565,10 @@ def main() -> None:
     for p, text in {**files, **local_files}.items():
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text)
+    if nas_local or sms_local:
+        print(f"CORPUS_LOCAL proto=nas vectors={len(nas_local)} pdu_types={len({r['pdu'] for r in nas_local})} "
+              f"proto=sms vectors={len(sms_local)} pdu_types={len({r['pdu'] for r in sms_local})} "
+              f"skipped: {'; '.join(f'{k} x{n}' for k, n in l3_skipped.most_common(3))}")
     if local_rows:
         types = Counter(r["pdu"] for r in local_rows)
         print(f"CORPUS_LOCAL proto=rrc vectors={len(local_rows)} pdu_types={len(types)} "

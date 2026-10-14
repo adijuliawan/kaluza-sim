@@ -1,0 +1,178 @@
+# IE types of TS 24.501 as the message tables use them (tools/nasgen.py). Do not edit.
+type_name	reference	formats	messages
+5GMM capability	9.11.3.1	TLV:3-15	1
+5GMM cause	9.11.3.2	TV:2-2;V:1-1	7
+5GS DRX parameters	9.11.3.2A	TLV:3-3	2
+5GS additional request result	9.11.3.81	TLV:3-3	2
+5GS identity type	9.11.3.3	V:0-0	1
+5GS mobile identity	9.11.3.4	LV-E:6-n;TLV-E:14-14	7
+5GS network feature support	9.11.3.5	TLV:3-6	1
+5GS registration result	9.11.3.6	LV:2-2;TLV:3-3	2
+5GS registration type	9.11.3.7	V:0-0	1
+5GS tracking area identity	9.11.3.8	TV:7-7	1
+5GS tracking area identity list	9.11.3.9	TLV:9-114	6
+5GS update type	9.11.3.9A	TLV:3-3	1
+5GSM capability	9.11.4.1	TLV:3-15	2
+5GSM cause	9.11.4.2	TV:2-2;V:1-1	11
+5GSM congestion re-attempt indicator	9.11.4.21	TLV:3-3	3
+5GSM network feature support	9.11.4.18	TLV:3-15	1
+ABBA	9.11.3.10	LV:3-n;TLV:4-n	3
+ATSSS container	9.11.4.22	TLV-E:3-n	3
+AUN3 device security key	9.11.3.107	TLV:36-n	2
+AUN3 indication	9.11.3.104	TLV:3-3	1
+Access technology utilization control	9.11.3.110	TLV:4-5	5
+Access type	9.11.2.1A	TV:1-1;V:0-0	2
+Additional 5G security information	9.11.3.12	TLV:3-3	1
+Additional configuration indication	9.11.3.74	TV:1-1	1
+Additional information	9.11.2.1	TLV:3-n	3
+Additional information requested	9.11.3.12A	TLV:3-3	1
+Allowed PDU session status	9.11.3.13	TLV:4-34	3
+Allowed SSC mode	9.11.4.5	TV:1-1	1
+Alternative NSSAI	9.11.3.97	TLV:2-146	2
+Always-on PDU session indication	9.11.4.3	TV:1-1	2
+Always-on PDU session requested	9.11.4.4	TV:1-1	2
+Authentication failure parameter	9.11.3.14	TLV:16-16	1
+Authentication parameter AUTN	9.11.3.15	TLV:18-18	1
+Authentication parameter RAND	9.11.3.16	TV:17-17	1
+Authentication response parameter	9.11.3.17	TLV:18-18	1
+CAG information list	9.11.3.18A	TLV-E:3-n	5
+CIoT small data container	9.11.3.18B	TLV:4-257	1
+Ciphering key data	9.11.3.18C	TLV-E:34-n	1
+Configuration update indication	9.11.3.18	TV:1-1	1
+Control plane only indication	9.11.4.23	TV:1-1	1
+Control plane service type	9.11.3.18D	V:0-0	1
+DNN	9.11.2.1B	TLV:3-102	2
+DS-TT Ethernet port MAC address	9.11.4.25	TLV:8-8	1
+Daylight saving time	9.11.3.19	TLV:3-3	1
+De-registration type	9.11.3.20	V:0-0	1
+EAP message	9.11.2.2	LV-E:6-1502;TLV-E:7-1503	22
+ECN marking for L4S indication	9.11.4.40	TLV:2-257	2
+EPS NAS message container	9.11.3.24	TLV-E:4-n	1
+EPS NAS security algorithms	9.11.3.25	TV:2-2	1
+EPS bearer context status	9.11.3.23A	TLV:4-4	2
+Emergency number list	9.11.3.23	TLV:5-50	1
+Ethernet header compression configuration	9.11.4.28	TLV:3-3	4
+Extended 5GMM cause	9.11.3.109	TLV:3-3	1
+Extended CAG information list	9.11.3.86	TLV-E:3-n	5
+Extended DRX parameters	9.11.3.26A	TLV:3-4	2
+Extended LADN information	9.11.3.96	TLV-E:3-1787	1
+Extended Protocol discriminator	9.2	V:1-1	1
+Extended emergency number list	9.11.3.26	TLV-E:7-n	1
+Extended protocol configuration options	9.11.4.6	TLV-E:4-n	15
+Extended protocol discriminator	9.2	V:1-1	55
+Extended rejected NSSAI	9.11.3.75	TLV:5-90	4
+Feature authorization indication	9.11.3.105	TLV:3-257	2
+GPRS timer	9.11.2.3	TV:2-2	2
+GPRS timer 2	9.11.2.4	TLV:3-3	5
+GPRS timer 3	9.11.2.5	TLV:3-3	10
+Header compression configuration	9.11.4.24	TLV:5-257	1
+IMEISV request	9.11.3.28	TV:1-1	1
+IP header compression configuration	9.11.4.24	TLV:5-257	3
+Integrity protection maximum data rate	9.11.4.7	TV:3-3;V:2-2	2
+LADN indication	9.11.3.29	TLV-E:3-811	1
+LADN information	9.11.3.30	TLV-E:13-1715	2
+LP-WUS status	9.11.3.112	TV:1-1	2
+LP-WUSPS assistance information	9.11.3.111	TLV:3-3	3
+List of PLMNs to be used in disaster condition	9.11.3.83	TLV:2-n	2
+MA PDU session information	9.11.3.31A	TV:1-1	1
+MICO indication	9.11.3.31	TV:1-1	3
+Mapped EPS bearer contexts	9.11.4.8	TLV-E:7-n	3
+Mapped NSSAI	9.11.3.31B	TLV:3-42	1
+Maximum number of supported packet filters	9.11.4.9	TV:3-3	2
+Message authentication code	9.8	V:4-4	1
+Message type	9.6	V:1-1	2
+Message type	9.7	V:1-1	53
+Mobile station classmark 2	9.11.3.31C	TLV:5-5	1
+N3IWF identifier	9.11.3.93	TLV:7-n	1
+N3QAI	9.11.4.36	TLV-E:9-n	2
+N5GC indication	9.11.3.72	TV:1-1	1
+NAS key set identifier	9.11.3.32	TV:1-1;V:0-0	7
+NAS message container	9.11.3.33	TLV-E:4-n	5
+NAS security algorithms	9.11.3.34	V:1-1	1
+NB-N1 mode DRX parameters	9.11.3.73	TLV:3-3	2
+NID	9.11.3.79	TLV:8-8	2
+NSAG information	9.11.3.87	TLV-E:9-3143	2
+NSSAI	9.11.3.37	TLV:4-74	3
+NSSAI inclusion mode	9.11.3.37A	TV:1-1	1
+NSSRG information	9.11.3.82	TLV-E:7-4099	2
+Network name	9.11.3.35	TLV:3-n	1
+Network slicing indication	9.11.3.36	TV:1-1	3
+Non-3GPP NW provided policies	9.11.3.36A	TV:1-1	1
+Non-3GPP access path switching indication	9.11.3.99	TLV:3-3	1
+Non-3GPP delay budget	9.11.4.37	TLV-E:6-n	1
+Non-3GPP device information	9.11.4.41	TLV-E:7-n	1
+Non-3GPP path switching information	9.11.3.102	TLV:3-3	1
+On-demand NSSAI	9.11.3.108	TLV:5-210	2
+Operator-defined access category definitions	9.11.3.38	TLV-E:3-8323	2
+PDU address	9.11.4.10	TLV:11-11	2
+PDU session identity	9.4	V:1-1	20
+PDU session identity 2	9.11.3.41	TV:2-2	3
+PDU session pair ID	9.11.4.32	TLV:3-3	1
+PDU session reactivation result	9.11.3.42	TLV:4-34	2
+PDU session reactivation result error cause	9.11.3.43	TLV-E:5-515	2
+PDU session status	9.11.3.44	TLV:4-34	7
+PDU session type	9.11.4.11	TV:1-1;V:0-0	2
+PEIPS assistance information	9.11.3.80	TLV:3-3	3
+PLMN identity	9.11.3.85	TLV:5-5	1
+PLMN list	9.11.3.45	TLV:5-47	1
+Paging restriction	9.11.3.77	TLV:3-35	3
+Partial NSSAI	9.11.3.103	TLV-E:3-808	1
+Payload container	9.11.3.39	LV-E:3-n;TLV-E:4-n	4
+Payload container information	9.11.3.106	TV:1-1	1
+Payload container type	9.11.3.40	TV:1-1;V:0-0	4
+Plain 5GS NAS message	9.9	V:3-n	1
+Port management information container	9.11.4.27	TLV-E:8-n	4
+Priority indicator	9.11.3.91	TV:1-1	1
+ProSe relay transaction identity	9.11.3.88	V:1-1	5
+Procedure transaction identity	9.6	V:1-1	20
+Protocol description	9.11.4.39	TLV-E:6-n	2
+QoS flow descriptions	9.11.4.12	TLV-E:6-n	3
+QoS rules	9.11.4.13	LV-E:6-n;TLV-E:7-n	3
+RAN timing synchronization	9.11.3.95	TLV:3-3	2
+RSN	9.11.4.33	TLV:3-3	1
+Re-attempt indicator	9.11.4.17	TLV:3-3	2
+Received MBS container	9.11.4.31	TLV-E:9-n	2
+Registration wait range	9.11.3.84	TLV:4-4	5
+Rejected NSSAI	9.11.3.46	TLV:4-42	4
+Relay key request parameters	9.11.3.89	LV:22-n	1
+Relay key response parameters	9.11.3.90	LV-E:51-n	1
+Release assistance indication	9.11.3.46A	TV:1-1	2
+Remote UE context list	9.11.4.29	TLV-E:16-n	1
+Request type	9.11.3.47	TV:1-1	1
+Requested MBS container	9.11.4.30	TLV-E:8-n	2
+S-NSSAI	9.11.2.8	LV:2-5;TLV:3-10	7
+S-NSSAI location validity information	9.11.3.100	TLV-E:17-38611	1
+S-NSSAI time validity information	9.11.3.101	TLV:23-257	2
+S1 UE network capability	9.11.3.48	TLV:4-15	1
+S1 UE security capability	9.11.3.48A	TLV:4-7	1
+SM PDU DN request container	9.11.4.15	TLV:3-255	1
+SMS indication	9.11.3.50A	TV:1-1	1
+SNPN list	9.11.3.92	TLV:11-137	1
+SOR transparent container	9.11.3.51	TLV-E:20-n	2
+SSC mode	9.11.4.16	TV:1-1;V:0-0	2
+Security header type	9.3	V:0-0	36
+Sequence number	9.10	V:1-1	1
+Service area list	9.11.3.49	TLV:6-114	2
+Service type	9.11.3.50	V:0-0	1
+Service-level-AA container	9.11.2.10	LV-E:5-n;TLV-E:4-n	11
+Serving PLMN rate control	9.11.4.20	TLV:4-4	2
+Session-AMBR	9.11.4.14	LV:7-7;TLV:8-8	2
+Spare half octet	9.5	V:0-0	36
+Supported codec list	9.11.3.51A	TLV:5-n	1
+TNAN information	9.11.3.94	TLV:3-n	1
+Time zone	9.11.3.52	TV:2-2	1
+Time zone and time	9.11.3.53	TV:8-8	1
+Truncated 5G-S-TMSI configuration	9.11.3.70	TLV:3-3	2
+Type 6 IE container	9.11.3.98	TLV-E:6-n	1
+UE radio capability ID	9.11.3.68	TLV:3-n	3
+UE radio capability ID deletion indication	9.11.3.69	TV:1-1	2
+UE request type	9.11.3.76	TLV:3-3	3
+UE security capability	9.11.3.54	LV:3-9;TLV:4-10	2
+UE status	9.11.3.56	TLV:3-3	1
+UE's usage setting	9.11.3.55	TLV:3-3	1
+UE-DS-TT residence time	9.11.4.26	TLV:10-10	1
+URSP rule enforcement reports	9.11.4.38	TLV:4-n	2
+Unavailability configuration	9.11.2.21	TLV:3-6	1
+Unavailability information	9.11.2.20	TLV:3-9	2
+Uplink data status	9.11.3.57	TLV:4-34	3
+WUS assistance information	9.11.3.71	TLV:3-3	2

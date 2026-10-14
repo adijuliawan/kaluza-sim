@@ -14,7 +14,8 @@
 //   enc <proto> <type> <jer>  ->  OK <hex> <minified JER of the decoded hex>
 //   (failure)                 ->  ERR <stage> <message>
 //
-// <proto> is rrc (UPER) or ngap, f1ap, e1ap, xnap (APER). Encoding is
+// <proto> is rrc (UPER) or ngap, f1ap, e1ap, xnap (APER), or for dec only nas,
+// sms-cp, sms-rp, sms-tpdu-mo, sms-tpdu-mt (plan M11). ASN.1 encoding is
 // asn1::Check::relay: what decodes re-encodes, extension values included.
 
 #include <cstdio>
@@ -25,6 +26,8 @@
 
 #include "codec/asn1/asn1.hpp"
 #include "codec/asn1/registry.hpp"
+#include "codec/nas/nas.hpp"
+#include "codec/nas/sms.hpp"
 #include "platform/buf.hpp"
 
 using namespace ksim;
@@ -107,6 +110,53 @@ std::string do_encode(std::string_view proto, std::string_view type, std::string
     return "OK\t" + to_hex(*bytes) + "\t" + *jer2;
 }
 
+/// dec for the hand-written codecs: <proto> is nas, sms-cp, sms-rp, sms-tpdu-mo
+/// (MS to SC) or sms-tpdu-mt (SC to MS); <type> is ignored ("-") except that
+/// "rp-error" marks a TPDU carried in an RP-ERROR.
+std::string do_decode_l3(std::string_view proto, std::string_view type, std::string_view hex) {
+    auto bytes = from_hex(hex);
+    if (!bytes) {
+        return error_text(bytes.error(), "hex");
+    }
+    if (proto == "nas") {
+        if (nas::is_protected(*bytes)) {
+            auto p = nas::decode_protected(*bytes);
+            if (!p) {
+                return error_text(p.error(), "decode");
+            }
+            const Bytes again = nas::encode_protected(*p);
+            return "OK\t" + to_hex(again) + "\t{\"message\":\"SECURITY PROTECTED 5GS NAS MESSAGE\",\"sht\":" +
+                   std::to_string(p->security_header_type) + ",\"sqn\":" + std::to_string(p->sequence_number) +
+                   ",\"payload\":\"" + to_hex(p->payload) + "\"}";
+        }
+        auto m = nas::decode(*bytes);
+        if (!m) {
+            return error_text(m.error(), "decode");
+        }
+        auto again = nas::encode(*m);
+        if (!again) {
+            return error_text(again.error(), "reencode");
+        }
+        return "OK\t" + to_hex(*again) + "\t" + nas::to_json(*m);
+    }
+    if (proto == "sms-cp") {
+        auto cp = sms::decode_cp(*bytes);
+        return cp ? "OK\t" + to_hex(sms::encode_cp(*cp)) + "\t" + sms::to_json(*cp) : error_text(cp.error(), "decode");
+    }
+    if (proto == "sms-rp") {
+        auto rp = sms::decode_rp(*bytes);
+        return rp ? "OK\t" + to_hex(sms::encode_rp(*rp)) + "\t" + sms::to_json(*rp) : error_text(rp.error(), "decode");
+    }
+    const auto dir = proto == "sms-tpdu-mo" ? sms::TpDir::ms_to_sc : sms::TpDir::sc_to_ms;
+    auto t = sms::decode_tpdu(*bytes, dir, type == "rp-error");
+    return t ? "OK\t" + to_hex(sms::encode_tpdu(*t)) + "\t" + sms::to_json(*t) : error_text(t.error(), "decode");
+}
+
+bool l3_protocol(std::string_view proto) {
+    return proto == "nas" || proto == "sms-cp" || proto == "sms-rp" || proto == "sms-tpdu-mo" ||
+           proto == "sms-tpdu-mt";
+}
+
 int batch() {
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -117,6 +167,8 @@ int batch() {
         std::string out;
         if (f.size() != 4) {
             out = "ERR\trequest\texpected <op> <proto> <type> <payload>";
+        } else if (l3_protocol(f[1])) {
+            out = f[0] == "dec" ? do_decode_l3(f[1], f[2], f[3]) : "ERR\trequest\tonly dec for " + f[1];
         } else if (!asn1::known_protocol(f[1])) {
             out = "ERR\trequest\tunknown protocol " + f[1];
         } else if (f[0] == "dec") {

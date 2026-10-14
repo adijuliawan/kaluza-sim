@@ -4,8 +4,9 @@
 #
 # CI hook (plan M8): the oracle harness must-fail self-test, the derived
 # tshark allowlist is current, and the external-origin corpus is current with
-# its sender rules; the M10 probes; in full mode the round trip of every v1
-# type (asn1c against pycrate and tshark), which must have no FAIL.
+# its sender rules; the M10 probes and the M11 NAS/SMS must-fail cases; in
+# full mode the round trip of every v1 type (asn1c against pycrate and
+# tshark; NAS and SMS likewise), which must have no FAIL.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MODE="${1:-quick}"
@@ -28,10 +29,17 @@ if [[ ! -x "$KSIM_CODEC" ]]; then
 else
     "${PY[@]}" "$ROOT/tests/oracles/oracle.py" probes 2>&1 | grep -E "^PROBE|^  " ; s=${PIPESTATUS[0]}
     (( s == 0 )) || exit 1
+    # The NAS and SMS check's own must-fail mutations (plan M11).
+    "${PY[@]}" "$ROOT/tests/oracles/oracle.py" l3roundtrip --selftest 2>&1 | grep -E "^L3SELFTEST" ; s=${PIPESTATUS[0]}
+    (( s == 0 )) || exit 1
     if [[ "$MODE" == full ]]; then
         # Every v1 type: corpus vectors (local ones too, where this machine has
         # them) and generated min/max values, asn1c against pycrate and tshark.
         "${PY[@]}" "$ROOT/tests/oracles/oracle.py" roundtrip --show 20 2>&1 | grep -E "^ROUNDTRIP|^FAILURE"
+        s=${PIPESTATUS[0]}
+        (( s == 0 )) || exit 1
+        # Every v1 5GMM, 5GSM and SMS type against pycrate and tshark (plan M11).
+        "${PY[@]}" "$ROOT/tests/oracles/oracle.py" l3roundtrip --show 20 2>&1 | grep -E "^L3ROUNDTRIP|^FAILURE"
         s=${PIPESTATUS[0]}
         (( s == 0 )) || exit 1
     fi

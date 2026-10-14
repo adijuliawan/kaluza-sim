@@ -21,6 +21,7 @@ class Leaf:
     name: str
     show: str
     value: str
+    pos: int = -1     # offset in the frame, as PDML gives it
 
 
 @dataclass
@@ -66,7 +67,7 @@ def decode(pcap: bytes, prefs: list[str] | None = None, disable: list[str] | Non
         for f in pkt.iter("field"):
             name = f.get("name", "")
             show = f.get("show", "") or f.get("showname", "")
-            p.leaves.append(Leaf(name, show, f.get("value", "")))
+            p.leaves.append(Leaf(name, show, f.get("value", ""), int(f.get("pos", "-1") or -1)))
             if name == "_ws.malformed" or name.startswith("_ws.malformed"):
                 p.malformed = True
             if name == "_ws.expert":

@@ -1,4 +1,4 @@
-# Extracted by spec/tools/docx_tables.py 1.0 from 3GPP TS 24.008 j50 (24008-j50.zip, sha256 8f207733d33bd93111d00800ac76941fb2cabcd5850b3486e3e2e5467298cca0). Do not edit.
+# Extracted by spec/tools/docx_tables.py 1.1 from 3GPP TS 24.008 j50 (24008-j50.zip, sha256 8f207733d33bd93111d00800ac76941fb2cabcd5850b3486e3e2e5467298cca0). Do not edit.
 direction	id_hex	name	length_octets
 UE-to-network	0001	P-CSCF IPv6 Address Request	1
 UE-to-network	0002	IM CN Subsystem Signaling Flag	1
@@ -34,17 +34,17 @@ UE-to-network	001F	Reserved	1
 UE-to-network	0020	Ethernet Frame Payload MTU Request	1
 UE-to-network	0021	Unstructured Link MTU Request	1
 UE-to-network	0022	5GSM cause value	1
-UE-to-network	0023	QoS rules with the length of two octets support indicator	2
-UE-to-network	0024	QoS flow descriptions with the length of two octets support indicator	2
+UE-to-network	0023	QoS rules with the length of two octets support indicator	1
+UE-to-network	0024	QoS flow descriptions with the length of two octets support indicator	1
 UE-to-network	0025	Reserved	1
 UE-to-network	0026	Reserved	1
 UE-to-network	0027	ACS information request	1
 UE-to-network	0029	Reserved	1
 UE-to-network	002A	Reserved	1
 UE-to-network	002B	Reserved	1
-UE-to-network	0030	ATSSS request	2
-UE-to-network	0031	DNS server security information indicator	2
-UE-to-network	0032	ECS configuration information provisioning support indicator	2
+UE-to-network	0030	ATSSS request	1
+UE-to-network	0031	DNS server security information indicator	1
+UE-to-network	0032	ECS configuration information provisioning support indicator	1
 UE-to-network	0035	Reserved	1
 UE-to-network	0036	PVS information request	1
 UE-to-network	0037	Reserved	1

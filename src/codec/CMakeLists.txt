@@ -7,3 +7,4 @@
 if(KSIM_ASN1)
     add_subdirectory(asn1)
 endif()
+add_subdirectory(nas)
