@@ -1,0 +1,55 @@
+SPDX-FileCopyrightText: 2026 Adi Juliawan
+SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+asn1c 18e56503 runtime: JER of an INTEGER past intmax_t (E1AP usage counts up
+to 2^64-1). The encoder fell back to a colon-separated hex dump, which is not
+JSON, and the decoder refused anything past LONG_MAX. A non-negative value
+past intmax_t is now written and read as an unsigned decimal. JER serves
+ksim-codec and the oracle harness only. Row KS-PLAT-D4.
+
+--- a/INTEGER.c
++++ b/INTEGER.c
+@@ -116,6 +116,14 @@
+ 	else
+ 		ret = asn_INTEGER2imax(st, &value);
+ 
++	/* A non-negative value past intmax_t (a 0..2^64-1 counter): still decimal */
++	if(ret != 0 && plainOrXER && !(specs && specs->field_unsigned)
++	   && !(specs && specs->strict_enumeration)) {
++		uintmax_t uvalue;
++		if(asn_INTEGER2umax(st, &uvalue) == 0)
++			return asn__format_to_callback(cb, app_key, "%" ASN_PRIuMAX, uvalue);
++	}
++
+ 	/* Simple case: the integer size is small */
+ 	if(ret == 0) {
+ 		const asn_INTEGER_enum_map_t *el;
+--- a/INTEGER_jer.c
++++ b/INTEGER_jer.c
+@@ -135,12 +135,26 @@
+         /* FALL THROUGH */
+     case ST_DIGITS_TRAILSPACE:
+         /* The last symbol encountered was a digit. */
++        if(dec_value_start && *dec_value_start != '-') {
++            /* A non-negative value past intmax_t (a 0..2^64-1 counter) */
++            const char *uend = dec_value_end;
++            uintmax_t uvalue;
++            if(asn_strtoimax_lim(dec_value_start, &uend, &dec_value) == ASN_STRTOX_ERROR_RANGE) {
++                uend = dec_value_end;
++                if(asn_strtoumax_lim(dec_value_start, &uend, &uvalue) == ASN_STRTOX_OK) {
++                    if(asn_umax2INTEGER(st, uvalue)) return JPBD_SYSTEM_FAILURE;
++                    return JPBD_BODY_CONSUMED;
++                }
++            }
++        }
+         switch(asn_strtoimax_lim(dec_value_start, &dec_value_end, &dec_value)) {
+         case ASN_STRTOX_OK:
+             if(specs && specs->field_unsigned && (uintmax_t) dec_value <= ULONG_MAX) {
+                 break;
+             } else if(dec_value >= LONG_MIN && dec_value <= LONG_MAX) {
+                 break;
++            } else if(!specs || !specs->field_unsigned) {
++                break;  /* an INTEGER_t holds any intmax_t */
+             } else {
+                 /*
+                  * We model INTEGER on long for JER,

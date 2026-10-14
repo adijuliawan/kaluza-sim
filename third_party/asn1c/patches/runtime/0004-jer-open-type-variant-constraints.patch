@@ -1,0 +1,27 @@
+SPDX-FileCopyrightText: 2026 Adi Juliawan
+SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+asn1c 18e56503 runtime: an open type's JER is written through its CHOICE-shaped
+struct with the variant member's JER constraints, but read with the bare
+type's. For a type written inline in an object set (e.g. BIT STRING (SIZE (24)),
+F1AP UEContextSetupResponse) the two differ, so asn1c could not read back its
+own JER (and, before 0002, crashed). The decoder now uses the variant member's
+constraints. JER serves ksim-codec and the oracle harness only. Row KS-PLAT-D3.
+
+--- a/OPEN_TYPE_jer.c
++++ b/OPEN_TYPE_jer.c
+@@ -103,8 +103,13 @@
+         (char *)*memb_ptr2
+         + elm->type->elements[selected.presence_index - 1].memb_offset;
+ 
++    /* The variant member's constraints, as CHOICE_encode_jer writes it: the
++     * bare type's are absent for a type written inline in an object set. */
++    const asn_jer_constraints_t *variant_jer =
++        elm->type->elements[selected.presence_index - 1].encoding_constraints.jer_constraints;
+     rv = selected.type_descriptor->op->jer_decoder(
+-        opt_codec_ctx, selected.type_descriptor, selected.type_descriptor->encoding_constraints.jer_constraints,
++        opt_codec_ctx, selected.type_descriptor,
++        variant_jer ? variant_jer : selected.type_descriptor->encoding_constraints.jer_constraints,
+         &inner_value, ptr, size);
+     ADVANCE(rv.consumed);
+     rv.consumed = 0;

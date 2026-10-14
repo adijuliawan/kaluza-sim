@@ -3,4 +3,11 @@
 #
 # Patches applied to the vendored asn1c runtime, in order (one file name per
 # line). Each patch fixes a defect found in P0 or later and has a -D or -S row
-# in docs/compliance/rows.tsv. Empty: the runtime is as shipped at 18e56503.
+# in docs/compliance/rows.tsv. third_party/asn1c/runtime stays as shipped at
+# 18e56503 (MANIFEST.sha256); cmake/asn1c.cmake applies these to a copy in the
+# build tree. Compiler patches live in compiler/ (tools/build-asn1c.sh).
+runtime/0001-aper-integer-8-bit-range-below-256.patch
+runtime/0002-jer-bit-string-without-constraints.patch
+runtime/0003-aper-integer-unsigned-64-bit-range.patch
+runtime/0004-jer-open-type-variant-constraints.patch
+runtime/0005-jer-integer-beyond-intmax.patch

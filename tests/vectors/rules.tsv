@@ -40,3 +40,4 @@ ocudu-f1ap-ctxmod	ocudu-cpp	ocudu/tests/unittests	f1ap/cu_cp/f1ap_cu_ue_context_
 ocudu-f1ap-paging	ocudu-cpp	ocudu/tests/unittests	f1ap/cu_cp/f1ap_cu_paging_test.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
 ocudu-e1ap-msgs	ocudu-cpp	ocudu/tests/unittests	e1ap/common/e1ap_cu_cp_test_messages.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
 ocudu-xnap-msgs	ocudu-cpp	ocudu/tests/unittests	xnap/xnap_test_messages.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
+ocudu-produced	tsv	kaluza-sim/tests/vectors/sources	ocudu-produced.tsv	row	OCUDU 489ed15c5c test message builders and ASN.1 encoder (tools/ocudu_vectors)	any	in	no	an independent implementation produced the octets (its own builders and encoder, run locally)

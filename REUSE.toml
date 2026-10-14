@@ -59,3 +59,10 @@ path = ["tests/vectors/*/index.tsv", "tests/vectors/excluded.tsv"]
 precedence = "override"
 SPDX-FileCopyrightText = ["2026 Adi Juliawan", "2021-2026 Software Radio Systems Limited (OCUDU unit-test vectors)"]
 SPDX-License-Identifier = "LicenseRef-kaluza-sim-private AND BSD-3-Clause-Open-MPI"
+
+# OCUDU's own builders and encoder produced these octets (tools/ocudu_vectors).
+[[annotations]]
+path = ["tests/vectors/sources/ocudu-produced.tsv"]
+precedence = "override"
+SPDX-FileCopyrightText = ["2026 Adi Juliawan", "2021-2026 Software Radio Systems Limited (OCUDU test message builders)"]
+SPDX-License-Identifier = "LicenseRef-kaluza-sim-private AND BSD-3-Clause-Open-MPI"

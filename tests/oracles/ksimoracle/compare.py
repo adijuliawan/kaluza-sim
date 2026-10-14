@@ -41,6 +41,11 @@ TSHARK_PROTO = {"ngap": "ngap", "f1ap": "f1ap", "e1ap": "e1ap", "xnap": "xnap"}
 _BOUND = re.compile(r"^Size constraint: (value too (big|small)|too (many|few) items): (-?\d+) "
                     r"\((-?\d+) \.\. (-?\d+)\)")
 _UNKNOWN = re.compile(r"^something unknown here")
+# tshark reading the open-type length of an IE it has no definition for
+_OPEN_LEN = re.compile(r"^Open type length\(\d+\) > available data")
+# What tshark reports once a lagging definition has misread a field's width.
+_CASCADE = re.compile(r"^(Malformed Packet \(Exception occurred\)|malformed packet|something unknown here|"
+                      r"Open type length\(|Size constraint: )")
 _NESTED = re.compile(r"^(Malformed Packet \(Exception occurred\)|Open type length\(|PDCP signalling header|"
                      r"malformed packet)")
 
@@ -102,6 +107,13 @@ def canonical_jer(o, value) -> str:
 
 def check_ap(proto: str, data: bytes, intended, generated: bool = False) -> Verdict:
     o, enc = asn.top(proto)
+    return check_pdu(proto, o, enc, TSHARK_PROTO[proto], data, intended, generated)
+
+
+def check_pdu(proto: str, o, enc: str, dissector: str | None, data: bytes, intended,
+              generated: bool = False) -> Verdict:
+    """pycrate round trip and value, then tshark through `dissector` (None: tshark
+    has no dissector for this type, recorded as oracle lag)."""
     v = Verdict("FAIL")
     want = canonical_jer(o, intended)
     try:
@@ -116,29 +128,43 @@ def check_ap(proto: str, data: bytes, intended, generated: bool = False) -> Verd
             v.notes.append("pycrate decodes a different value than intended")
     except Exception as e:  # noqa: BLE001
         v.notes.append(f"pycrate decode: {type(e).__name__}: {str(e)[:160]}")
-    pkt = tshark.decode(pcap.exported_pdu([(TSHARK_PROTO[proto], data)]))[0]
-    errs = tshark.errors(pkt)
-    lag, nested, other = [], [], []
-    unknown = unknown_to_tshark(proto)
+    if dissector is None:
+        layered = []
+        v.notes.append("oracle-lag: tshark has no standalone dissector for this type")
+    else:
+        pkt = tshark.decode(pcap.exported_pdu([(dissector, data)]))[0]
+        layered = tshark.errors_by_layer(pkt)
+    top = dissector.split(".")[0] if dissector else proto
+    lag, nested, payload, other = [], [], [], []
+    unknown = unknown_to_tshark(proto) if proto in TSHARK_PROTO else {}
     carried_unknown = sorted(_ie_ids(intended) & set(unknown))
-    for e in errs:
-        if _BOUND.match(e) and v.pycrate_value_match:
+    cascade = False      # tshark has shown it lags in this packet; what follows is unreliable
+    for layer, e in layered:
+        if cascade and layer in (top, "frame") and _CASCADE.match(e):
+            lag.append(f"after the lag above: {e}")
+        elif layer not in (top, "frame"):
+            # raised inside a protocol carried in the PDU (NAS, RRC, PDCP): the
+            # content of a container, not this PDU's encoding
+            (nested if generated else payload).append(f"{layer}: {e}")
+        elif _BOUND.match(e) and v.pycrate_value_match:
             lag.append(e)
-        elif _UNKNOWN.match(e) and carried_unknown:
+            cascade = True
+        elif (_UNKNOWN.match(e) or _OPEN_LEN.match(e)) and carried_unknown:
             lag.append(f"{e} (carries ids unknown to tshark: {carried_unknown[:6]})")
-        elif _NESTED.match(e) and generated:
-            nested.append(e)
+            cascade = True
         else:
             other.append(e)
-    v.tshark_clean = not errs
-    for kind, items in (("oracle-lag", lag), ("nested-filler", nested), ("tshark", other)):
+    errs = lag + nested + payload + other
+    v.tshark_clean = not errs and dissector is not None
+    for kind, items in (("oracle-lag", lag), ("nested-filler", nested), ("nested-payload", payload),
+                        ("tshark", other)):
         for text, n in sorted({t: items.count(t) for t in items}.items()):
             v.notes.append(f"{kind}: {text}" + (f" (x{n})" if n > 1 else ""))
     pycrate_ok = v.pycrate_roundtrip and v.pycrate_value_match
-    if pycrate_ok and not errs:
-        v.status = "PASS"
-    elif pycrate_ok and not other and lag and not nested:
+    if pycrate_ok and dissector is None:
         v.status = "ORACLE_LAG"
-    elif pycrate_ok and not other and nested:
-        v.status = "NESTED_FILLER"
+    elif pycrate_ok and not errs:
+        v.status = "PASS"
+    elif pycrate_ok and not other:
+        v.status = "NESTED_FILLER" if nested else "NESTED_PAYLOAD" if payload else "ORACLE_LAG"
     return v

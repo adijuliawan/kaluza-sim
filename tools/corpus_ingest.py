@@ -28,15 +28,18 @@ import hashlib
 import io
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 BASES = {
     "testkit": Path("/home/amadeus/Development/kaluza-core/testkit/kaluza-testkit-vectors/src/main/resources/vectors"),
     "ocudu": Path("/home/amadeus/Development/ran/ocudu"),
+    "kaluza-sim": ROOT,
 }
 LICENCE = {"testkit": "kaluza-core testkit (external-origin octets, the user's own repo)",
-           "ocudu": "BSD-3-Clause-Open-MPI (OCUDU unit tests)"}
+           "ocudu": "BSD-3-Clause-Open-MPI (OCUDU unit tests)",
+           "kaluza-sim": "BSD-3-Clause-Open-MPI (OCUDU's builders and encoder, run by tools/ocudu_vectors)"}
 FIELDS = ["id", "proto", "pdu", "octets", "sha256", "producer", "direction", "same_compiler", "source",
           "locator", "licence", "hex"]
 
@@ -82,6 +85,9 @@ def ocudu_arrays(path: Path):
             yield f"{path.name}:{line}", bytes.fromhex(hexes)
 
 
+ROW_PROTO: dict[tuple[str, str], str] = {}   # (file, locator) -> protocol named in a tsv source
+
+
 def candidates(rules: list[dict]):
     """(base, rel, locator, bytes) for every file the rules reach."""
     seen_paths = set()
@@ -97,6 +103,15 @@ def candidates(rules: list[dict]):
                     continue
                 seen_paths.add(key)
                 yield base, f"{sub}/{p.name}", p.name, p.read_bytes(), p
+        elif r["kind"] == "tsv":                  # protocol, builder, hex (tools/ocudu_vectors)
+            p = root / r["glob"]
+            if not p.is_file() or (base, str(p)) in seen_paths:
+                continue
+            seen_paths.add((base, str(p)))
+            lines = [ln.rstrip("\n") for ln in p.open() if not ln.startswith("#")]
+            for row in csv.DictReader(lines, delimiter="\t"):
+                ROW_PROTO[(f"{sub}/{r['glob']}", row["builder"])] = row["protocol"]
+                yield base, f"{sub}/{r['glob']}", row["builder"], bytes.fromhex(row["hex"]), p
         elif r["kind"] == "ocudu-cpp":
             p = root / r["glob"]
             if not p.is_file() or (base, str(p)) in seen_paths:
@@ -176,6 +191,8 @@ def build() -> tuple[dict[str, list[dict]], list[dict]]:
             excluded.append({"source": f"{base}:{rel}", "locator": loc, "reason": f"{r['source']}: {r['reason']}"})
             continue
         proto = r["proto"]
+        if proto == "row":
+            proto = ROW_PROTO[(rel, loc)]
         if proto == "auto":
             proto = auto_proto(data)
             if proto is None:
@@ -189,6 +206,82 @@ def build() -> tuple[dict[str, list[dict]], list[dict]]:
             "direction": r["direction"], "same_compiler": r["same_compiler"],
             "source": f"{base}:{rel}", "locator": loc, "licence": LICENCE[base], "hex": data.hex()})
     return by_proto, excluded
+
+
+# Local-only sources (plan M8): the user's phone captures carry device
+# identities, so their octets stay under tests/vectors/local/ (git-ignored) and
+# only a hash manifest is committed. NR RRC only for now: the uplink is the
+# phone's modem, the downlink the network's gNB (the lab's OCUDU or an
+# operator's); NAS waits for M11, where the direction rules (kaluza-core's
+# downlink NAS is out) need the NAS header.
+LOCAL_BASES = {"kaluza-ue": Path("/home/amadeus/Development/ran/kaluza-ue/captures")}
+LOCAL_CAP_PER_TYPE = 12
+RRC_TAG_CLASS = {
+    "nr-rrc.ul.ccch": "UL_CCCH_Message", "nr-rrc.ul.ccch1": "UL_CCCH1_Message",
+    "nr-rrc.dl.ccch": "DL_CCCH_Message", "nr-rrc.ul.dcch": "UL_DCCH_Message",
+    "nr-rrc.dl.dcch": "DL_DCCH_Message", "nr-rrc.pcch": "PCCH_Message",
+    "nr-rrc.bcch.bch": "BCCH_BCH_Message", "nr-rrc.bcch.dl.sch": "BCCH_DL_SCH_Message",
+}
+LOCAL_FIELDS = ["id", "proto", "pdu", "octets", "sha256", "producer", "direction", "source", "locator"]
+
+
+def _rrc_exact(cls: str, data: bytes) -> tuple[str, bytes, str] | None:
+    """('<Class>.<message>', octets, note) if the octets are one encoding of the
+    class, possibly followed by zero octets of transport-block padding (SIB1 and
+    Paging arrive in a whole MAC transport block), which are removed."""
+    sys.path.insert(0, str(ROOT / "tests" / "oracles"))
+    from ksimoracle import asn
+    o = asn.obj("rrc", "NR_RRC_Definitions", cls)
+    try:
+        o.from_uper(data)
+        again = o.to_uper()
+    except Exception:  # noqa: BLE001
+        return None
+    note = ""
+    if again != data:
+        if not data.startswith(again) or any(data[len(again):]):
+            return None
+        note = f" (transport-block padding removed: {len(data) - len(again)} zero octets)"
+    v = o.get_val()["message"]
+    name = v[1][0] if v[0] == "c1" else v[0]
+    return f"{cls.replace('_', '-')}.{name}", again, note
+
+
+def build_local() -> tuple[list[dict], list[dict], Counter]:
+    """(rows with hex, manifest rows, exclusion reasons) over the local captures."""
+    sys.path.insert(0, str(ROOT / "tests" / "oracles"))
+    from ksimoracle import pcap
+    rows, seen, per_type, skipped = [], set(), Counter(), Counter()
+    for base, root in LOCAL_BASES.items():
+        if not root.is_dir():
+            continue
+        for f in sorted(root.rglob("*_l3.pcap")):
+            rel = f.relative_to(root).as_posix()
+            run = f.parent.relative_to(root).as_posix()
+            for frame, tag, data in pcap.read_exported_pdu(f.read_bytes()):
+                cls = RRC_TAG_CLASS.get(tag)
+                if cls is None:
+                    continue
+                h = hashlib.sha256(data).hexdigest()
+                if h in seen:
+                    continue
+                seen.add(h)
+                got = _rrc_exact(cls, data)
+                if got is None:
+                    skipped[f"{tag}: not one {cls} encoding (+ zero padding)"] += 1
+                    continue
+                name, data, note = got
+                if per_type[name] >= LOCAL_CAP_PER_TYPE:
+                    continue
+                per_type[name] += 1
+                ul = ".ul." in tag
+                rows.append({
+                    "id": f"rrc-local-{len(rows) + 1:04d}", "proto": "rrc", "pdu": name, "octets": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(), "direction": "uplink" if ul else "downlink",
+                    "producer": (f"UE modem ({run})" if ul else f"network gNB ({run})"),
+                    "source": f"{base}:{rel}", "locator": f"frame {frame}{note}", "hex": data.hex()})
+    manifest = [{k: r[k] for k in LOCAL_FIELDS} for r in rows]
+    return rows, manifest, skipped
 
 
 def render(rows: list[dict], fields: list[str], header: str) -> str:
@@ -213,15 +306,27 @@ def main() -> None:
     files[ROOT / "tests" / "vectors" / "excluded.tsv"] = render(
         sorted(excluded, key=lambda x: (x["source"], x["locator"])), ["source", "locator", "reason"],
         "# Candidates the sender rules exclude (tools/corpus_ingest.py). Do not edit.")
+    local_rows, manifest, skipped = build_local()
+    local_files = {}
+    if local_rows:
+        files[ROOT / "tests" / "vectors" / "local-manifest.tsv"] = render(
+            manifest, LOCAL_FIELDS, "# Local-only vectors (tools/corpus_ingest.py): the octets stay under "
+                                    "tests/vectors/local/ (git-ignored; device identities). Do not edit.")
+        local_files[ROOT / "tests" / "vectors" / "local" / "rrc" / "index.tsv"] = render(
+            local_rows, LOCAL_FIELDS + ["hex"], "# Local-only vectors. Never commit. Do not edit.")
     stale = [p for p, text in files.items() if not p.is_file() or p.read_text() != text]
     if a.check:
         for p in stale:
             print(f"CORPUS=STALE {p.relative_to(ROOT)}")
         print(f"CORPUS={'STALE' if stale else 'CURRENT'}")
         sys.exit(1 if stale else 0)
-    for p, text in files.items():
+    for p, text in {**files, **local_files}.items():
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(text)
+    if local_rows:
+        types = Counter(r["pdu"] for r in local_rows)
+        print(f"CORPUS_LOCAL proto=rrc vectors={len(local_rows)} pdu_types={len(types)} "
+              f"skipped={sum(skipped.values())} ({'; '.join(f'{k} x{n}' for k, n in skipped.most_common(4))})")
     for proto, rows in sorted(by_proto.items()):
         types = {r["pdu"] for r in rows if r["pdu"]}
         print(f"CORPUS proto={proto} vectors={len(rows)} pdu_types={len(types)}")

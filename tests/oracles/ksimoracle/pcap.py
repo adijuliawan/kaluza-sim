@@ -55,3 +55,37 @@ def _ipv4_udp(payload: bytes, dport: int, sport: int = 40000,
 def raw_udp(records: list[tuple[int, bytes]]) -> bytes:
     """records: (destination port, UDP payload)."""
     return _file(DLT_IPV4, [_ipv4_udp(p, port) for port, p in records])
+
+
+def read_exported_pdu(data: bytes) -> list[tuple[int, str, bytes]]:
+    """(frame number, dissector name, payload) for each record of a classic
+    pcap of DLT 252 (Exported PDU). Records of other link types are skipped."""
+    if len(data) < 24:
+        return []
+    magic = struct.unpack("<I", data[:4])[0]
+    if magic in (0xA1B2C3D4, 0xA1B23C4D):
+        e = "<"
+    elif magic in (0xD4C3B2A1, 0x4D3CB2A1):
+        e = ">"
+    else:
+        raise ValueError("not a classic pcap file")
+    dlt = struct.unpack(e + "I", data[20:24])[0]
+    out, off, n = [], 24, 0
+    while off + 16 <= len(data):
+        _, _, incl, _ = struct.unpack(e + "IIII", data[off:off + 16])
+        rec = data[off + 16:off + 16 + incl]
+        off += 16 + incl
+        n += 1
+        if dlt != 252:
+            continue
+        name, pos = "", 0
+        while pos + 4 <= len(rec):
+            tag, ln = struct.unpack(">HH", rec[pos:pos + 4])
+            pos += 4
+            if tag == 0:
+                break
+            if tag == 12:                     # EXP_PDU_TAG_PROTO_NAME
+                name = rec[pos:pos + ln].rstrip(b"\0").decode(errors="replace")
+            pos += ln + ((4 - ln % 4) % 4 if tag not in (12,) and ln % 4 else 0)
+        out.append((n, name, rec[pos:]))
+    return out

@@ -2,3 +2,6 @@
 # SPDX-License-Identifier: LicenseRef-kaluza-sim-private
 
 add_subdirectory(ksim-selftest)
+if(KSIM_ASN1)
+    add_subdirectory(ksim-codec)
+endif()

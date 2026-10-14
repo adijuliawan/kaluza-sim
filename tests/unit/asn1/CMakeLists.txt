@@ -42,3 +42,8 @@ add_test(NAME asn1-nm-hygiene
             --lib "XNAP=$<TARGET_FILE:ksim_asn1_xnap>")
 add_test(NAME asn1-nm-hygiene-selftest
     COMMAND ${Python3_EXECUTABLE} "${PROJECT_SOURCE_DIR}/tools/asn1_nm_check.py" --self-test)
+
+# The C++ wrapper and the type registry (plan M10).
+add_executable(unit_asn1_wrapper wrapper_test.cpp)
+target_link_libraries(unit_asn1_wrapper PRIVATE ksim::asn1_registry ksim::warnings GTest::gtest_main)
+gtest_discover_tests(unit_asn1_wrapper DISCOVERY_MODE PRE_TEST)

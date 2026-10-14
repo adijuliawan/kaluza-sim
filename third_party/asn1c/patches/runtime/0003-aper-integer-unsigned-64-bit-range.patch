@@ -1,0 +1,49 @@
+SPDX-FileCopyrightText: 2026 Adi Juliawan
+SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+asn1c 18e56503 runtime: INTEGER (0..18446744073709551615) (E1AP usage counts,
+NGAP and XnAP volume counters). The compiler writes the upper bound into the
+intmax_t PER constraint, where it wraps to -1, and a member INTEGER has no
+field_unsigned flag; the APER encoder then rejected every value (0 included),
+and the decoder accumulated the eight octets in a signed shift. A root that
+starts at 0 or above and whose 64-bit range wrapped is now read, checked and
+written as uintmax_t. Applies on top of 0001. Row KS-PLAT-D4.
+
+--- a/INTEGER_aper.c
++++ b/INTEGER_aper.c
+@@ -25,6 +25,10 @@
+ 
+     if(!constraints) constraints = td->encoding_constraints.per_constraints;
+     ct = constraints ? &constraints->value : 0;
++    /* A root of (0..18446744073709551615): the compiler's bound does not fit
++     * intmax_t and wraps; the value is unsigned 64-bit. */
++    int u64 = ct && ct->range_bits == 64 && ct->lower_bound >= 0
++              && ct->upper_bound < ct->lower_bound;
+ 
+     if(ct && ct->flags & APC_EXTENSIBLE) {
+         int inext = per_get_few_bits(pd, 1);
+@@ -79,11 +83,11 @@
+                     int buf = per_get_few_bits(pd, 8);
+                     if (buf < 0)
+                         ASN__DECODE_FAILED;
+-                    value += (((intmax_t)buf) << (8 * length));
++                    value = (intmax_t)((uintmax_t)value + ((uintmax_t)buf << (8 * length)));
+                 }
+ 
+                 value += ct->lower_bound;
+-                if((specs && specs->field_unsigned)
++                if((specs && specs->field_unsigned) || u64
+                         ? asn_umax2INTEGER(st, (uintmax_t)value)
+                         : asn_imax2INTEGER(st, value))
+                     ASN__DECODE_FAILED;
+@@ -181,7 +185,9 @@
+ 
+     if(ct) {
+         int inext = 0;
+-        if(specs && specs->field_unsigned) {
++        int u64 = ct->range_bits == 64 && ct->lower_bound >= 0
++                  && ct->upper_bound < ct->lower_bound;  /* see the decoder */
++        if((specs && specs->field_unsigned) || u64) {
+             uintmax_t uval;
+             if(asn_INTEGER2umax(st, &uval))
+                 ASN__ENCODE_FAILED;

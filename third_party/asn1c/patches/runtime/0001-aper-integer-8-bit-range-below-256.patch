@@ -1,0 +1,23 @@
+SPDX-FileCopyrightText: 2026 Adi Juliawan
+SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+asn1c 18e56503 runtime: the APER decoder octet-aligns a constrained INTEGER
+whose range takes exactly 8 bits even when the range is below 256; its own
+encoder (and X.691 #11.5.7.1) writes those as an unaligned bit-field. So
+asn1c could not read back what it wrote for e.g. INTEGER (1..181, ...) or
+(-127..127). Row KS-PLAT-D1. Applied by cmake/asn1c.cmake to a build-tree copy.
+
+--- a/INTEGER_aper.c
++++ b/INTEGER_aper.c
+@@ -91,7 +91,10 @@
+                           value, (intmax_t)ct->lower_bound);
+             } else {
+                 intmax_t value = 0;
+-                if (ct->range_bits < 8) {
++                /* X.691 #11.5.7.1-2, as the encoder: a range below 256 is a
++                 * bit-field, unaligned even when it takes 8 bits. */
++                intmax_t range = ct->upper_bound - ct->lower_bound + 1;
++                if (ct->range_bits < 8 || (ct->range_bits == 8 && range < 256)) {
+                     value = per_get_few_bits(pd, ct->range_bits);
+                     if(value < 0) ASN__DECODE_STARVED;
+                 } else if (ct->range_bits == 8) {

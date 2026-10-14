@@ -24,7 +24,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ksimoracle import asn, compare, pcap, tshark  # noqa: E402
+from ksimoracle import asn, compare, pcap, roundtrip, tshark  # noqa: E402
+from ksimoracle.codec import Codec  # noqa: E402
 from ksimoracle.valuegen import Gen, Omit  # noqa: E402
 
 ROOT = asn.ROOT
@@ -60,7 +61,7 @@ def cmd_check(a) -> int:
           f"PYCRATE_VALUE_MATCH={int(v.pycrate_value_match)}\nTSHARK_CLEAN={int(v.tshark_clean)}")
     for n in v.notes:
         print(f"NOTE={n}")
-    return 0 if v.status in ("PASS", "ORACLE_LAG", "NESTED_FILLER") else 1
+    return 0 if v.status in ("PASS", "ORACLE_LAG", "NESTED_FILLER", "NESTED_PAYLOAD") else 1
 
 
 def cmd_sweep(a) -> int:
@@ -86,6 +87,119 @@ def cmd_sweep(a) -> int:
         print(f"FAILURE {f}")
     print("SWEEP_TOTAL " + " ".join(f"{k}={n}" for k, n in sorted(total.items())))
     return 0
+
+
+def corpus(proto: str) -> list[dict]:
+    """External-origin vectors of a protocol: tests/vectors/<proto>/index.tsv and,
+    where this machine has them, the local-only tests/vectors/local/<proto>/index.tsv."""
+    out = []
+    for path in (ROOT / "tests" / "vectors" / proto / "index.tsv",
+                 ROOT / "tests" / "vectors" / "local" / proto / "index.tsv"):
+        if not path.is_file():
+            continue
+        lines = [ln.rstrip("\n") for ln in path.open() if not ln.startswith("#")]
+        head = lines[0].split("\t")
+        out += [dict(zip(head, ln.split("\t"))) for ln in lines[1:] if ln]
+    return out
+
+
+def corpus_v1_name(proto: str, pdu: str, v1: list[str]) -> str | None:
+    """The v1 type a corpus row's pdu names: the procedure for AP; for RRC,
+    '<Channel>-Message.<arm>' or a container name."""
+    if proto != "rrc":
+        return pdu if pdu in v1 else None
+    if pdu in v1:
+        return pdu
+    for name in v1:
+        try:
+            pl = roundtrip.rrc.place(name)
+        except KeyError:
+            continue
+        if pl.path and pdu == f"{pl.top}.{pl.path[-1][1]}":
+            return name
+    return None
+
+
+def cmd_roundtrip(a) -> int:
+    report = ROOT / "build" / "oracle" / "roundtrip.tsv"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    rows = []
+    totals = collections.Counter()
+    types_seen = {}
+    with Codec(Path(a.codec) if a.codec else None) as codec:
+        for proto in a.proto or ("ngap", "f1ap", "e1ap", "xnap", "rrc"):
+            v1 = v1_types(proto)
+            if a.pdu:
+                v1 = [p for p in v1 if p in a.pdu]
+            by_type = collections.defaultdict(list)
+            for row in corpus(proto):
+                name = corpus_v1_name(proto, row["pdu"], v1)
+                if name:
+                    by_type[name].append(row)
+            c = collections.Counter()
+            for pdu in v1:
+                cases = [(row["id"], bytes.fromhex(row["hex"]), None, False) for row in by_type[pdu]]
+                for mode in ("min", "max"):
+                    try:
+                        value, data = roundtrip.generate(proto, pdu, mode)
+                        cases.append((f"gen-{mode}", data, value, True))
+                    except Exception as e:  # noqa: BLE001
+                        c["GEN_ERROR"] += 1
+                        rows.append([proto, pdu, f"gen-{mode}", "GEN_ERROR", "", "", "", "", "",
+                                     f"{type(e).__name__}: {str(e)[:160]}"])
+                indep = 0
+                for src, data, value, gen in cases:
+                    r = roundtrip.check(codec, proto, pdu, data, value, gen)
+                    c[r.status] += 1
+                    if not gen and r.status != "FAIL":
+                        indep += 1
+                    rows.append([proto, pdu, src, r.status, int(r.asn1c_roundtrip), int(r.jer_match),
+                                 int(r.pycrate_ok), int(r.tshark_clean),
+                                 "" if r.encoders_agree is None else int(r.encoders_agree),
+                                 "; ".join(dict.fromkeys(r.notes))[:400]])
+                types_seen[(proto, pdu)] = indep
+            totals += c
+            no_indep = sum(1 for (p, _), n in types_seen.items() if p == proto and n == 0)
+            print(f"ROUNDTRIP proto={proto} types={len(v1)} without_independent_vector={no_indep} "
+                  + " ".join(f"{k}={n}" for k, n in sorted(c.items())))
+    with report.open("w") as f:
+        f.write("# tests/oracles/oracle.py roundtrip (plan M10). Generated; not committed.\n")
+        f.write("protocol\tpdu\tsource\tstatus\tasn1c_roundtrip\tjer_match\tpycrate_ok\ttshark_clean"
+                "\tencoders_agree\tnotes\n")
+        for r in rows:
+            f.write("\t".join(str(x) for x in r) + "\n")
+    fails = [r for r in rows if r[3] in ("FAIL", "GEN_ERROR")]
+    for r in fails[: a.show]:
+        print(f"FAILURE {r[0]} {r[1]} {r[2]} {r[3]} {r[9][:220]}")
+    print("ROUNDTRIP_TOTAL " + " ".join(f"{k}={n}" for k, n in sorted(totals.items()))
+          + f" types={len(types_seen)} without_independent_vector="
+          + str(sum(1 for n in types_seen.values() if n == 0)) + f" report={report.relative_to(ROOT)}")
+    return 0 if not fails else 1
+
+
+def cmd_localize(a) -> int:
+    from ksimoracle.localize import localize
+    value, _ = roundtrip.generate(a.proto, a.pdu, a.mode)
+    o, _, top, _ = roundtrip.target(a.proto, a.pdu)
+    with Codec(Path(a.codec) if a.codec else None) as codec:
+        found = localize(codec, a.proto, o, top, value)
+    for name, why in dict.fromkeys(found):
+        print(f"DISAGREE {a.proto} {name}: {why}")
+    print(f"LOCALIZE {a.proto} {a.pdu} {a.mode} deepest={len(set(found))}")
+    return 0
+
+
+def cmd_probes(a) -> int:
+    from ksimoracle import probes
+    bad = 0
+    with Codec(Path(a.codec) if a.codec else None) as codec:
+        for name, n, ok, fails in probes.run(codec):
+            print(f"PROBE {'PASS' if ok == n else 'FAIL'} {ok}/{n} {name}")
+            for f in fails:
+                print(f"  {f}")
+            bad += n - ok
+    print(f"PROBES={'PASS' if not bad else 'FAIL'} failures={bad}")
+    return 0 if not bad else 1
 
 
 def cmd_allowlists(a) -> int:
@@ -154,12 +268,24 @@ def main() -> None:
     c.add_argument("--generated", action="store_true")
     s = sub.add_parser("sweep")
     s.add_argument("--proto", action="append", choices=AP)
+    rt = sub.add_parser("roundtrip")
+    rt.add_argument("--proto", action="append", choices=("ngap", "f1ap", "e1ap", "xnap", "rrc"))
+    rt.add_argument("--pdu", action="append")
+    rt.add_argument("--codec", help="ksim-codec binary (default: build/dev, or $KSIM_CODEC)")
+    rt.add_argument("--show", type=int, default=40)
+    pr = sub.add_parser("probes")
+    pr.add_argument("--codec")
+    lo = sub.add_parser("localize")
+    lo.add_argument("proto")
+    lo.add_argument("pdu")
+    lo.add_argument("mode", choices=("min", "max"))
+    lo.add_argument("--codec")
     al = sub.add_parser("allowlists")
     al.add_argument("--check", action="store_true")
     sub.add_parser("selftest")
     a = ap.parse_args()
-    sys.exit({"gen": cmd_gen, "check": cmd_check, "sweep": cmd_sweep, "allowlists": cmd_allowlists,
-              "selftest": cmd_selftest}[a.cmd](a))
+    sys.exit({"gen": cmd_gen, "check": cmd_check, "sweep": cmd_sweep, "roundtrip": cmd_roundtrip, "localize": cmd_localize, "probes": cmd_probes,
+              "allowlists": cmd_allowlists, "selftest": cmd_selftest}[a.cmd](a))
 
 
 if __name__ == "__main__":

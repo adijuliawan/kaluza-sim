@@ -150,13 +150,23 @@ DESCRIPTIONS = {
 }
 
 
+def _kept() -> dict[str, tuple[str, str]]:
+    """The handling and vector columns already written (plan M10): kept as they are."""
+    if not OUT.is_file():
+        return {}
+    rows = list(csv.reader(OUT.read_text().splitlines(), delimiter="\t"))
+    return {r[0]: (r[-2], r[-1]) for r in rows[1:] if len(r) >= 9}
+
+
 def table() -> str:
     counts = {p: count(p) for p in PROTOS}
+    kept = _kept()
     buf = io.StringIO()
     w = csv.writer(buf, delimiter="\t", lineterminator="\n")
     w.writerow(["construct", *PROTOS, "description", "handling", "vector"])
     for k in DESCRIPTIONS:
-        w.writerow([k, *(counts[p][k] for p in PROTOS), DESCRIPTIONS[k], "-", "-"])
+        handling, vector = kept.get(k, ("-", "-"))
+        w.writerow([k, *(counts[p][k] for p in PROTOS), DESCRIPTIONS[k], handling, vector])
     return buf.getvalue()
 
 

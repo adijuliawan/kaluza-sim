@@ -67,6 +67,37 @@ def _bounds(const):
     return (lb if isinstance(lb, int) else None), (ub if isinstance(ub, int) else None)
 
 
+def _encoded(proto: str, module: str, name: str) -> bytes:
+    """pycrate's encoding of the minimal value of a type, for a container."""
+    from . import asn
+    o = asn.obj(proto, module, name.replace("-", "_"))
+    return asn.encode(o, Gen("min").value(o), "uper" if proto == "rrc" else "aper")
+
+
+# OCTET STRINGs that carry another PDU (no CONTAINING constraint, but the spec
+# and tshark treat the octets as that PDU). Filler there is read as garbage by
+# tshark, so generated values carry real content: the minimal value of the
+# carried type, or for NAS a valid 5GMM DEREGISTRATION ACCEPT (UE originating).
+CARRIED = {
+    "NAS-PDU": lambda: bytes.fromhex("7e0046"),
+    "DedicatedNAS-Message": lambda: bytes.fromhex("7e0046"),
+    "SourceToTarget-TransparentContainer":
+        lambda: _encoded("ngap", "NGAP_IEs", "SourceNGRANNode-ToTargetNGRANNode-TransparentContainer"),
+    "TargetToSource-TransparentContainer":
+        lambda: _encoded("ngap", "NGAP_IEs", "TargetNGRANNode-ToSourceNGRANNode-TransparentContainer"),
+    "LastVisitedNGRANCellInformation":
+        lambda: _encoded("ngap", "NGAP_IEs", "LastVisitedNGRANCellInformation"),
+    "CellGroupConfig": lambda: _encoded("rrc", "NR_RRC_Definitions", "CellGroupConfig"),
+}
+
+# Where the IE says more than its type: NGAP's NASC (id 37) is a NAS-PDU that
+# carries the Intra N1 mode NAS transparent container (TS 24.501 9.11.2.6):
+# MAC, algorithms, KSI/NCC and SQN, seven octets.
+CARRIED_BY_IE = {
+    ("NAS-PDU", 37): lambda: bytes(7),
+}
+
+
 class Gen:
     def __init__(self, mode: str, caps: Caps | None = None):
         assert mode in ("min", "max")
@@ -162,6 +193,9 @@ class Gen:
         cont = self._contained(o)
         if cont is not None:
             return cont
+        carried = CARRIED.get(type_name(o))
+        if carried is not None:
+            return carried()
         n = self._size(o, self.caps.octets_max)
         return (b"\xff" if self.mode == "max" else b"\x00") * n
 
@@ -227,7 +261,11 @@ class Gen:
                 for n, c in item._cont.items():
                     if getattr(c, "_const_tab", None) is not None:
                         v = e.get(c._const_tab_id)
-                        one[n] = (type_name(v), self.value(v, depth + 1)) if c.TYPE == "OPEN_TYPE" else v
+                        if c.TYPE == "OPEN_TYPE":
+                            special = CARRIED_BY_IE.get((type_name(v), e.get("id")))
+                            one[n] = (type_name(v), special() if special else self.value(v, depth + 1))
+                        else:
+                            one[n] = v
                     elif n in item._root_mand or self.mode == "max":
                         one[n] = self.value(c, depth + 1)
                 out.append(one)

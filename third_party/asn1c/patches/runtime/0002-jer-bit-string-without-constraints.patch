@@ -1,0 +1,34 @@
+SPDX-FileCopyrightText: 2026 Adi Juliawan
+SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+asn1c 18e56503 runtime: the BIT STRING JER encoder and decoder dereference
+their size constraint without a NULL check; a BIT STRING written inline in an
+information object set reaches them through an open type with none, and the
+JER decoder crashed (F1AP UEContextSetupResponse, maximal value). A missing
+constraint now means none (-1). JER serves ksim-codec and the oracle harness
+only, never the protocol path. Row KS-PLAT-D3.
+
+--- a/BIT_STRING_jer.c
++++ b/BIT_STRING_jer.c
+@@ -19,8 +19,10 @@
+     char scratch[16 * 3 + 4];
+     char *p = scratch;
+     const BIT_STRING_t *st = (const BIT_STRING_t *)sptr;
++    static const asn_jer_constraints_t unconstrained = { -1 };
+     const asn_jer_constraints_t* cts = constraints ?
+         constraints : td->encoding_constraints.jer_constraints;
++    if(!cts) cts = &unconstrained;  /* e.g. a BIT STRING written inline in an object set */
+     uint8_t *buf;
+     uint8_t *end;
+ 
+@@ -153,8 +155,10 @@
+                             void **sptr,
+                             const void *buf_ptr, size_t size) {
+     BIT_STRING_t *st = (BIT_STRING_t *)*sptr;
++    static const asn_jer_constraints_t unconstrained = { -1 };
+     const asn_jer_constraints_t *cts = constraints ?
+         constraints : td->encoding_constraints.jer_constraints;
++    if(!cts) cts = &unconstrained;  /* e.g. a BIT STRING written inline in an object set */
+     asn_dec_rval_t rval;  /* Return value from the decoder */
+     ssize_t consumed_myself = 0;  /* Consumed bytes from buf_ptr */
+ 

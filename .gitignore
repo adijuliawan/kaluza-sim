@@ -9,6 +9,9 @@ secrets/
 *.secrets.yaml
 cards/**/secrets*
 
+# Local-only corpus octets (device identities): only tests/vectors/local-manifest.tsv is tracked
+tests/vectors/local/
+
 # Run output: run directories, captures, key logs (opt-in AS-key exports are secrets too)
 runs/
 *.pcap

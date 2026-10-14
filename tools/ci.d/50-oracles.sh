@@ -4,8 +4,8 @@
 #
 # CI hook (plan M8): the oracle harness must-fail self-test, the derived
 # tshark allowlist is current, and the external-origin corpus is current with
-# its sender rules. In full mode the generated-value sweep over every v1 AP type
-# is reported (informational until M10 turns it into the exit check).
+# its sender rules; the M10 probes; in full mode the round trip of every v1
+# type (asn1c against pycrate and tshark), which must have no FAIL.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 MODE="${1:-quick}"
@@ -21,7 +21,19 @@ if [[ -d /home/amadeus/Development/ran/ocudu && -d /home/amadeus/Development/kal
 else
     echo "CORPUS=SKIP (the OCUDU checkout or the kaluza-core testkit is not on this machine)"
 fi
-if [[ "$MODE" == full ]]; then
-    "${PY[@]}" "$ROOT/tests/oracles/oracle.py" sweep 2>&1 | grep -E "^SWEEP"
+# Our C++ codecs (plan M10) through ksim-codec from the dev build.
+export KSIM_CODEC="${KSIM_CODEC:-$ROOT/build/dev/apps/ksim-codec/ksim-codec}"
+if [[ ! -x "$KSIM_CODEC" ]]; then
+    echo "ROUNDTRIP=SKIP (no ksim-codec at $KSIM_CODEC; build the dev preset)"
+else
+    "${PY[@]}" "$ROOT/tests/oracles/oracle.py" probes 2>&1 | grep -E "^PROBE|^  " ; s=${PIPESTATUS[0]}
+    (( s == 0 )) || exit 1
+    if [[ "$MODE" == full ]]; then
+        # Every v1 type: corpus vectors (local ones too, where this machine has
+        # them) and generated min/max values, asn1c against pycrate and tshark.
+        "${PY[@]}" "$ROOT/tests/oracles/oracle.py" roundtrip --show 20 2>&1 | grep -E "^ROUNDTRIP|^FAILURE"
+        s=${PIPESTATUS[0]}
+        (( s == 0 )) || exit 1
+    fi
 fi
 echo "ORACLES=PASS"

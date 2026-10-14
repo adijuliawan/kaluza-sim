@@ -1,0 +1,74 @@
+SPDX-FileCopyrightText: 2026 Adi Juliawan
+SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+asn1c 18e56503 compiler: for INTEGER (0..4095, ..., 4096..2000000) the PER
+constraint it emits is (0..2000000,...): the extension additions after "..."
+are merged into the root. X.691 makes only the root PER-visible (pycrate,
+tshark and OCUDU encode so), so a root value went out in the wrong form (a
+length determinant and octets instead of a two-octet aligned field) and a
+correct encoding did not decode. PER ranges now stop at the extension marker;
+constraint checking is unchanged. The fork's own test 50-constraint-OK
+expected the merged range (its comment: "(5..MAX,...,1..4) Means
+(1..10,...)"); its expected output is updated to the root, (5..10,...), and
+all 130 compiler tests pass. Row KS-PLAT-D2. Applied by tools/build-asn1c.sh
+(git apply).
+
+diff --git a/libasn1fix/asn1fix_crange.c b/libasn1fix/asn1fix_crange.c
+index bae6f553..363a49c9 100644
+--- a/libasn1fix/asn1fix_crange.c
++++ b/libasn1fix/asn1fix_crange.c
+@@ -834,7 +834,7 @@ asn1cnst_range_t *
+ asn1constraint_compute_PER_range(const char *dbg_name, asn1p_expr_type_e expr_type, const asn1p_constraint_t *ct, enum asn1p_constraint_type_e requested_ct_type, const asn1cnst_range_t *minmax, int *exmet, enum cpr_flags cpr_flags) {
+     if(0) return asn1constraint_compute_constraint_range(dbg_name, expr_type, ct, requested_ct_type, minmax, exmet, cpr_flags | CPR_strict_PER_visibility);
+     /* Due to peculiarities of PER constraint handling, we don't enable strict PER visibility upfront here. */
+-    return asn1constraint_compute_constraint_range(dbg_name, expr_type, ct, requested_ct_type, minmax, exmet, cpr_flags);
++    return asn1constraint_compute_constraint_range(dbg_name, expr_type, ct, requested_ct_type, minmax, exmet, cpr_flags | CPR_PER_root_only);
+ }
+ 
+ asn1cnst_range_t *
+@@ -1243,6 +1243,19 @@ asn1constraint_compute_constraint_range(
+ 		 * Canonicalizator will do the union magic.
+ 		 */
+ 		for(; i < ct->el_count; i++) {
++			if((cpr_flags & CPR_PER_root_only) && ct->type == ACT_CA_CSV) {
++				/* X.691 9.3.19: after "...", the extension additions are not
++				 * PER-visible: the range stays the root, marked extensible. */
++				int seen_ext = 0;
++				for(int k = 0; k <= (int)i; k++)
++					if(ct->elements[k]->type == ACT_EL_EXT) seen_ext = 1;
++				if(seen_ext) {
++					range->extensible = 1;
++					range->not_OER_visible = 1;
++					range->not_JER_visible = 1;
++					continue;
++				}
++			}
+ 			tmp = asn1constraint_compute_constraint_range(dbg_name, expr_type,
+ 				ct->elements[i], requested_ct_type, minmax, exmet,
+ 				cpr_flags);
+diff --git a/libasn1fix/asn1fix_crange.h b/libasn1fix/asn1fix_crange.h
+index abc4ead0..9df023d0 100644
+--- a/libasn1fix/asn1fix_crange.h
++++ b/libasn1fix/asn1fix_crange.h
+@@ -53,6 +53,8 @@ enum cpr_flags {
+ 	CPR_strict_PER_visibility	= 0x02,
+ 	CPR_strict_JER_visibility	= 0x04,
+ 	CPR_simulate_fbless_SIZE	= 0x08,
++	/* X.691: extension additions are not PER-visible; only the root counts. */
++	CPR_PER_root_only		= 0x10,
+ };
+ asn1cnst_range_t *asn1constraint_compute_OER_range(const char *dbg_name,
+ 	asn1p_expr_type_e expr_type,
+diff --git a/tests/tests-asn1c-compiler/50-constraint-OK.asn1.+-P_-gen-UPER_-gen-APER b/tests/tests-asn1c-compiler/50-constraint-OK.asn1.+-P_-gen-UPER_-gen-APER
+index 118ddba5..dbd0c356 100644
+--- a/tests/tests-asn1c-compiler/50-constraint-OK.asn1.+-P_-gen-UPER_-gen-APER
++++ b/tests/tests-asn1c-compiler/50-constraint-OK.asn1.+-P_-gen-UPER_-gen-APER
+@@ -315,7 +315,7 @@ Int4_constraint(const asn_TYPE_descriptor_t *td, const void *sptr,
+ 
+ #if !defined(ASN_DISABLE_UPER_SUPPORT) || !defined(ASN_DISABLE_APER_SUPPORT)
+ asn_per_constraints_t asn_PER_type_Int4_constr_1 CC_NOTUSED = {
+-	{ APC_CONSTRAINED | APC_EXTENSIBLE,  4,  4,  1,  10 }	/* (1..10,...) */,
++	{ APC_CONSTRAINED | APC_EXTENSIBLE,  3,  3,  5,  10 }	/* (5..10,...) */,
+ 	{ APC_UNCONSTRAINED,	-1, -1,  0,  0 },
+ 	0, 0	/* No PER value map */
+ };

@@ -1,32 +1,32 @@
 construct	rrc	ngap	f1ap	e1ap	xnap	description	handling	vector
-type-assignments	2740	1313	1860	655	1551	type assignments (scale)	-	-
-parameterized-types	1	11	9	8	11	parameterized type definitions (asn1c specializes each use)	-	-
-information-object-classes	0	5	5	4	5	information object classes (CLASS)	-	-
-information-object-sets	0	787	1161	388	875	information object sets (IE / procedure tables)	-	-
-open-type-fields	0	8	8	6	8	references to class type fields (open types: &Value, &InitiatingMessage)	-	-
-extension-markers	766	1543	1948	734	1831	extension markers ... in SEQUENCE/CHOICE/ENUMERATED	-	-
-extension-addition-groups	731	0	0	0	0	extension addition groups [[ ]] (Rel-16+ CHOICE brackets)	-	-
-choice	591	79	99	31	88	CHOICE types	-	-
-enumerated	4285	230	354	131	310	ENUMERATED types	-	-
-optional	8455	796	1181	497	1274	OPTIONAL components (presence bitmap)	-	-
-default	22	1	1	1	1	DEFAULT components (encoder must omit default values in canonical PER)	-	-
-containing	67	60	0	0	0	CONTAINING (an octet/bit string carrying another PDU)	-	-
-integer-constrained	2738	125	421	83	209	constrained INTEGER ranges	-	-
-integer-extensible	0	63	121	57	94	extensible INTEGER ranges (...) (the SRBID-width class)	-	-
-integer-negative-lower-bound	97	4	18	2	8	INTEGER ranges with a negative lower bound	-	-
-integer-range-over-2^32	5	5	2	7	6	INTEGER ranges wider than 2^32 (e.g. BitRate)	-	-
-integer-unresolved-bound	0	0	0	0	0	INTEGER bounds naming a value this tool did not resolve	-	-
-size-constrained	2167	339	469	171	426	SIZE-constrained strings and SEQUENCE OF	-	-
-size-extensible	0	26	8	7	7	extensible SIZE constraints	-	-
-size-upper-16K-or-more	76	40	32	8	40	SIZE upper bound of 16K or more (PER fragmentation)	-	-
-octet-string-unbounded	161	42	140	6	115	OCTET STRING without SIZE (length may reach 16K: fragmentation)	-	-
-bit-string-unbounded	0	0	0	0	0	BIT STRING without SIZE	-	-
-sequence-of-upper-16K-or-more	71	39	32	7	37	SEQUENCE OF with an upper bound of 16K or more	-	-
-printable-string	0	2	2	2	0	PrintableString (APER character width)	-	-
-visible-string	0	4	3	3	1	VisibleString	-	-
-utf8-string	0	3	2	2	0	UTF8String	-	-
-ia5-string	0	0	0	0	0	IA5String	-	-
-boolean	157	0	1	0	0	BOOLEAN	-	-
-null	197	6	14	0	3	NULL	-	-
-real	0	0	0	0	0	REAL (asn1c PER support is limited)	-	-
-object-identifier	0	1	1	1	1	OBJECT IDENTIFIER	-	-
+type-assignments	2740	1313	1860	655	1551	type assignments (scale)	asn1c: one C type and descriptor each; tools/asn1_registry.py lists them for ksim-codec	unit_asn1_link (all five libraries); oracle.py roundtrip over every v1 type
+parameterized-types	1	11	9	8	11	parameterized type definitions (asn1c specializes each use)	asn1c specializes each use (ProtocolIE-Container{{...}} and kin)	ngap-ocudu-ngap-077 (NGSetupRequest); every AP vector
+information-object-classes	0	5	5	4	5	information object classes (CLASS)	resolved by asn1c into the IE CHOICE of each container	every AP vector
+information-object-sets	0	787	1161	388	875	information object sets (IE / procedure tables)	asn1c: one CHOICE arm per set entry; valuegen takes id, criticality and value from one entry	every AP vector; roundtrip gen-max carries every entry
+open-type-fields	0	8	8	6	8	references to class type fields (open types: &Value, &InitiatingMessage)	asn1c: a CHOICE-shaped struct per open type; its JER differs from X.697 (KS-PLAT-T15); open-type JER decoder patched (KS-PLAT-D3)	f1ap UEContextSetupResponse gen-max (inline BIT STRING in an object set)
+extension-markers	766	1543	1948	734	1831	extension markers ... in SEQUENCE/CHOICE/ENUMERATED	asn1c: extension bit and additions; additions unknown to Rel-19 are skipped on decode, not re-emitted	roundtrip gen-max (every known addition present)
+extension-addition-groups	731	0	0	0	0	extension addition groups [[ ]] (Rel-16+ CHOICE brackets)	asn1c: an optional nested struct per [[ ]] group	probe '[[ ]] in a CHOICE' (RLF-Report-r16 max); local phone RRC vectors
+choice	591	79	99	31	88	CHOICE types	asn1c: present + union; extensible CHOICE index past the root via the extension bit	roundtrip gen-min/gen-max (first and last alternatives)
+enumerated	4285	230	354	131	310	ENUMERATED types	asn1c: native long; extension values via the extension bit	probe 'extensible ENUMERATED' (CA-BandwidthClassNR a, q, r2-v1730)
+optional	8455	796	1181	497	1274	OPTIONAL components (presence bitmap)	asn1c: pointer or presence bitmap	roundtrip gen-min (all absent) and gen-max (all present)
+default	22	1	1	1	1	DEFAULT components (encoder must omit default values in canonical PER)	asn1c omits a component equal to its DEFAULT when encoding	roundtrip gen-min/gen-max of the types that carry one; byte-identical with pycrate
+containing	67	60	0	0	0	CONTAINING (an octet/bit string carrying another PDU)	asn1c: plain OCTET STRING, decoded by the caller; the harness decodes it with pycrate (KS-PLAT-T15)	ngap PDUSessionResourceSetupRequest (transfer CONTAINING); ngap-transfer corpus
+integer-constrained	2738	125	421	83	209	constrained INTEGER ranges	asn1c per-constraint table; an 8-bit range below 256 was decoded octet-aligned (runtime patch, KS-PLAT-D1)	probe 'integer union of values, 8-bit root below 256' (ExpectedActivityPeriod)
+integer-extensible	0	63	121	57	94	extensible INTEGER ranges (...) (the SRBID-width class)	the extension additions were merged into the PER root (compiler patch, KS-PLAT-D2); out-of-root values travel with Check::relay	probes 'integer-extensible' (MaximumDataBurstVolume 0..2000000, ExtendedPacketDelayBudget 1..109999)
+integer-negative-lower-bound	97	4	18	2	8	INTEGER ranges with a negative lower bound	asn1c offsets by the lower bound; the 8-bit decode fix (KS-PLAT-D1) applies	probe 'integer-negative-lower-bound' (N6JitterInformation -127..127)
+integer-range-over-2^32	5	5	2	7	6	INTEGER ranges wider than 2^32 (e.g. BitRate)	INTEGER_t with a length-prefixed octet field; 0..2^64-1 needed runtime and compiler patches (KS-PLAT-D4)	probes 'integer-range-over-2^32' (BitRate to 4000000000001) and 'to 2^64-1' (E1AP usage counts)
+integer-unresolved-bound	0	0	0	0	0	INTEGER bounds naming a value this tool did not resolve	none in Rel-19	-
+size-constrained	2167	339	469	171	426	SIZE-constrained strings and SEQUENCE OF	asn1c per-constraint size ranges	roundtrip gen-min/gen-max (lower and upper bounds)
+size-extensible	0	26	8	7	7	extensible SIZE constraints	extension bit; an over-root length travels with Check::relay	probe 'APER PrintableString' (RANNodeName 151 characters)
+size-upper-16K-or-more	76	40	32	8	40	SIZE upper bound of 16K or more (PER fragmentation)	PER fragmentation (16K blocks); asn1c, pycrate and tshark agree	probe 'length 16K and more' (16383..200000 octets, in a PDU through tshark)
+octet-string-unbounded	161	42	140	6	115	OCTET STRING without SIZE (length may reach 16K: fragmentation)	PER fragmentation as above; containers get real content in generated values	probe 'length 16K and more'; e1ap BearerContextSetupRequest gen-max (28222-octet open type)
+bit-string-unbounded	0	0	0	0	0	BIT STRING without SIZE	none in Rel-19	-
+sequence-of-upper-16K-or-more	71	39	32	7	37	SEQUENCE OF with an upper bound of 16K or more	PER length up to the bound; the bound itself and one past it	probe 'SEQUENCE OF at its bounds' (SupportedTAList 1, 256, 257 refused)
+printable-string	0	2	2	2	0	PrintableString (APER character width)	APER: 8 bits per character (known-multiplier, X.691 30.5.4)	probe 'APER PrintableString' (RANNodeName 1, 4, 150, 151 characters)
+visible-string	0	4	3	3	1	VisibleString	as PrintableString	roundtrip gen-min/gen-max (RANNodeNameVisibleString in NGSetupRequest gen-max)
+utf8-string	0	3	2	2	0	UTF8String	APER: octet length then UTF-8 octets	roundtrip gen-max (RANNodeNameUTF8String in NGSetupRequest gen-max)
+ia5-string	0	0	0	0	0	IA5String	none in Rel-19	-
+boolean	157	0	1	0	0	BOOLEAN	asn1c BOOLEAN	roundtrip gen-min/gen-max
+null	197	6	14	0	3	NULL	asn1c NULL	roundtrip gen-max
+real	0	0	0	0	0	REAL (asn1c PER support is limited)	none in Rel-19	-
+object-identifier	0	1	1	1	1	OBJECT IDENTIFIER	asn1c OBJECT IDENTIFIER (module identifiers only)	-
