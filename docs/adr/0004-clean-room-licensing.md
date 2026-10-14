@@ -1,0 +1,23 @@
+# ADR 0004: private for now, clean-room with respect to copyleft and restricted code
+
+- **Status:** accepted, 2026-10-14 (user: "private, decide later")
+- **Context:** the repo (github.com/adijuliawan/kaluza-sim) is private, and its licence is open. The reference code around it carries mixed licences:
+  - UERANSIM, including the user's fork: **AGPL-3.0**.
+  - onomondo-uicc: **GPL-3.0**.
+  - duranta-ran / OAI: **CSSL v1.0**, whose patent grant covers research and testing only.
+  - OCUDU: **BSD-3-Clause-Open-MPI**.
+  - PacketRusher: **Apache-2.0**.
+  - asn1c, compiler and runtime: **BSD-2**.
+  - Wireshark and pySim: **GPL**. pycrate: **LGPL**.
+  - The Quectel AT manuals and firmware are **confidential** vendor material.
+- **Decision:** keep the code clean-room, so any licence remains possible later.
+  - **Never copy** code or text from UERANSIM, onomondo-uicc or OAI/Duranta. Read them for facts only (for example, which asn1c commit works), and never write side by side with their source open.
+  - **May copy** OCUDU and PacketRusher code, keeping its header and adding a NOTICE entry, under `third_party/`.
+  - **Wireshark, pySim and pycrate** run as external oracles only, never linked.
+  - **The Quectel manuals and firmware** are cited by path. No text from them enters the repo; behaviour is reimplemented from what they document ([`../research/quectel.md`](../research/quectel.md)).
+  - **asn1c's runtime** is vendored, keeping its BSD-2 licence.
+  - **The user's own code** (kaluza-ue) may be studied and reused at the user's discretion. kaluza-core is governed by [ADR 0005](0005-independence-from-kaluza-core.md), not by licence.
+- **Consequences:**
+  - SPDX headers and REUSE metadata from the first commit.
+  - A provenance scanner in CI denies known UERANSIM, OAI and onomondo-uicc text.
+  - `NOTICE` lists the OCUDU and PacketRusher copies.

@@ -1,0 +1,34 @@
+# kaluza-sim: what never enters git
+
+# Secrets and key material: subscriber K/OPc, range master secrets, sealed card secrets, TLS keys
+secrets/
+*.key
+*.pem
+*.p12
+*.sealed
+*.secrets.yaml
+cards/**/secrets*
+
+# Run output: run directories, captures, key logs (opt-in AS-key exports are secrets too)
+runs/
+*.pcap
+*.pcapng
+*.qmdl
+*keylog*
+
+# 3GPP / ETSI / O-RAN documents are fetched, not tracked (docs/specs.md says where from)
+spec/3gpp/**/*.zip
+spec/3gpp/**/*.docx
+spec/etsi/**/*.pdf
+spec/oran/**
+
+# Vendor-confidential material (e.g. Quectel AT manuals, firmware) is cited by path, never copied
+vendor-confidential/
+
+# Build and tooling
+build/
+out/
+.cache/
+compile_commands.json
+__pycache__/
+.venv*/

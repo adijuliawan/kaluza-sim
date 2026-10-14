@@ -1,0 +1,23 @@
+# ADR 0002: our own O-RAN nodes, with OCUDU as interop peer and reference
+
+- **Status:** accepted, 2026-10-14 (user)
+- **Context:**
+  - The user wants the RAN simulator built on the O-RAN architecture.
+  - OCUDU (the srsRAN Project renamed; BSD) already runs `ocucp`, `ocuup` and `odu` as separate processes over real F1, E1, Xn, N2 and E2, but:
+    - its ASN.1 is Rel-18;
+    - it has no UE and no NPN support;
+    - its split-6 FAPI wire has no open format (only dummy plugins ship);
+    - its test-mode UEs never reach the CU-CP or the AMF.
+  - duranta-ran (OAI) carries a CSSL licence (research and testing only), and its NGAP is Rel-15.
+- **Decision:** kaluza-sim implements its own **O-CU-CP, O-CU-UP and O-DU** (`ksim-cucp`, `ksim-cuup`, `ksim-du`).
+  - They are separate processes joined by real F1-C, F1-U, E1, Xn-C, Xn-U, NG-C and NG-U at Rel-19.
+  - An all-in-one mode carries the same encoded bytes over memory.
+  - OCUDU is an **interop peer** from P2: our DU against OCUDU's CU-CP and CU-UP, E1 in both directions, Xn between CU-CPs. It is also a BSD **reference**.
+  - A later **FAPI bridge** lets our UEs drive a real OCUDU DU through its split-6 plugin seam.
+- **Consequences:**
+  - Full control of RRC and PDCP: real AS security, Rel-19 IEs, fault injection at every interface.
+  - More code to write: RRC-CU, F1AP, E1AP, XnAP and NGAP on the RAN side.
+  - A per-peer release cap (`peer_release: 18`) is needed for OCUDU interop.
+- **Alternatives considered:**
+  - **OCUDU as the RAN, with only the UE built:** blocked by Rel-18, the closed FAPI wire, and test-mode UEs that never reach the CU.
+  - **Our own nodes with no OCUDU coupling:** loses the independent-implementation evidence that OCUDU interop gives.
