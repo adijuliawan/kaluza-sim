@@ -20,7 +20,9 @@ add_library(ksim_platform STATIC
     rng.cpp
     yaml.cpp
     event.cpp
-    mutation.cpp)
+    mutation.cpp
+    transport.cpp
+    memlink.cpp)
 add_library(ksim::platform ALIAS ksim_platform)
 target_include_directories(ksim_platform PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_platform PUBLIC OpenSSL::Crypto fmt::fmt Threads::Threads PRIVATE yaml-cpp::yaml-cpp ksim::warnings)

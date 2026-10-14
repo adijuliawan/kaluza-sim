@@ -19,6 +19,10 @@ const char* errc_name(Errc c) noexcept {
         return "overflow";
     case Errc::invalid_argument:
         return "invalid_argument";
+    case Errc::io:
+        return "io";
+    case Errc::closed:
+        return "closed";
     case Errc::internal:
         return "internal";
     }

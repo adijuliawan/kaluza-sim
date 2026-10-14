@@ -27,13 +27,15 @@ enum class Errc : std::uint16_t {
     overflow,          // an output or counter would overflow
     invalid_argument,  // a caller passed something unusable
     internal,          // a bug: an invariant did not hold
+    io,                // an OS call failed: Error::offset holds its errno (P1 N2)
+    closed,            // the association, link or socket is not up (P1 N2)
 };
 
 const char* errc_name(Errc c) noexcept;
 
 struct Error {
     Errc code;
-    std::uint32_t offset = 0;      // where it went wrong: byte offset unless the API says bits
+    std::uint32_t offset = 0;      // where it went wrong: byte offset unless the API says bits; errno for Errc::io
     const char* what = "";         // static string literal, never owned
 };
 
