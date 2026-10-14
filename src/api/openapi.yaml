@@ -1,0 +1,152 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The control API, v0 (P1 N8; ADR 0009 point 7; architecture section 9; cli.md).
+# Served on <run>/ctl.sock (and optionally TCP 127.0.0.1:PORT). Every answer
+# except /v1/events is a Reply: {"exit": n, "kv": {KEY: "value", ...}}, with an
+# HTTP status that matches the exit code of cli.md section 2. The keys and
+# their order are a contract: gates read them as KEY=value lines.
+openapi: 3.1.0
+info:
+  title: kaluza-sim control API
+  version: 0.1.0
+  description: >-
+    The v0 verbs of P1 N8. A UE route takes one UE: imsi-<15 digits> or its farm
+    index. ksim-ctl resolves group:<name> and all through /v1/ues.
+paths:
+  /v1/version:
+    get:
+      summary: VERSION, COMMIT, BUILD, SPEC_PINS, ASN1C
+      responses: {"200": {$ref: "#/components/responses/Reply"}}
+  /v1/capabilities:
+    get:
+      summary: CAP.<feature>=0|1 (or a value) for what this build serves
+      responses: {"200": {$ref: "#/components/responses/Reply"}}
+  /v1/faults:
+    get:
+      summary: FAULTS=0 (fault injection is P3)
+      responses: {"200": {$ref: "#/components/responses/Reply"}}
+  /v1/info:
+    get:
+      summary: >-
+        ROLE, NG_UP, NG_SETUP, F1_SETUP, CELL_ACTIVE, UES, RAN_UES, KAIR_FRAMES,
+        KAIR_ERRORS, GNB, PLMN, AMF, RUN_DIR, EVENT_SEQ, LOOP_LAG_MAX_MS
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "503": {$ref: "#/components/responses/Reply"}}
+  /v1/nodes:
+    get:
+      summary: NODES, NODE.<n>.NAME, NODE.<n>.ROLE
+      responses: {"200": {$ref: "#/components/responses/Reply"}}
+  /v1/ues:
+    get:
+      summary: UES, UE.<index>=imsi-..., UE.<index>.GROUP
+      responses: {"200": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/status:
+    get:
+      summary: >-
+        UE, INDEX, POWER, RM_STATE, CM_STATE, RRC_STATE, MM_STATE (TS 24.501 state
+        names), UPDATE_STATUS, USIM, CAMPED, AS_SECURITY, and when known GUTI
+        (<mcc><mnc>-<region>-<set>-<pointer>-<tmsi>, hex), TAI (<mcc><mnc>-<tac hex>),
+        C_RNTI, T3512_S
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/power:
+    post:
+      summary: >-
+        state=on: card read, fixed camping, initial registration; with wait_ms it
+        ends at nas.reg.accept (exit 0) or nas.reg.reject / nas.reg.abort (exit 1).
+        state=off with mode=switch-off: a switch-off de-registration, ending at
+        nas.dereg.sent switch_off=1. Other modes come with N12 (exit 5).
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                state: {enum: ["on", "off"]}
+                mode: {enum: [switch-off, graceful, abrupt]}
+                wait_ms: {type: string, pattern: "^[0-9]{1,9}$"}
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/register:
+    post:
+      summary: type=initial; wait_ms as for power on
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/deregister:
+    post:
+      summary: >-
+        type=normal (ends at nas.dereg.accept, or nas.dereg.abort with exit 1) or
+        switch-off (ends at nas.dereg.sent switch_off=1)
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/wait:
+    get:
+      summary: >-
+        A long poll over the run's numbered events. event and fail are comma lists
+        of names from src/api/events.tsv; ue (a UE selector) or subject narrows it;
+        where=key=value (repeatable) matches fields; since=N (default 0: events
+        already recorded match) or new=1; timeout_ms (default 30000, at most
+        600000). A match prints EVENT, SEQ, T_MS, SUBJECT, UE and the event's
+        fields upper-cased; a fail event exits 1 with CAUSE from its cause or
+        reason field; no match exits 3.
+      parameters:
+        - {name: event, in: query, required: true, schema: {type: string}}
+        - {name: fail, in: query, schema: {type: string}}
+        - {name: ue, in: query, schema: {type: string}}
+        - {name: subject, in: query, schema: {type: string}}
+        - {name: where, in: query, schema: {type: string}}
+        - {name: since, in: query, schema: {type: string}}
+        - {name: new, in: query, schema: {enum: ["1"]}}
+        - {name: timeout_ms, in: query, schema: {type: string}}
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "422": {$ref: "#/components/responses/Reply"}, "504": {$ref: "#/components/responses/Reply"}}
+  /v1/events:
+    get:
+      summary: >-
+        The events after since (default 0) as NDJSON (one object per line:
+        seq, t_ms, wall_ns, event, subject, fields), filtered by subject and a
+        name prefix (filter); follow=1 keeps the stream open.
+      parameters:
+        - {name: since, in: query, schema: {type: string}}
+        - {name: subject, in: query, schema: {type: string}}
+        - {name: filter, in: query, schema: {type: string}}
+        - {name: follow, in: query, schema: {enum: ["1"]}}
+      responses:
+        "200": {description: NDJSON, content: {application/x-ndjson: {}}}
+  /v1/gnb/{name}/ue-list:
+    get:
+      summary: UES, UE.<n>.RAN_UE_NGAP_ID, UE.<n>.AMF_UE_NGAP_ID, UE.<n>.C_RNTI, UE.<n>.PHASE
+      parameters: [{name: name, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
+  /v1/gnb/{name}/amf-list:
+    get:
+      summary: AMFS, AMF.<n>.ADDR, AMF.<n>.SCTP=up|down, AMF.<n>.NG_SETUP, AMF.<n>.NAME
+      parameters: [{name: name, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
+  /v1/stop:
+    post:
+      summary: Ends the run (STOPPING=1); the manifest records the end.
+      responses: {"200": {$ref: "#/components/responses/Reply"}}
+  /v1/stub:
+    get:
+      summary: >-
+        ksim-corestub only: ASSOCIATIONS, NG_SETUP, UES, RECEIVED.<NGAP message>,
+        REGISTERED, ERROR_INDICATIONS, FAILURES, FAILURE.<n> (each failed check
+        with its clause)
+      responses: {"200": {$ref: "#/components/responses/Reply"}}
+components:
+  parameters:
+    sel: {name: sel, in: path, required: true, schema: {type: string}, description: "imsi-<15 digits> or a farm index"}
+  responses:
+    Reply:
+      description: >-
+        exit is cli.md section 2's code (0 ok, 1 failed with CAUSE, 2 usage,
+        3 timeout, 4 unknown node or UE, 5 capability absent, 6 wrong state,
+        7 abort, 10 internal); kv holds the KEY=value pairs in order.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [exit, kv]
+            properties:
+              exit: {type: integer}
+              kv: {type: object, additionalProperties: {type: string}}

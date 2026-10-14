@@ -13,5 +13,7 @@ inline constexpr const char* kBuildType = "@CMAKE_BUILD_TYPE@";
 inline constexpr const char* kSanitize = "@KSIM_SANITIZE@";
 inline constexpr const char* kArchFlags = "@KSIM_ARCH_FLAGS@";
 inline constexpr const char* kCxxCompiler = "@CMAKE_CXX_COMPILER_ID@ @CMAKE_CXX_COMPILER_VERSION@";
+inline constexpr const char* kSpecIndexSha256 = "@KSIM_SPEC_INDEX_SHA256@";
+inline constexpr const char* kAsn1cPin = "@KSIM_ASN1C_PIN@";
 
 } // namespace ksim::build

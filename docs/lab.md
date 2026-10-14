@@ -113,6 +113,22 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
   - Since kaluza-core-e9 ended there is no standing coordinator: kaluza-sim agrees each window with whichever kaluza-core session is active, and asks the user when none is (P1 working agreement, 2026-10-15).
   - P1's windows: **W0** (N9) imports imsi-001010000300000..099 through the provisioning API, then NG Setup, registration of 1–3 UEs, AS SMC and deregistration; **W1** (N11) sessions, a ping to the DN, an MTU probe, two sessions; **W2/W3** (N18) the full P1 row set. The sub-blocks of that import: 000–049 default, 050–059 SMS (`smsSubscribed` true), 060–069 `subsRegTimer` 120 s (each re-registers every 2 min while registered, so they stay out of rows that count AMF log lines), 070–079 EAP-AKA′, 080–099 spare.
 - **The dev-PC guard.** The real AMF listens on the dev PC itself (172.30.30.1:38412), so `ksim` refuses any peer in 172.30.0.0/16 unless it runs with `--lab` on `kaluza-uesim`, and the scripted core binds 127.0.0.x only ([ADR 0009](adr/0009-p1-runtime-shape.md), point 11). vmnet8 (192.168.134.0/24, host-only) is allowed for the Open5GS control.
+- **The Open5GS rig (D5, ADR 0010).** A control run follows the same steps each time, all from the dev PC, inside a window agreed with the active kaluza-core session:
+  1. `ksim-sim range provision --target open5gs --block … --ssh amadeus-open5gs`.
+  2. `tools/open5gs-rig.sh start`. It refuses when any open5gs NF already runs.
+  3. `gates/run.sh open5gs`.
+  4. `tools/open5gs-rig.sh stop`. It checks that no NF and no `ogstun` are left.
+  5. `ksim-sim range deprovision …`, then remove the NF logs in `~/kaluza-sim-rig/log`, since debug logs can hold the subscribers' key material.
+  6. Tell the core session what was left.
+
+  The NF set is nrfd, scpd, ausfd, udmd, udrd, pcfd, bsfd, nssfd and amfd; smfd and upfd come only with the session runs.
+  The rig copy `~/kaluza-sim-rig/etc` differs from `install/etc/open5gs` in four ways, recorded in `tools/open5gs-rig.sh`:
+  - its log paths;
+  - loopback SBI addresses for nrf, ausf, udm and nssf, because the 5gc FQDNs don't resolve on the rig;
+  - the AMF's NGAP on vmnet8 only;
+  - NSAC off.
+
+  Subscribers are provisioned with `security.auth_method` 1 (5G AKA), since the fork's UDR defaults to EAP-TTLS without it.
 - **CPU.** The 4 vCPUs are shared with UERANSIM and n3iwue when those run, and with whatever else the Proxmox host is doing.
   - kaluza-sim needs no real-time pinning, since its L2 is ideal.
   - Its loop-lag watchdog makes a run ABORT, not FAIL, under contention.

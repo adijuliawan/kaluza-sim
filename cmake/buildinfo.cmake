@@ -17,6 +17,15 @@ if(GIT_FOUND)
 endif()
 
 string(TIMESTAMP KSIM_CONFIGURE_UTC "%Y-%m-%dT%H:%M:%SZ" UTC)
+
+# The spec and code-generator pins a run manifest records (P1 N8): the hash of
+# spec/INDEX.tsv (every pinned document) and the asn1c commit of PINS.tsv.
+file(SHA256 ${PROJECT_SOURCE_DIR}/spec/INDEX.tsv KSIM_SPEC_INDEX_SHA256)
+file(STRINGS ${PROJECT_SOURCE_DIR}/third_party/PINS.tsv _ksim_asn1c_pin REGEX "^asn1c\t")
+string(REPLACE "\t" ";" _ksim_asn1c_pin "${_ksim_asn1c_pin}")
+list(GET _ksim_asn1c_pin 1 KSIM_ASN1C_PIN)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${PROJECT_SOURCE_DIR}/spec/INDEX.tsv ${PROJECT_SOURCE_DIR}/third_party/PINS.tsv)
 set(KSIM_BUILD_PRESET "$ENV{KSIM_PRESET}")
 
 configure_file(

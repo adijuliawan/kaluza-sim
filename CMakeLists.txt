@@ -52,6 +52,7 @@ find_package(fmt 10 REQUIRED)
 find_package(Threads REQUIRED)
 find_package(yaml-cpp 0.7 REQUIRED)
 find_package(nlohmann_json 3.11 REQUIRED)
+find_package(CLI11 2.4 REQUIRED)
 ksim_asn1_generate()
 
 enable_testing()

@@ -17,6 +17,13 @@ with 2, which captures the card's AUTHENTICATE response unredacted: both have to
 be found.
 
     tools/secret_canary.py [--binary build/dev/tests/canary/ksim_canary]
+
+With --run-dir (P1 N8) it scans a ksim run directory instead: every file in it
+(manifest, events, log, captures, the gates' ksim-ctl output) for K and OPc of
+each card, derived from the run's throwaway range master, and for the whole
+chain of every authentication the run's Uu capture shows:
+
+    tools/secret_canary.py --run-dir <run> --master <file> --block <first IMSI>/<n>
 """
 
 from __future__ import annotations
@@ -92,10 +99,107 @@ def run(binary: Path, leak: str = "") -> tuple[list[str], list[str]]:
         return scan(Path(td)), files
 
 
+def run_dir_secrets(run: Path, master: bytes, imsis: list[str], pci: int, arfcn: int) -> tuple[dict[str, bytes], int]:
+    """Every key a run used (P1 N8): K and OPc of each card from the range master
+    (sim-uicc.md section 8: the first 16 octets of HMAC-SHA-256(master, label ||
+    IMSI)), and for each AUTHENTICATION REQUEST in the run's Uu capture the
+    whole chain from its RAND and AUTN (SQN = SQN^AK ^ AK), with K_gNB for the
+    first uplink NAS COUNTs. Returns the keys and the challenges seen."""
+    import hashlib
+    import hmac as hmac_
+    from ksimoracle import pcap
+    out: dict[str, bytes] = {}
+    keys = {}
+    for imsi in imsis:
+        k = hmac_.new(master, b"K" + imsi.encode(), hashlib.sha256).digest()[:16]
+        opc = hmac_.new(master, b"OPc" + imsi.encode(), hashlib.sha256).digest()[:16]
+        keys[imsi] = (k, opc)
+        out[f"K {imsi}"] = k
+        out[f"OPc {imsi}"] = opc
+    challenges = 0
+    uu = run / "uu.pcapng"
+    records = pcap.read_pcapng_exported(uu.read_bytes()) if uu.is_file() else []
+    for _, name, pdu, comment in records:
+        # A plain AUTHENTICATION REQUEST (TS 24.501 8.2.1): EPD, SHT, type 0x56,
+        # ngKSI, ABBA (LV), then RAND (TV 0x21) and AUTN (TLV 0x20).
+        if name != "nas-5gs" or len(pdu) < 6 or pdu[0] != 0x7E or pdu[1] != 0x00 or pdu[2] != 0x56:
+            continue
+        supi = comment.split(" ")[0].removeprefix("imsi-")
+        if supi not in keys:
+            continue
+        abba_len = pdu[4]
+        abba = pdu[5:5 + abba_len]
+        pos, rand, autn = 5 + abba_len, None, None
+        while pos < len(pdu):
+            iei = pdu[pos]
+            if iei == 0x21:
+                rand = pdu[pos + 1:pos + 17]
+                pos += 17
+            elif iei == 0x20:
+                ln = pdu[pos + 1]
+                autn = pdu[pos + 2:pos + 2 + ln]
+                pos += 2 + ln
+            else:
+                break
+        if rand is None or autn is None or len(autn) != 16:
+            continue
+        challenges += 1
+        k, opc = keys[supi]
+        ak = keychain.milenage(k, opc, rand, bytes(6), bytes(2))["ak"]
+        sqn = bytes(a ^ b for a, b in zip(autn[:6], ak))
+        for count in range(4):
+            vals = keychain.chain(k, opc, rand, sqn, autn[6:8], supi[:3], supi[3:5], supi, abba, count, pci, arfcn)
+            named = dict(zip(keychain.FIELDS, vals))
+            for f in SECRET_FIELDS:
+                out[f"{f} {supi} #{challenges}/{count}"] = bytes.fromhex(named[f])
+    return out, challenges
+
+
+def scan_tree(root: Path, secret: dict[str, bytes]) -> tuple[list[str], int]:
+    hits, files = [], 0
+    for f in sorted(root.rglob("*")):
+        if f.is_symlink() or not f.is_file():
+            continue
+        files += 1
+        data = f.read_bytes()
+        for name, v in secret.items():
+            for form, needle in forms(name, v):
+                if needle and needle in data:
+                    hits.append(f"{f.relative_to(root)}: {name.split(' ')[0]} as {form}")
+    return hits, files
+
+
+def main_run_dir(a) -> int:
+    master = Path(a.master).read_bytes()
+    first, _, count = a.block.partition("/")
+    imsis = [f"{int(first) + i:015d}" for i in range(int(count or "1"))]
+    secret, challenges = run_dir_secrets(Path(a.run_dir), master, imsis, a.pci, a.arfcn)
+    hits, files = scan_tree(Path(a.run_dir), secret)
+    for h in sorted(set(hits)):
+        print(f"CANARY_HIT {h}")
+    # Must-fail: the same scan finds a K written into a file in clear hex.
+    k0 = secret[f"K {imsis[0]}"]
+    caught = any(needle in (b"x" + k0.hex().encode() + b"x") for _, needle in forms("K", k0))
+    print(f"CANARY_MUSTFAIL {'CAUGHT' if caught else 'MISSED'} K as hex in a file")
+    ok = not hits and caught and challenges > 0
+    print(f"CANARY_RUN={'PASS' if ok else 'FAIL'} keys={len(secret)} challenges={challenges} files={files} "
+          f"hits={len(set(hits))}")
+    return 0 if ok else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--binary", default=str(ROOT / "build" / "dev" / "tests" / "canary" / "ksim_canary"))
+    ap.add_argument("--run-dir", help="scan a ksim run directory instead (P1 N8)")
+    ap.add_argument("--master", help="with --run-dir: the run's range master file")
+    ap.add_argument("--block", help="with --run-dir: <first IMSI>/<count> of the run's cards")
+    ap.add_argument("--pci", type=int, default=101)
+    ap.add_argument("--arfcn", type=int, default=632628)
     a = ap.parse_args()
+    if a.run_dir:
+        if not a.master or not a.block:
+            ap.error("--run-dir needs --master and --block")
+        return main_run_dir(a)
     binary = Path(a.binary)
     if not binary.is_file():
         print(f"CANARY=SKIP (no {binary}; build the dev preset)")

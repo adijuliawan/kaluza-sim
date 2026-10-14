@@ -209,6 +209,9 @@ void Mm::start_registration() {
                   {"identity", guti_ ? "5g-guti" : "suci"},
                   {"attempt", str(attempts_ + 1)}});
     set_state(MmState::registered_initiated, "registration request");
+    if (cfg_.tap) {
+        cfg_.tap(true, *wire);
+    }
     send_wire(std::move(*wire));
     start(MmTimer::t3510, cfg_.timers.t3510);
 }
@@ -638,6 +641,9 @@ void Mm::on_security_mode_command(ByteView wire) {
         events_.emit("nas.sec.discard", cfg_.id, {{"message", "SECURITY MODE COMMAND"}, {"verdict", verdict_name(in.verdict)}});
         return;
     }
+    if (cfg_.tap) {
+        cfg_.tap(false, in.plain);
+    }
     if (!(*caps == cfg_.security)) {
         reject_security_mode(kCapabilitiesMismatch);
         return;
@@ -674,6 +680,9 @@ void Mm::on_security_mode_command(ByteView wire) {
         return;
     }
     kgnb_count_ = ctx_->ul_count();   // the SECURITY MODE COMPLETE's COUNT (TS 33.501 6.8.1.2.2)
+    if (cfg_.tap) {
+        cfg_.tap(true, *plain);
+    }
     auto out = ctx_->protect(*plain, Sht::integrity_ciphered_new);
     if (!out) {
         return;
@@ -741,6 +750,9 @@ void Mm::on_nas(ByteView wire) {
             }
             return;
         }
+        if (cfg_.tap) {
+            cfg_.tap(false, wire);
+        }
         if (!processed_unprotected(*m, ctx_.has_value())) {
             events_.emit("nas.sec.discard", cfg_.id,
                          {{"message", m->desc != nullptr ? m->desc->name : "?"}, {"verdict", "unprotected"}});
@@ -757,6 +769,9 @@ void Mm::on_nas(ByteView wire) {
     if (in.verdict != Verdict::ok) {
         events_.emit("nas.sec.discard", cfg_.id, {{"message", "?"}, {"verdict", verdict_name(in.verdict)}});
         return;
+    }
+    if (cfg_.tap) {
+        cfg_.tap(false, in.plain);
     }
     auto m = nas::decode(in.plain);
     if (!m) {
@@ -831,6 +846,9 @@ void Mm::send(const nas::Message& m) {
     auto plain = nas::encode(m);
     if (!plain) {
         return;
+    }
+    if (cfg_.tap) {
+        cfg_.tap(true, *plain);
     }
     if (!ctx_) {
         send_wire(std::move(*plain));

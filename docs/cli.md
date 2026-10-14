@@ -4,6 +4,16 @@
 - It keeps **nr-cli's verbs and its `<node> --exec '<cmd>'` form**, so moving a gate off UERANSIM changes the binary and the node name, not the logic.
 - New commands cover the device, the SIM, radio and mobility, the data plane, events and the RAN nodes.
 
+**As built in P1 N8 (v0):**
+- **Verbs:**
+  - `nodes`, `info`, `version`, `capabilities`, `faults list`, `ues`, `stop`;
+  - `ue <sel> status|power on|power off --switch-off|register|deregister normal|switch-off|wait|events`;
+  - `wait`, `events`;
+  - `gnb <name> ue-list|amf-list`.
+- **The run:** `--run D`, else `$KSIM_RUN`, else `$KSIM_RUNS/latest` (`runs/latest`); `--socket S` reaches any control socket, e.g. `ksim-corestub`'s, with `stub`.
+- **Unbuilt verbs** answer exit 5 and name the milestone that brings them. The `--exec` form and `--format=nrcli` come with N16.
+- **Routes:** in [`src/api/openapi.yaml`](../src/api/openapi.yaml).
+
 ## 1. Forms
 
 ```

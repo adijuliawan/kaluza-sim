@@ -30,6 +30,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -71,6 +72,9 @@ struct MmConfig {
     std::string imeisv;                            // 16 digits
     bool follow_on_request = false;
     MmTimerValues timers;
+    /// Each 5GMM message in clear, as sent before protection and as taken
+    /// after its integrity check and deciphering, for the run's Uu capture.
+    std::function<void(bool uplink, ByteView plain)> tap;
 };
 
 class Mm {

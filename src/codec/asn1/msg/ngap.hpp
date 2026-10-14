@@ -269,4 +269,15 @@ Result<Header> peek(ByteView in);
 /// Errc::malformed for one P1 reads that lacks an IE it needs.
 Result<Pdu> decode(ByteView in);
 
+/// Any NGAP PDU with its key material zeroed, for captures (P1 N8): every
+/// Security Key (TS 38.413 9.3.1.87) and Next Hop NH (9.3.1.88, in a Security
+/// Context) anywhere in the PDU, found by walking the decoded value and
+/// re-encoded. `keys` counts the values zeroed. A PDU that does not decode is
+/// an error: the caller drops it from the capture.
+struct Redacted {
+    Bytes pdu;
+    unsigned keys = 0;
+};
+Result<Redacted> redact_keys(ByteView in);
+
 } // namespace ksim::ngap

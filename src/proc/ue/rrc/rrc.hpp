@@ -33,6 +33,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "codec/air/kair.hpp"
@@ -60,6 +61,10 @@ struct RrcConfig {
     bool allow_null_integrity = false;      // D1: NIA0 only as the bisect switch
     Millis t300_default = 1000;             // until SIB1 gives T300
     std::optional<Bytes> nr_capability;     // the persona's UE-NR-Capability; a generic one if absent
+    /// Each RRC message in clear as the UE sends or takes it, with Wireshark's
+    /// channel name ("nr-rrc.ul.dcch", …) for the run's Uu capture. Broadcast
+    /// is reported when it makes the UE camp, not at every period.
+    std::function<void(std::string_view channel, ByteView pdu)> tap;
 };
 
 /// The NAS and the user plane above RRC, as the UE node wires them.

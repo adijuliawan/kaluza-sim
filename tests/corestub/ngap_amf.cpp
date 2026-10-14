@@ -131,7 +131,10 @@ void NgapAmf::release(std::size_t n, ngap::Cause cause) {
 
 void NgapAmf::attach_nas(Ue& ue) {
     const std::uint64_t id = ue.amf_ue;
-    ue.nas = std::make_unique<Amf>(ex_, home_, plmn_, p_);
+    // One 5G-TMSI per UE: the profile's, then the next ones in arrival order.
+    Profile p = p_;
+    p.tmsi = p_.tmsi + static_cast<std::uint32_t>(order_.size() - 1);
+    ue.nas = std::make_unique<Amf>(ex_, home_, plmn_, std::move(p));
     Amf::Link link;
     link.to_ue = [this, id](Bytes nas) {
         if (Ue* u = by_amf(id)) {

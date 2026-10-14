@@ -12,7 +12,10 @@ namespace ksim::proc::ue {
 
 namespace {
 
-constexpr std::uint8_t kBearer3gpp = 0;   // the NAS connection identifier for 3GPP access (TS 33.501 §6.4.3.1)
+// The BEARER input is the NAS connection identifier (TS 33.501 §6.4.3.1, §6.4.4.1),
+// 0x01 for 3GPP access and 0x02 for non-3GPP access (§6.4.2.1). It was 0 until
+// P1 N8, which the core stub shared; the Open5GS control found it (KS-SEC-D2).
+constexpr std::uint8_t kBearer3gpp = 1;
 constexpr std::uint8_t kUplink = 0;
 constexpr std::uint8_t kDownlink = 1;
 

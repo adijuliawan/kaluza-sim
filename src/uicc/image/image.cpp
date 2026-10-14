@@ -378,6 +378,15 @@ Result<Bytes> encode_msisdn_record(std::string_view d, std::size_t record_len) {
     return rec;
 }
 
+Result<Subscriber> range_subscriber(std::string_view imsi) {
+    const bool digits = imsi.size() == 15 && std::all_of(imsi.begin(), imsi.end(), [](char c) { return c >= '0' && c <= '9'; });
+    if (!digits || (imsi.substr(0, 12) != "001010000300" && imsi.substr(0, 12) != "999700000300")) {
+        return make_error(Errc::invalid_argument, 0, "not an IMSI of the sim ranges (sim-uicc.md section 8)");
+    }
+    const std::string msin(imsi.substr(5));
+    return Subscriber{std::string(imsi), "898821100" + msin, "999" + msin.substr(2), 2};
+}
+
 Result<void> personalise(os::Card& card, const Subscriber& sub) {
     os::File* adf = usim_adf(card);
     if (adf == nullptr) {

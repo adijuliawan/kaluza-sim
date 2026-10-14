@@ -7,7 +7,9 @@
 // pure-Python reading of TS 33.501 Annex A) for K 000102…0f, OPc f0e0…00,
 // RAND 0011…ff, SQN 000000000021, AMF 8000, SUPI 001010000300001; the MACs
 // (AES-CMAC, 128-NIA2) and ciphertexts (AES-CTR, 128-NEA2) by the Python
-// `cryptography` package, with BEARER 0 and DIRECTION 0 up, 1 down.
+// `cryptography` package, with BEARER 1 (the NAS connection identifier of
+// 3GPP access, TS 33.501 §6.4.2.1) and DIRECTION 0 up, 1 down. Until P1 N8
+// they were made with BEARER 0, the same misreading as the code's (KS-SEC-D2).
 
 #include <gtest/gtest.h>
 
@@ -31,18 +33,18 @@ TEST(NasSecurity, Clause4_4_3_TheSecurityModeCompleteMatchesTheIndependentVector
     auto c = ctx();
     auto wire = c.protect(h("7e005e"), Sht::integrity_ciphered_new);
     ASSERT_TRUE(wire);
-    EXPECT_EQ(to_hex(*wire), "7e040164765100d724fe");
+    EXPECT_EQ(to_hex(*wire), "7e04139c9efc0003f9b4");
     EXPECT_EQ(c.ul_count(), 1u);
 }
 
 TEST(NasSecurity, Clause4_4_3_ACommandAndACipheredMessageVerifyAndDecipher) {
     auto c = ctx();
-    auto smc = c.unprotect(h("7e03d711f0f3007e005d2201028080e1"));
+    auto smc = c.unprotect(h("7e03d0955c87007e005d2201028080e1"));
     ASSERT_EQ(smc.verdict, Verdict::ok) << verdict_name(smc.verdict);
     EXPECT_EQ(smc.sht, Sht::integrity_new);
     EXPECT_EQ(to_hex(smc.plain), "7e005d2201028080e1");
     EXPECT_EQ(c.dl_count(), 0u);
-    auto dl = c.unprotect(h("7e029da9efe70129e873d58806b429697f018bae3fad98340e"));
+    auto dl = c.unprotect(h("7e02423e7f1401d95fc9d524372b47c3128490eb702fac4134"));
     ASSERT_EQ(dl.verdict, Verdict::ok) << verdict_name(dl.verdict);
     EXPECT_EQ(to_hex(dl.plain), "7e00680112000f2e0101c1ffff91a1280100");
     EXPECT_EQ(c.dl_count(), 1u);
@@ -50,21 +52,21 @@ TEST(NasSecurity, Clause4_4_3_ACommandAndACipheredMessageVerifyAndDecipher) {
 
 TEST(NasSecurity, Clause4_4_3_2_AReplayIsDiscardedAndChangesNothing) {
     auto c = ctx();
-    const Bytes smc = h("7e03d711f0f3007e005d2201028080e1");
+    const Bytes smc = h("7e03d0955c87007e005d2201028080e1");
     ASSERT_EQ(c.unprotect(smc).verdict, Verdict::ok);
     EXPECT_EQ(c.unprotect(smc).verdict, Verdict::discard_mac);   // COUNT 0 again: estimated as 256, MAC fails
     EXPECT_EQ(c.dl_count(), 0u);
-    Bytes tampered = h("7e029da9efe70129e873d58806b429697f018bae3fad98340e");
+    Bytes tampered = h("7e02423e7f1401d95fc9d524372b47c3128490eb702fac4134");
     tampered[10] ^= 0x01;
     EXPECT_EQ(c.unprotect(tampered).verdict, Verdict::discard_mac);
-    EXPECT_EQ(c.unprotect(h("7e029da9efe70129e873d58806b429697f018bae3fad98340e")).verdict, Verdict::ok);
+    EXPECT_EQ(c.unprotect(h("7e02423e7f1401d95fc9d524372b47c3128490eb702fac4134")).verdict, Verdict::ok);
     EXPECT_EQ(c.unprotect(h("7e02")).verdict, Verdict::discard_malformed);
 }
 
 TEST(NasSecurity, Clause4_4_3_1_TheOverflowCounterIsEstimatedPastAWrap) {
     auto c = ctx();
     c.restore_counts(0, 0xFF);   // the last verified downlink COUNT: overflow 0, SQN 255
-    auto m = c.unprotect(h("7e0139687c9f017e005d2201028080e1"));   // SQN 1: COUNT 257
+    auto m = c.unprotect(h("7e0186ef7990017e005d2201028080e1"));   // SQN 1: COUNT 257
     ASSERT_EQ(m.verdict, Verdict::ok);
     EXPECT_EQ(m.count, 257u);
     EXPECT_EQ(c.dl_count(), 257u);

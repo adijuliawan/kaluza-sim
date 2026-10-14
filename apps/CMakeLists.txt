@@ -4,4 +4,8 @@
 add_subdirectory(ksim-selftest)
 if(KSIM_ASN1)
     add_subdirectory(ksim-codec)
+    add_subdirectory(ksim)
+    add_subdirectory(ksim-ctl)
+    add_subdirectory(ksim-corestub)
 endif()
+add_subdirectory(ksim-sim)

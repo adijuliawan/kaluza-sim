@@ -566,7 +566,10 @@ void Amf::on_deregistration_request(const nas::Message& m) {
     const bool was_secure = ctx_.has_value() && state_ == State::registered;
     state_ = State::idle;
     if (dt->switch_off) {
-        return;   // §5.5.2.2.2: no accept for a switch-off
+        // §5.5.2.2.2: no accept for a switch-off; the AMF still releases the
+        // UE's N2 context (TS 23.502 4.2.2.3.2 step 8).
+        release();
+        return;
     }
     if (p_.deregistration == Profile::Deregistration::silent) {
         return;

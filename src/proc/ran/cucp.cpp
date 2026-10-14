@@ -370,11 +370,34 @@ void CuCp::on_ngap(ByteView msg) {
 
 void CuCp::handle(const ngap::NgSetupResponse& m) {
     ng_ready_ = true;
+    amf_name_ = m.amf_name;
     if (ng_retry_) {
         ex_.stop_timer(*ng_retry_);
         ng_retry_.reset();
     }
     events_.emit("ran.ng.setup", cfg_.id, {{"amf", m.amf_name}, {"capacity", str(m.capacity)}});
+}
+
+const char* CuCp::phase_name(Phase p) noexcept {
+    switch (p) {
+    case Phase::setup: return "setup";
+    case Phase::connected: return "connected";
+    case Phase::securing: return "securing";
+    case Phase::capability: return "capability";
+    case Phase::reconfiguring: return "reconfiguring";
+    case Phase::active: return "active";
+    case Phase::releasing: return "releasing";
+    }
+    return "?";
+}
+
+std::vector<CuCpUeView> CuCp::ue_list() const {
+    std::vector<CuCpUeView> out;
+    out.reserve(ues_.size());
+    for (const auto& [id, ue] : ues_) {
+        out.push_back(CuCpUeView{ue.ran_ue, ue.amf_ue, ue.c_rnti, phase_name(ue.phase)});
+    }
+    return out;
 }
 
 void CuCp::handle(const ngap::NgSetupFailure& m) {

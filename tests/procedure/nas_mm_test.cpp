@@ -301,7 +301,10 @@ TEST(Mm, Clause5_5_2_2_ASwitchOffAwaitsNoAccept) {
     r.loop.run_for(5'000);
     EXPECT_EQ(r.amf.count_uplink("DEREGISTRATION REQUEST"), 1u);
     EXPECT_EQ(field(r.named("nas.dereg.sent").at(0), "switch_off"), "1");
-    EXPECT_EQ(r.link.network_releases, 0);   // the stub sent nothing back
+    // No DEREGISTRATION ACCEPT; the network still releases the N2 context
+    // (TS 23.502 4.2.2.3.2 step 8), which reaches a UE already off.
+    EXPECT_EQ(r.named("nas.dereg.accept").size(), 0u);
+    EXPECT_EQ(r.link.network_releases, 1);
     EXPECT_EQ(r.failures(), "");
 }
 

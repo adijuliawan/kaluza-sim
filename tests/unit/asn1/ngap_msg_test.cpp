@@ -9,6 +9,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <fstream>
 #include <set>
@@ -29,6 +30,30 @@ TEST(NgapMsg, EveryBuilderRoundTrips) {
         auto h = peek(*wire);
         ASSERT_TRUE(h) << s.name;
     }
+}
+
+TEST(NgapMsg, RedactionZeroesTheSecurityKeyAndKeepsTheRest) {
+    for (const auto& s : samples::all()) {
+        auto wire = encode(s.pdu);
+        ASSERT_TRUE(wire) << s.name;
+        auto r = redact_keys(*wire);
+        ASSERT_TRUE(r) << s.name << ": " << r.error().what;
+        auto back = decode(r->pdu);
+        ASSERT_TRUE(back) << s.name;
+        if (const auto* ics = std::get_if<InitialContextSetupRequest>(&s.pdu)) {
+            EXPECT_EQ(r->keys, 1u);
+            auto want = *ics;
+            want.security_key = Bytes(32, 0);
+            EXPECT_EQ(*back, Pdu{want});
+            // The placeholder key's octets appear nowhere in the redacted PDU.
+            const Bytes a5(4, 0xA5);
+            EXPECT_EQ(std::search(r->pdu.begin(), r->pdu.end(), a5.begin(), a5.end()), r->pdu.end());
+        } else {
+            EXPECT_EQ(r->keys, 0u) << s.name;
+            EXPECT_EQ(r->pdu, *wire) << s.name;
+        }
+    }
+    EXPECT_FALSE(redact_keys(*from_hex("ff00ff")));
 }
 
 TEST(NgapMsg, PeekReadsTheProcedureAndTheUeIds) {

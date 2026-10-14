@@ -50,7 +50,9 @@ struct DuConfig {
     std::string name = "ksim-du1";
     std::uint32_t cell_handle = 1;     // the cell's KAIR handle
     rrc::Plmn plmn{"001", "01"};
-    std::uint64_t nci = 0x1A0000001;   // NR cell identity: the gNB ID 0x1A0 (22 bits), cell 1
+    // NR cell identity (36 bits, TS 38.300 8.2): the gNB ID 0x1A0 in the leftmost
+    // 22 bits, then local cell 1.
+    std::uint64_t nci = (std::uint64_t{0x1A0} << 14) | 1U;
     std::uint16_t pci = 101;
     std::uint32_t tac = 1;
     std::uint32_t arfcn = 632628;      // n78, 3489.42 MHz

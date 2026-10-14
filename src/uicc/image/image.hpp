@@ -43,6 +43,11 @@ struct Subscriber {
     unsigned mnc_digits = 2;
 };
 
+/// The identity of a sim-range card (sim-uicc.md §8; P1 N8): the IMSI, ICCID
+/// 8988211 00 ‖ MSIN, MSISDN 999 ‖ the MSIN's last eight digits, two MNC digits.
+/// Errc::invalid_argument outside the 001/01 and 999/70 sim ranges.
+Result<Subscriber> range_subscriber(std::string_view imsi);
+
 /// Writes a subscriber's identity into a card built from a template: EF.IMSI,
 /// EF.ICCID, EF.ACC, the MNC length in EF.AD, and EF.MSISDN.
 Result<void> personalise(os::Card& card, const Subscriber& sub);

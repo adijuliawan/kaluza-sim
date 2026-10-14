@@ -78,6 +78,14 @@ struct CuCpStats {
     std::uint64_t ics_failed = 0;
 };
 
+/// A RAN UE context as ksim-ctl's ue-list shows it (cli.md §4).
+struct CuCpUeView {
+    std::uint32_t ran_ue = 0;
+    std::optional<std::uint64_t> amf_ue;
+    std::uint16_t c_rnti = 0;
+    const char* phase = "";
+};
+
 class CuCp {
 public:
     CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1);
@@ -89,12 +97,16 @@ public:
     bool f1_ready() const noexcept { return du_.has_value(); }
     std::size_t ues() const noexcept { return ues_.size(); }
     const CuCpStats& stats() const noexcept { return stats_; }
+    std::vector<CuCpUeView> ue_list() const;
+    /// The AMF Name of the last NG SETUP RESPONSE, "" before one.
+    const std::string& amf_name() const noexcept { return amf_name_; }
 
     /// For tests and fuzzing: an NG-C message as if it came from the AMF.
     void on_ngap(ByteView msg);
 
 private:
     enum class Phase : std::uint8_t { setup, connected, securing, capability, reconfiguring, active, releasing };
+    static const char* phase_name(Phase p) noexcept;
 
     struct Ue {
         std::uint32_t cu_ue = 0;
@@ -172,6 +184,7 @@ private:
     std::shared_ptr<bool> alive_;
 
     bool ng_ready_ = false;
+    std::string amf_name_;
     std::optional<TimerId> ng_retry_;
     struct DuInfo {
         std::uint64_t du_id = 0;

@@ -1,0 +1,440 @@
+// SPDX-FileCopyrightText: 2026 Adi Juliawan
+// SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+//
+// ksim-sim: the offline card lifecycle (P1 N8 part; architecture §2.1,
+// sim-uicc.md §8, ADR 0010).
+//
+//   ksim-sim range init --master <file> --kek <file>
+//       creates whichever of the two key files is missing: 32 random octets, 0600
+//   ksim-sim range derive --block <first IMSI>/<count> --master <file> --kek <file> --out <dir> [--force]
+//       writes <dir>/imsi-<IMSI>.sec: the card's secrets (K, OPc, PINs, ADM1)
+//       from the master, sealed under the KEK; prints BATCH_SALT, then one
+//       IMSI= K_FPR= line per card, never a key
+//   ksim-sim range provision --target open5gs --block <…> --master <file> --ssh <host>
+//            [--db-config <remote yaml>] [--sst 1] [--sd 000001] [--dnn internet] [--replace]
+//   ksim-sim range deprovision --target open5gs --block <…> --ssh <host> [--db-config <remote yaml>]
+//       the block into or out of the Open5GS fork's PostgreSQL on the rig
+//       (ADR 0010 point 2): one ogs_subscriber_upsert() per subscriber, the
+//       fork's own write path. The documents travel in a COPY data block on
+//       ssh's stdin, so K and OPc are in no argv, no statement text a server
+//       log could keep, no file; the database credentials are read on the rig
+//       from the NFs' db_uri into PG* variables, never a command line.
+//
+// Keys exist only in memory and in sealed files. A clear list of keys never
+// exists, and nothing here prints one (requirements §3.6).
+
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <CLI/CLI.hpp>
+
+#include <cstdio>
+#include <exception>
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cerrno>
+#include <span>
+#include <filesystem>
+#include <iostream>
+#include <regex>
+#include <sstream>
+#include <vector>
+
+#include "crypto/aead.hpp"
+#include "platform/secret.hpp"
+#include "uicc/image/image.hpp"
+#include "uicc/secrets/secrets.hpp"
+
+extern char** environ;   // NOLINT: posix_spawnp passes our environment on
+
+namespace {
+
+namespace secrets = ksim::uicc::secrets;
+
+struct Block {
+    std::string first;
+    unsigned count = 0;
+};
+
+std::string imsi_at(const std::string& first, unsigned i) {
+    std::string s = std::to_string(std::stoull(first) + i);
+    return std::string(15 - s.size(), '0') + s;
+}
+
+bool parse_block(const std::string& s, Block& b) {
+    const auto slash = s.find('/');
+    b.first = s.substr(0, slash);
+    const std::string n = slash == std::string::npos ? "1" : s.substr(slash + 1);
+    if (n.empty() || n.size() > 4 || n.find_first_not_of("0123456789") != std::string::npos ||
+        !ksim::uicc::image::range_subscriber(b.first)) {
+        return false;
+    }
+    b.count = static_cast<unsigned>(std::stoul(n));
+    // Both ends inside the same sim range.
+    return b.count >= 1 && b.count <= 1000 && ksim::uicc::image::range_subscriber(imsi_at(b.first, b.count - 1)) &&
+           imsi_at(b.first, b.count - 1).substr(0, 12) == b.first.substr(0, 12);
+}
+
+int init(const std::string& master, const std::string& kek) {
+    int created = 0;
+    for (const auto& path : {master, kek}) {
+        if (std::filesystem::exists(path)) {
+            std::cout << "KEPT=" << path << "\n";
+            continue;
+        }
+        const auto dir = std::filesystem::path(path).parent_path();
+        if (!dir.empty() && !std::filesystem::exists(dir)) {
+            std::filesystem::create_directories(dir);
+            std::filesystem::permissions(dir, std::filesystem::perms::owner_all);
+        }
+        if (auto r = secrets::create_key_file(path); !r) {
+            std::cerr << "ksim-sim: " << path << ": " << r.error().what << "\n";
+            return 1;
+        }
+        std::cout << "CREATED=" << path << "\n";
+        ++created;
+    }
+    std::cout << "CREATED_FILES=" << created << "\n";
+    return 0;
+}
+
+int derive(const Block& b, const std::string& master_file, const std::string& kek_file, const std::string& out, bool force) {
+    auto master = secrets::load_kek(master_file);
+    if (!master) {
+        std::cerr << "ksim-sim: the range master: " << master.error().what << "\n";
+        return 1;
+    }
+    auto kek = secrets::load_kek(kek_file);
+    if (!kek) {
+        std::cerr << "ksim-sim: the KEK: " << kek.error().what << "\n";
+        return 1;
+    }
+    if (!std::filesystem::exists(out)) {
+        std::filesystem::create_directories(out);
+    }
+    std::filesystem::permissions(out, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+    auto salt = ksim::crypto::aead::random_bytes(16);
+    if (!salt) {
+        std::cerr << "ksim-sim: no random source\n";
+        return 1;
+    }
+    std::cout << "BATCH_SALT=" << ksim::to_hex(*salt) << "\n";
+    for (unsigned i = 0; i < b.count; ++i) {
+        const std::string imsi = imsi_at(b.first, i);
+        const secrets::SecretMap m = secrets::card_secrets(*master, imsi);
+        auto sealed = secrets::seal(*kek, m);
+        if (!sealed) {
+            std::cerr << "ksim-sim: imsi-" << imsi << ": " << sealed.error().what << "\n";
+            return 1;
+        }
+        std::string path = out;
+        path += "/imsi-";
+        path += imsi;
+        path += ".sec";
+        const int flags = O_WRONLY | O_CREAT | O_CLOEXEC | (force ? O_TRUNC : O_EXCL);
+        const int fd = ::open(path.c_str(), flags, 0600);
+        if (fd < 0) {
+            std::cerr << "ksim-sim: " << path << ": cannot create (exists? --force)\n";
+            return 1;
+        }
+        const ssize_t n = ::write(fd, sealed->data(), sealed->size());
+        ::fchmod(fd, 0600);
+        ::close(fd);
+        if (n != static_cast<ssize_t>(sealed->size())) {
+            std::cerr << "ksim-sim: " << path << ": short write\n";
+            return 1;
+        }
+        std::cout << "IMSI=" << imsi << " K_FPR=" << secrets::key_fingerprint(*salt, *m.get("k")) << "\n";
+    }
+    std::cout << "DERIVED=" << b.count << "\n";
+    return 0;
+}
+
+// ---- Open5GS (ADR 0010 point 2) --------------------------------------------------------------
+
+void wipe(std::string& s) noexcept {
+    ksim::secure_zero(std::span<std::uint8_t>(reinterpret_cast<std::uint8_t*>(s.data()), s.size()));   // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
+    s.clear();
+}
+
+/// Runs argv with `input` on its stdin and returns its exit status; its
+/// stdout lines go to `out`. stderr passes through.
+int run_with_stdin(const std::vector<std::string>& argv, std::string& input, std::vector<std::string>& out) {
+    int in[2];
+    int outp[2];
+    if (::pipe2(in, O_CLOEXEC) != 0 || ::pipe2(outp, O_CLOEXEC) != 0) {
+        return -1;
+    }
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, in[0], 0);
+    posix_spawn_file_actions_adddup2(&fa, outp[1], 1);
+    std::vector<char*> args;
+    args.reserve(argv.size() + 1);
+    for (const auto& a : argv) {
+        args.push_back(const_cast<char*>(a.c_str()));   // NOLINT(cppcoreguidelines-pro-type-const-cast): posix_spawn's signature
+    }
+    args.push_back(nullptr);
+    pid_t pid = 0;
+    const int rc = posix_spawnp(&pid, args[0], &fa, nullptr, args.data(), environ);
+    posix_spawn_file_actions_destroy(&fa);
+    ::close(in[0]);
+    ::close(outp[1]);
+    if (rc != 0) {
+        ::close(in[1]);
+        ::close(outp[0]);
+        wipe(input);
+        return -1;
+    }
+    std::size_t done = 0;
+    while (done < input.size()) {
+        const ssize_t n = ::write(in[1], input.data() + done, input.size() - done);
+        if (n <= 0) {
+            break;
+        }
+        done += static_cast<std::size_t>(n);
+    }
+    wipe(input);
+    ::close(in[1]);
+    std::string text;
+    std::array<char, 4096> buf{};
+    for (;;) {
+        const ssize_t n = ::read(outp[0], buf.data(), buf.size());
+        if (n <= 0) {
+            break;
+        }
+        text.append(buf.data(), static_cast<std::size_t>(n));
+    }
+    ::close(outp[0]);
+    int status = 0;
+    ::waitpid(pid, &status, 0);
+    std::istringstream lines(text);
+    for (std::string l; std::getline(lines, l);) {
+        if (!l.empty()) {
+            out.push_back(l);
+        }
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+/// The command the rig runs: psql on the NFs' database, its credentials taken
+/// from `cfg`'s db_uri into the environment. No secret is in this text.
+std::string remote_psql(const std::string& cfg) {
+    std::string s = "set -eu\ncfg=";
+    s += cfg;
+    s += "\n"
+           "uri=$(sed -n 's/^[[:space:]]*db_uri:[[:space:]]*//p' \"$cfg\" | head -n 1)\n"
+           "case \"$uri\" in postgresql://*@*/*) ;; *) echo 'ksim-sim: no postgresql db_uri in the config' >&2; exit 3 ;; esac\n"
+           "rest=${uri#postgresql://}; cred=${rest%%@*}; hostdb=${rest#*@}; hp=${hostdb%%/*}\n"
+           "PGUSER=${cred%%:*}; PGPASSWORD=${cred#*:}; PGDATABASE=${hostdb#*/}\n"
+           "case \"$hp\" in *:*) PGHOST=${hp%%:*}; PGPORT=${hp#*:} ;; *) PGHOST=$hp; PGPORT=5432 ;; esac\n"
+           "export PGUSER PGPASSWORD PGHOST PGPORT PGDATABASE\n"
+           "exec psql -X -q -A -t -v ON_ERROR_STOP=1 -v VERBOSITY=terse\n";
+    return s;
+}
+
+struct Rig {
+    std::string ssh;
+    std::string cfg;
+};
+
+int psql(const Rig& rig, std::string& sql, std::vector<std::string>& out) {
+    const std::vector<std::string> argv{"ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", rig.ssh, remote_psql(rig.cfg)};
+    return run_with_stdin(argv, sql, out);
+}
+
+std::string imsi_list(const Block& b) {
+    std::string s;
+    for (unsigned i = 0; i < b.count; ++i) {
+        s += (i ? ",'" : "'") + imsi_at(b.first, i) + "'";
+    }
+    return s;
+}
+
+/// The fork's subscriber document (misc/db/open5gs-dbctl-pgsql subscriber_doc
+/// at 741c29d8d: Milenage with OPc, AMF 8000, one slice, one session, 1 Gbps).
+nlohmann::json subscriber_doc(const std::string& imsi, unsigned sst, const std::string& sd, const std::string& dnn) {
+    using nlohmann::json;
+    const json ambr = {{"downlink", {{"value", 1000000000}, {"unit", 0}}}, {"uplink", {{"value", 1000000000}, {"unit", 0}}}};
+    json session = {{"name", dnn},
+                    {"type", 3},
+                    {"qos", {{"index", 9}, {"arp", {{"priority_level", 8}, {"pre_emption_capability", 1}, {"pre_emption_vulnerability", 2}}}}},
+                    {"ambr", ambr},
+                    {"pcc_rule", json::array()}};
+    json slice = {{"sst", sst}, {"default_indicator", true}, {"session", json::array({session})}};
+    if (!sd.empty()) {
+        slice["sd"] = sd;
+    }
+    return {{"imsi", imsi},
+            {"schema_version", 1},
+            {"slice", json::array({slice})},
+            {"ambr", ambr},
+            {"access_restriction_data", 32},
+            {"network_access_mode", 0},
+            {"subscribed_rau_tau_timer", 12},
+            {"__v", 0}};
+}
+
+int provision(const Block& b, const std::string& master_file, const Rig& rig, unsigned sst, const std::string& sd,
+              const std::string& dnn, bool replace) {
+    auto master = secrets::load_kek(master_file);
+    if (!master) {
+        std::cerr << "ksim-sim: the range master: " << master.error().what << "\n";
+        return 1;
+    }
+    // First the collision check: nothing in the block may exist unless --replace.
+    std::vector<std::string> out;
+    std::string check = "SELECT 'EXISTING=' || imsi FROM subscribers WHERE imsi IN (" + imsi_list(b) + ") ORDER BY imsi;\n";
+    if (psql(rig, check, out) != 0) {
+        std::cerr << "ksim-sim: the rig's database did not answer\n";
+        return 1;
+    }
+    for (const auto& l : out) {
+        std::cout << l << "\n";
+    }
+    if (!out.empty() && !replace) {
+        std::cerr << "ksim-sim: subscribers of the block exist already (--replace to overwrite them)\n";
+        return 1;
+    }
+    auto salt = ksim::crypto::aead::random_bytes(16);
+    if (!salt) {
+        return 1;
+    }
+    std::cout << "BATCH_SALT=" << ksim::to_hex(*salt) << "\n";
+    std::string sql = "BEGIN;\nCREATE TEMP TABLE ksim_sub (doc jsonb) ON COMMIT DROP;\nCOPY ksim_sub (doc) FROM STDIN;\n";
+    for (unsigned i = 0; i < b.count; ++i) {
+        const std::string imsi = imsi_at(b.first, i);
+        const auto k = secrets::derive(*master, "K", imsi);
+        const auto opc = secrets::derive(*master, "OPc", imsi);
+        nlohmann::json doc = subscriber_doc(imsi, sst, sd, dnn);
+        // auth_method 1, 5G AKA: without it the fork's UDR picks EAP-TTLS
+        // (src/udr/nudr-handler.c at 741c29d8d).
+        doc["security"] = {{"k", ksim::to_hex(k.expose())}, {"op", nullptr}, {"opc", ksim::to_hex(opc.expose())},
+                           {"amf", "8000"}, {"auth_method", 1}};
+        std::string line = doc.dump();   // no tab, backslash or newline: COPY text as is
+        doc["security"]["k"].get_ref<std::string&>().assign(32, '0');
+        doc["security"]["opc"].get_ref<std::string&>().assign(32, '0');
+        sql += line;
+        sql += '\n';
+        wipe(line);
+        std::cout << "IMSI=" << imsi << " K_FPR=" << secrets::key_fingerprint(*salt, k) << "\n";
+    }
+    sql += "\\.\nSELECT 'UPSERTED=' || count(ogs_subscriber_upsert(doc)) FROM ksim_sub;\nCOMMIT;\n"
+           "SELECT 'PRESENT=' || imsi FROM subscribers WHERE imsi IN (" + imsi_list(b) + ") ORDER BY imsi;\n";
+    out.clear();
+    const int rc = psql(rig, sql, out);   // wipes sql
+    unsigned present = 0;
+    for (const auto& l : out) {
+        if (l.rfind("UPSERTED=", 0) == 0 || l.rfind("PRESENT=", 0) == 0) {
+            std::cout << l << "\n";
+            present += l.rfind("PRESENT=", 0) == 0 ? 1U : 0U;
+        }
+    }
+    std::cout << "PROVISIONED=" << present << "/" << b.count << "\n";
+    return rc == 0 && present == b.count ? 0 : 1;
+}
+
+int deprovision(const Block& b, const Rig& rig) {
+    std::vector<std::string> out;
+    std::string sql = "WITH d AS (DELETE FROM subscribers WHERE imsi IN (" + imsi_list(b) +
+                      ") RETURNING imsi) SELECT 'DELETED=' || imsi FROM d ORDER BY imsi;\n"
+                      "SELECT 'REMAINING=' || count(*) FROM subscribers WHERE imsi IN (" + imsi_list(b) + ");\n";
+    const int rc = psql(rig, sql, out);
+    for (const auto& l : out) {
+        std::cout << l << "\n";
+    }
+    const bool none_left = std::find(out.begin(), out.end(), "REMAINING=0") != out.end();
+    return rc == 0 && none_left ? 0 : 1;
+}
+
+bool safe_remote_path(const std::string& p) {
+    static const std::regex ok("^(~/|/)[A-Za-z0-9_./-]+$");
+    return std::regex_match(p, ok) && p.find("..") == std::string::npos;
+}
+
+} // namespace
+
+static int run_main(int argc, char** argv) {
+    CLI::App app{"ksim-sim: sim-range cards and subscribers"};
+    app.require_subcommand(1);
+    auto* range = app.add_subcommand("range", "the sim ranges (sim-uicc.md section 8)");
+    range->require_subcommand(1);
+    std::string master;
+    std::string kek;
+    std::string block;
+    std::string out;
+    std::string target;
+    std::string ssh;
+    std::string db_config = "~/kaluza-sim-rig/etc/udr.yaml";
+    std::string sd;
+    std::string dnn = "internet";
+    unsigned sst = 1;
+    bool force = false;
+    bool replace = false;
+    auto* init_cmd = range->add_subcommand("init", "create the range master and the KEK if missing");
+    init_cmd->add_option("--master", master, "the range master file")->required();
+    init_cmd->add_option("--kek", kek, "the KEK file")->required();
+    auto* derive_cmd = range->add_subcommand("derive", "write sealed card secrets for a block");
+    derive_cmd->add_option("--block", block, "<first IMSI>/<count>")->required();
+    derive_cmd->add_option("--master", master, "the range master file")->required();
+    derive_cmd->add_option("--kek", kek, "the KEK file")->required();
+    derive_cmd->add_option("--out", out, "the sealed card directory")->required();
+    derive_cmd->add_flag("--force", force, "overwrite existing sealed files");
+    auto* prov_cmd = range->add_subcommand("provision", "put a block into a core");
+    auto* deprov_cmd = range->add_subcommand("deprovision", "remove a block from a core");
+    for (auto* c : {prov_cmd, deprov_cmd}) {
+        c->add_option("--target", target, "open5gs (kaluza: N9)")->required();
+        c->add_option("--block", block, "<first IMSI>/<count>")->required();
+        c->add_option("--ssh", ssh, "the rig's ssh host")->required();
+        c->add_option("--db-config", db_config, "the rig's NF config holding db_uri");
+    }
+    prov_cmd->add_option("--master", master, "the range master file")->required();
+    prov_cmd->add_option("--sst", sst, "the slice's SST");
+    prov_cmd->add_option("--sd", sd, "the slice's SD (6 hex digits)");
+    prov_cmd->add_option("--dnn", dnn, "the session's DNN");
+    prov_cmd->add_flag("--replace", replace, "overwrite subscribers of the block that exist");
+    CLI11_PARSE(app, argc, argv);
+    ::umask(077);
+    if (init_cmd->parsed()) {
+        return init(master, kek);
+    }
+    Block b;
+    if (!parse_block(block, b)) {
+        std::cerr << "ksim-sim: --block is <first IMSI>/<count 1..1000> inside one sim range\n";
+        return 2;
+    }
+    if (derive_cmd->parsed()) {
+        return derive(b, master, kek, out, force);
+    }
+    if (target != "open5gs") {
+        std::cerr << "ksim-sim: --target open5gs only (kaluza comes with N9)\n";
+        return 2;
+    }
+    if (!safe_remote_path(db_config) || ssh.empty() || ssh.find_first_of(" ;'\"$`\\") != std::string::npos ||
+        ssh.front() == '-' || !std::regex_match(dnn, std::regex("^[A-Za-z0-9.-]{1,63}$")) ||
+        (!sd.empty() && !std::regex_match(sd, std::regex("^[0-9A-Fa-f]{6}$"))) || sst > 255) {
+        std::cerr << "ksim-sim: --ssh, --db-config, --dnn, --sst or --sd is not acceptable\n";
+        return 2;
+    }
+    Rig rig{ssh, db_config.rfind("~/", 0) == 0 ? "\"$HOME\"/" + db_config.substr(2) : db_config};
+    return prov_cmd->parsed() ? provision(b, master, rig, sst, sd, dnn, replace) : deprovision(b, rig);
+}
+
+int main(int argc, char** argv) {
+    // An exception that reaches here is a bug: exit 10 (cli.md's internal error).
+    try {
+        return run_main(argc, argv);
+    } catch (const std::exception& e) {
+        std::fputs("ksim-sim: internal error: ", stderr);
+        std::fputs(e.what(), stderr);
+        std::fputs("\n", stderr);
+    } catch (...) {
+        std::fputs("ksim-sim: internal error\n", stderr);
+    }
+    return 10;
+}

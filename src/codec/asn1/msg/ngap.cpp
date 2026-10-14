@@ -795,6 +795,43 @@ Result<Header> peek(ByteView in) {
     return guarded([&]() -> Result<Header> { return parse(*j).header; });
 }
 
+namespace {
+
+void zero_keys(jer::json& j, unsigned& n) {
+    if (j.is_object()) {
+        for (auto& [k, v] : j.items()) {
+            if ((k == "SecurityKey" || k == "nextHopNH") && v.is_string()) {
+                auto& s = v.get_ref<std::string&>();
+                std::fill(s.begin(), s.end(), '0');
+                ++n;
+            } else {
+                zero_keys(v, n);
+            }
+        }
+    } else if (j.is_array()) {
+        for (auto& v : j) {
+            zero_keys(v, n);
+        }
+    }
+}
+
+} // namespace
+
+Result<Redacted> redact_keys(ByteView in) {
+    auto j = jer::decode(asn_DEF_NGAP_NGAP_PDU, in, asn1::Rules::aper);
+    if (!j) {
+        return j.error();
+    }
+    Redacted out;
+    zero_keys(*j, out.keys);
+    auto wire = jer::encode(asn_DEF_NGAP_NGAP_PDU, std::move(*j), asn1::Rules::aper);
+    if (!wire) {
+        return wire.error();
+    }
+    out.pdu = std::move(*wire);
+    return out;
+}
+
 Result<Pdu> decode(ByteView in) {
     auto j = jer::decode(asn_DEF_NGAP_NGAP_PDU, in, asn1::Rules::aper);
     if (!j) {

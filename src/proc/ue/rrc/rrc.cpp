@@ -78,6 +78,9 @@ void UeRrc::on_mib(const air::Frame& f) {
     if (!mib) {
         return;
     }
+    if (!mib_ok_ && !mib->barred && cfg_.tap) {
+        cfg_.tap("nr-rrc.bcch.bch", f.sdus.front().data);
+    }
     if (mib->barred) {
         if (camped_ && f.cell_handle == cell_) {
             camped_ = false;
@@ -111,6 +114,9 @@ void UeRrc::on_sib1(const air::Frame& f) {
     plmn_index_ = static_cast<std::uint8_t>(it - sib1->plmns.begin() + 1);
     t300_ = sib1->timers ? sib1->timers->t300 : cfg_.t300_default;
     mac_->camp(cell_);
+    if (cfg_.tap) {
+        cfg_.tap("nr-rrc.bcch.dl.sch", f.sdus.front().data);
+    }
     events_.emit("rrc.camped", cfg_.id,
                  {{"cell", str(cell_)}, {"tac", str(tac_)}, {"nci", str(static_cast<std::int64_t>(nci_))},
                   {"plmn", cfg_.plmn.mcc + cfg_.plmn.mnc}});
@@ -127,6 +133,9 @@ void UeRrc::on_paging(const air::Frame& f) {
     const auto mine = upper_.s_tmsi();
     if (!mine || std::find(p->s_tmsis.begin(), p->s_tmsis.end(), *mine) == p->s_tmsis.end()) {
         return;
+    }
+    if (cfg_.tap) {
+        cfg_.tap("nr-rrc.pcch", f.sdus.front().data);
     }
     events_.emit("rrc.paging", cfg_.id, {{"state", rrc_state_name(state_)}});
     if (state_ == RrcState::idle && upper_.paged) {
@@ -171,6 +180,9 @@ void UeRrc::establish() {
         setup_failed("encode");
         return;
     }
+    if (cfg_.tap) {
+        cfg_.tap("nr-rrc.ul.ccch", *wire);
+    }
     events_.emit("rrc.setup.request", cfg_.id,
                  {{"identity", req.s_tmsi_part1 ? "ng-5G-S-TMSI-Part1" : "randomValue"},
                   {"cause", rrc::cause_name(req.cause)}});
@@ -199,6 +211,9 @@ void UeRrc::setup_failed(const char* reason) {
 void UeRrc::on_ccch(Bytes sdu) {
     if (state_ != RrcState::connecting) {
         return;
+    }
+    if (cfg_.tap) {
+        cfg_.tap("nr-rrc.dl.ccch", sdu);
     }
     auto d = rrc::decode_dl_ccch(sdu);
     if (!d) {
@@ -317,6 +332,9 @@ void UeRrc::send_dcch(Result<Bytes> msg, std::uint8_t srb) {
         it = srbs_.find(1);
     }
     if (it != srbs_.end()) {
+        if (cfg_.tap) {
+            cfg_.tap("nr-rrc.ul.dcch", *msg);
+        }
         it->second.pdcp->write_sdu(std::move(*msg));
     }
 }
@@ -327,6 +345,9 @@ void UeRrc::ul_nas(Bytes pdu) {
 }
 
 void UeRrc::on_dcch(std::uint8_t srb, Bytes sdu) {
+    if (cfg_.tap) {
+        cfg_.tap("nr-rrc.dl.dcch", sdu);
+    }
     auto d = rrc::decode_dl_dcch(sdu);
     if (!d) {
         events_.emit("rrc.decode_error", cfg_.id, {{"bearer", "srb" + str(srb)}, {"what", d.error().what}});

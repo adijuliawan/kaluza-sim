@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# All-in-one against the Open5GS fork on the rig amadeus-open5gs (ADR 0010):
+# NG-C from the dev PC's vmnet8 address to the AMF at 192.168.134.128:38412,
+# host-only, no lab traffic (the dev-PC guard allows 192.168.134.0/24). The
+# AMF serves 001/01 TAC 1 with S-NSSAI 1/000001. Runs only in a window agreed
+# with the kaluza-core session (D5); the subscribers come from
+# ksim-sim range provision --target open5gs.
+plmn: "00101"
+seed: 42
+amf: [{addr: 192.168.134.128, port: 38412}]
+gnbs:
+  - id: {value: 0x1A0, bits: 22}
+    name: ksim-gnb1
+    cucp: {ng_bind: 192.168.134.1}
+    dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
+ues:
+  - {group: phones, count: 3, range: "001010000300001", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+     imeisv_tac: "86000000"}
+secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
+peer: {name: open5gs, repo: adijuliawan/open5gs, commit: 741c29d8d, rig: amadeus-open5gs, config: kaluza-sim-rig/etc}

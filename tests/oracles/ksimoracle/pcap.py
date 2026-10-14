@@ -57,6 +57,59 @@ def raw_udp(records: list[tuple[int, bytes]]) -> bytes:
     return _file(DLT_IPV4, [_ipv4_udp(p, port) for port, p in records])
 
 
+def _exported_payload(rec: bytes) -> tuple[str, bytes]:
+    """The dissector name and the PDU of one Exported PDU record."""
+    name, pos = "", 0
+    while pos + 4 <= len(rec):
+        tag, ln = struct.unpack(">HH", rec[pos:pos + 4])
+        pos += 4
+        if tag == 0:
+            break
+        if tag == 12:                     # EXP_PDU_TAG_PROTO_NAME, NUL-padded to 4
+            name = rec[pos:pos + ln].rstrip(b"\0").decode(errors="replace")
+        pos += ln
+    return name, rec[pos:]
+
+
+def read_pcapng_exported(data: bytes) -> list[tuple[int, str, bytes, str]]:
+    """(frame number, dissector name, PDU, comment) for each Enhanced Packet
+    Block of a pcapng file (the run captures of P1 N8) whose interface is
+    DLT 252. Written from the pcapng draft (draft-ietf-opsawg-pcapng): blocks of
+    type, total length, body, total length; the SHB's magic gives the order."""
+    out: list[tuple[int, str, bytes, str]] = []
+    e, off, n = "<", 0, 0
+    links: list[int] = []
+    while off + 12 <= len(data):
+        btype = struct.unpack("<I", data[off:off + 4])[0]
+        if btype == 0x0A0D0D0A:
+            e = "<" if data[off + 8:off + 12] == b"\x4d\x3c\x2b\x1a" else ">"
+            links = []
+        blen = struct.unpack(e + "I", data[off + 4:off + 8])[0]
+        if blen < 12 or off + blen > len(data):
+            raise ValueError(f"pcapng: a block of length {blen} at {off}")
+        body = data[off + 8:off + blen - 4]
+        if btype == 1:                    # Interface Description Block
+            links.append(struct.unpack(e + "H", body[:2])[0])
+        elif btype == 6:                  # Enhanced Packet Block
+            n += 1
+            ifc, _, _, cap, _ = struct.unpack(e + "IIIII", body[:20])
+            pkt = body[20:20 + cap]
+            opts = body[20 + cap + ((-cap) % 4):]
+            comment, pos = "", 0
+            while pos + 4 <= len(opts):
+                code, ln = struct.unpack(e + "HH", opts[pos:pos + 4])
+                if code == 0:
+                    break
+                if code == 1:             # opt_comment
+                    comment = opts[pos + 4:pos + 4 + ln].decode(errors="replace")
+                pos += 4 + ln + ((-ln) % 4)
+            if ifc < len(links) and links[ifc] == DLT_UPPER_PDU:
+                name, pdu = _exported_payload(pkt)
+                out.append((n, name, pdu, comment))
+        off += blen
+    return out
+
+
 def read_exported_pdu(data: bytes) -> list[tuple[int, str, bytes]]:
     """(frame number, dissector name, payload) for each record of a classic
     pcap of DLT 252 (Exported PDU). Records of other link types are skipped."""
