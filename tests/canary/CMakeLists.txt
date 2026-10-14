@@ -5,4 +5,5 @@
 # it writes.
 
 add_executable(ksim_canary canary.cpp)
-target_link_libraries(ksim_canary PRIVATE ksim::crypto ksim::codec_nas ksim::codec_uicc ksim::platform ksim::warnings)
+target_link_libraries(ksim_canary PRIVATE ksim::uicc ksim::crypto ksim::codec_nas ksim::codec_uicc ksim::platform ksim::warnings)
+target_compile_definitions(ksim_canary PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

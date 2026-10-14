@@ -17,6 +17,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace ksim {
@@ -56,7 +57,7 @@ public:
     /// The value at `key` as T, or `fallback` when the key is absent or null.
     template <class T>
     T get(std::string_view key, T fallback) const {
-        return has(key) && !at(key).is_null() ? at(key).as<T>() : fallback;
+        return has(key) && !at(key).is_null() ? at(key).as<T>() : std::move(fallback);
     }
 
     /// Fails when the map holds a key not in `allowed`.

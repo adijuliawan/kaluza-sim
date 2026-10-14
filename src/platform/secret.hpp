@@ -68,4 +68,8 @@ private:
     std::size_t n_ = 0;
 };
 
+/// Zeroes a buffer that held key material (an APDU response with CK and IK, a
+/// PIN in a command) in a way the compiler cannot drop (OPENSSL_cleanse).
+void secure_zero(std::span<std::uint8_t> buf) noexcept;
+
 } // namespace ksim

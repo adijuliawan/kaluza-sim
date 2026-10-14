@@ -191,7 +191,10 @@ public:
         if (p.error) {
             std::rethrow_exception(p.error);
         }
-        return std::move(*p.value);
+        if (!p.value.has_value()) {
+            std::terminate();   // a Task<T> that ended without co_return
+        }
+        return std::move(p.value).value();
     }
 
 private:

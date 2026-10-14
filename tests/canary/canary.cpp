@@ -28,6 +28,9 @@
 #include "platform/log.hpp"
 #include "platform/pcapng.hpp"
 #include "platform/secret.hpp"
+#include "platform/yaml.hpp"
+#include "uicc/image/image.hpp"
+#include "uicc/secrets/secrets.hpp"
 
 namespace {
 
@@ -189,6 +192,48 @@ int run(const std::string& dir) {
     sim_frame.insert(sim_frame.end(), shown.begin(), shown.end());
     sim_frame.insert(sim_frame.end(), {0x90, 0x00});
     (void)w.write(sim, t + 3000, *pcap::ipv4_udp(u, pcap::gsmtap(pcap::kGsmtapSim, 0, sim_frame)));
+
+    // The soft card (P1 N3): a card keyed with the canary K and OPc answers the
+    // AUTHENTICATE, holds K_AUSF and K_SEAF in EF.5GAUTHKEYS, and is saved as an
+    // image and a sealed secrets file. Neither may show a key in any form.
+    {
+        const auto ascii = [](const char* d) {
+            return SecretBytes::copy_of(ByteView(reinterpret_cast<const std::uint8_t*>(d), std::char_traits<char>::length(d)));
+        };
+        uicc::secrets::SecretMap s;
+        s.set("k", k->clone());
+        s.set("opc", opc->clone());
+        s.set("pin1", ascii("1234"));
+        s.set("pin2", ascii("5678"));
+        s.set("adm1", ascii("11111111"));
+        auto soft = uicc::image::load(Yaml::load_file(std::string(KSIM_SOURCE_DIR) + "/cards/usim-5g.yaml"), s);
+        (void)uicc::image::personalise(*soft, {std::string(kSupi), "8988211000000300042", "", 2});
+        (void)soft->process(hex("00A4040C07A0000000871002"));
+        Bytes answer = soft->process(cmd);
+        log::info("canary", "card answered {} octets to AUTHENTICATE", answer.size());
+        secure_zero(answer);
+        uicc::os::File* adf = uicc::image::usim_adf(*soft);
+        uicc::os::File* df5gs = adf != nullptr ? adf->child(0x5FC0) : nullptr;
+        uicc::os::File* keys = df5gs != nullptr ? df5gs->child(0x4F05) : nullptr;
+        if (keys != nullptr && keys->data.size() >= 68) {
+            keys->data[0] = 0x80;
+            keys->data[1] = 0x20;
+            std::copy(kausf_.expose().begin(), kausf_.expose().end(), keys->data.begin() + 2);
+            keys->data[34] = 0x81;
+            keys->data[35] = 0x20;
+            std::copy(kseaf_.expose().begin(), kseaf_.expose().end(), keys->data.begin() + 36);
+        }
+        uicc::secrets::SecretMap sealed;
+        std::ofstream(dir + "/canary-card.yaml") << uicc::image::save(*soft, sealed);
+        sealed.set("k", k->clone());
+        sealed.set("opc", opc->clone());
+        const SecretBytes kek = SecretBytes::copy_of(Bytes(32, 0x4B));
+        auto file = uicc::secrets::seal(kek, sealed);
+        if (file) {
+            std::ofstream(dir + "/canary-card.sealed", std::ios::binary)
+                .write(reinterpret_cast<const char*>(file->data()), static_cast<std::streamsize>(file->size()));
+        }
+    }
 
     if (leak_mode == "1") {
         log::warn("canary", "deliberate leak for the must-fail case: K {}", kK);

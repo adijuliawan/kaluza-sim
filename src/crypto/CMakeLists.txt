@@ -15,7 +15,8 @@ add_library(ksim_crypto STATIC
     rijndael256.cpp
     milenage256.cpp
     ecies.cpp
-    eap_aka_prime.cpp)
+    eap_aka_prime.cpp
+    aead.cpp)
 add_library(ksim::crypto ALIAS ksim_crypto)
 target_include_directories(ksim_crypto PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_crypto

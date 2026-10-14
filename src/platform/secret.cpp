@@ -111,4 +111,10 @@ bool ct_equal(const SecretBytes& a, const SecretBytes& b) noexcept {
     return ct_equal(a, b.expose());
 }
 
+void secure_zero(std::span<std::uint8_t> buf) noexcept {
+    if (!buf.empty()) {
+        OPENSSL_cleanse(buf.data(), buf.size());
+    }
+}
+
 } // namespace ksim

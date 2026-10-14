@@ -12,8 +12,8 @@ Row suffixes (requirements.md): -D defect in the sim, -B a choice the spec leave
 |---|---|
 | Guards (tools/guards), each with a must-fail self-test | 8: check_events, check_layers, check_linenum_types, check_mutants, check_provenance, check_registers, check_secret_expose, check_spdx |
 | CI hooks (tools/ci.d) | 9: 10-spec-index, 20-asn1c, 25-third-party, 30-asn1-extract, 40-spec-tables, 50-oracles, 60-canary, 70-clang-tidy, 80-fuzz |
-| Unit test sources (tests/unit) | 23 |
-| Fuzz targets (tests/fuzz) | 3 |
+| Unit test sources (tests/unit) | 27 |
+| Fuzz targets (tests/fuzz) | 4 |
 
 ## Requirements built
 

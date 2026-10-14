@@ -61,6 +61,22 @@ def main() -> int:
         codecs.append(bytes([11, len(cmd)]) + cmd + rsp)
     codecs += [bytes([14]) + f for f in m12rt.gen_fcps().values()]
     seeds["fuzz_codecs"] = codecs
+    # fuzz_card: (length, APDU) sequences, from power-on habits of a phone.
+    def seq(*apdus):
+        out = b""
+        for a in apdus:
+            b = bytes.fromhex(a)
+            out += bytes([len(b)]) + b
+        return out
+    pin = lambda d: d.encode().hex() + "ff" * (8 - len(d))
+    seeds["fuzz_card"] = [
+        seq("00A40004022F00", "00C0000020", "00B2010426"),
+        seq("00A4040C07A0000000871002", "00A4000C026F07", "00B0000009", "00A4000C025FC0", "00A4000C024F01", "00B0000014"),
+        seq("0020000A08" + pin("11111111"), "00A4080C047FF06F07", "00D6000001AA", "00B0000001"),
+        seq("00A4040C07A0000000871002", "0088008122" + "10" + "00" * 16 + "10" + "00" * 16),
+        seq("0070000001", "01A4040C07A0000000871002", "0070800100"),
+        seq("00A4000C022F06", "00A201040383010100", "00B2000228", "00B2000328"),
+    ]
     seeds["fuzz_mustfail"] = [b"KSIM must crash here"]
     total = 0
     for target, items in seeds.items():

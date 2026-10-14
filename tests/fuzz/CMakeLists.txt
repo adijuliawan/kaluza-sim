@@ -19,3 +19,6 @@ if(KSIM_ASN1)
 endif()
 ksim_add_fuzzer(fuzz_codecs SOURCES fuzz_l3.cpp LIBS ksim::codec_nas ksim::codec_up ksim::codec_uicc)
 ksim_add_fuzzer(fuzz_mustfail SOURCES fuzz_mustfail.cpp)
+# P1 N3: the soft card under arbitrary APDU streams.
+ksim_add_fuzzer(fuzz_card SOURCES fuzz_card.cpp LIBS ksim::uicc)
+target_compile_definitions(fuzz_card PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
