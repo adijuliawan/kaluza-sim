@@ -107,7 +107,7 @@ kaluza-sim/
     INDEX.tsv      doc, version, sha256, what is derived from it
     3gpp/<series>/ fetched zips (gitignored)      asn1/{rrc,ngap,f1ap,e1ap,xnap}/*.asn (extracted, committed)
     nas/{24501,24008,24011}/*.tsv                 kat/*.tsv (Milenage, TUAK, MILENAGE-256, NEA/NIA, ZUC, ECIES C.4)
-    tools/ docx_asn1.py docx_tables.py kat_extract.py fetch.sh verify_index.sh
+    tools/ docx_asn1.py docx_tables.py kat_extract.py fetch.py verify_index.py   (manifest.tsv lists the pinned documents)
   third_party/     asn1c runtime (BSD-2) · OCUDU SNOW3G/ZUC kernels (BSD, NOTICE) · PacketRusher eBPF (Apache-2.0, later)
   cmake/           asn1c.cmake (codegen + stamps) · layers.cmake · sanitizers.cmake · fuzz.cmake
   src/

@@ -1,0 +1,6 @@
+component	version	id	source	licence	use
+asn1c	18e56503	pending-M4	https://github.com/mouse07410/asn1c	BSD-2-Clause	ASN.1 compiler (built to ~/.local/opt/asn1c-18e56503); its runtime skeletons vendored under third_party/asn1c
+ocudu	489ed15c5c	489ed15c5cd6b1d4f52cf16c2e4cc79c2bde1775	https://gitlab.com/ocudu/ocudu (local /home/amadeus/Development/ran/ocudu)	BSD-3-Clause-Open-MPI	SNOW 3G and ZUC kernels copied verbatim (M9); unit-test vectors as an independent producer (M8, M12)
+pycrate	0.8.1	sha256:65c4dd48d93248a0a4aa2fc78bab10ea64087c6382827035fae9f8bba343db53	https://pypi.org/project/pycrate/0.8.1/	LGPL-2.1-or-later	external oracle only, in .venv; never linked
+tshark	4.6.4	deb:4.6.4-1	Ubuntu 26.04 package	GPL-2.0-or-later	external oracle only (pcaps fed on stdin); never linked
+pysim	2761d165825f	2761d165825ff9fd619b1f31076ada6477913647	local /home/amadeus/Development/ran/usim/pysim-src (venv .venv-pysim)	GPL-2.0-or-later	external oracle only (FCP decoding, pySim-trace; pySim-shell from P1); never linked

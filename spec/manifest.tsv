@@ -1,0 +1,70 @@
+doc	version	origin	purpose
+24.501	j80	3gpp	NAS 5GMM/5GSM; docx_tables source
+24.007	j50	3gpp	L3 message structure and error handling (§11)
+24.008	j50	3gpp	ePCO container IDs (§10.5.6.3A)
+24.011	j00	3gpp	SMS CP/RP
+23.040	j00	3gpp	SMS TPDU
+23.038	j00	3gpp	SMS alphabets
+23.003	j80	3gpp	identities (SUPI, SUCI, GUTI, routing indicator)
+23.122	j70	3gpp	PLMN selection
+23.501	j90	3gpp	architecture (reading)
+23.502	j90	3gpp	procedures (reading)
+38.300	j40	3gpp	NR stage 2
+38.331	j40	3gpp	RRC ASN.1 (NR-RRC-Definitions, NR-InterNodeDefinitions)
+38.413	j40	3gpp	NGAP ASN.1
+38.412	j00	3gpp	NG signalling transport
+38.414	j00	3gpp	NG data transport
+38.415	j10	3gpp	PDU Session Container
+29.281	j20	3gpp	GTP-U
+33.501	j70	3gpp	security: key hierarchy (Annex A), SUCI (Annex C)
+33.102	j10	3gpp	SQN management (Annex C)
+33.220	j10	3gpp	generic KDF (Annex B.2)
+33.401	j20	3gpp	EEA/EIA test data (Annex C)
+33.402	j00	3gpp	EAP-AKA' key derivation
+35.205	j00	3gpp	MILENAGE general
+35.206	j00	3gpp	MILENAGE algorithm specification
+35.207	j00	3gpp	MILENAGE implementers' test data
+35.208	j00	3gpp	MILENAGE conformance test data
+35.215	j00	3gpp	UEA2/UIA2 specification
+35.216	j00	3gpp	SNOW 3G specification
+35.217	j00	3gpp	UEA2/UIA2 implementers' test data
+35.218	j00	3gpp	UEA2/UIA2 design report
+35.221	j00	3gpp	EEA3/EIA3 specification
+35.222	j00	3gpp	ZUC specification
+35.223	j00	3gpp	EEA3/EIA3 implementers' test data
+35.231	j00	3gpp	TUAK specification
+35.232	j00	3gpp	TUAK implementers' test data
+35.233	j00	3gpp	TUAK conformance test data
+35.234	j00	3gpp	MILENAGE-256 specification
+35.235	j00	3gpp	MILENAGE-256 implementers' test data
+35.236	j00	3gpp	MILENAGE-256 conformance test data
+38.473	j40	3gpp	F1AP ASN.1
+38.470	j20	3gpp	F1 general
+38.472	j00	3gpp	F1 signalling transport
+38.474	j00	3gpp	F1 data transport
+37.483	j40	3gpp	E1AP ASN.1
+37.480	j10	3gpp	E1 general
+37.482	j00	3gpp	E1 signalling transport
+38.423	j40	3gpp	XnAP ASN.1
+38.420	j10	3gpp	Xn general
+38.422	j00	3gpp	Xn signalling transport
+38.424	j00	3gpp	Xn data transport
+38.425	j10	3gpp	NR user plane protocol (NR-U)
+38.401	j30	3gpp	NG-RAN architecture
+38.323	j10	3gpp	PDCP
+37.324	j00	3gpp	SDAP
+38.322	j30	3gpp	RLC
+38.321	j40	3gpp	MAC
+38.304	j30	3gpp	idle and inactive procedures
+38.133	j60	3gpp	RRM
+38.215	j40	3gpp	physical-layer measurements
+38.901	j50	3gpp	channel models (TR)
+38.306	j40	3gpp	UE radio access capabilities
+31.101	j00	3gpp	UICC-terminal interface (3GPP)
+31.102	j60	3gpp	USIM application
+31.121	j00	3gpp	USIM conformance tests (checklist)
+38.523-1	j60	3gpp	5GS UE protocol conformance (test purposes)
+38.508-1	j50	3gpp	common test environment
+102.221	18.04.00	etsi	UICC-terminal interface (ETSI TS 102 221 V18.4.0)
+rfc9048	-	ietf	EAP-AKA' revised (test vectors)
+sage-uea2uia2-doc3	-	sage	UEA2/UIA2 implementers' test data (SAGE Doc 3)

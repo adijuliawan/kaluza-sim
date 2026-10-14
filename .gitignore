@@ -22,6 +22,7 @@ spec/3gpp/**/*.docx
 spec/3gpp/**/*.doc
 spec/3gpp/**/*.pdf
 spec/etsi/**/*.pdf
+spec/ietf/
 spec/oran/**
 
 # Vendor-confidential material (e.g. Quectel AT manuals, firmware) is cited by path, never copied
