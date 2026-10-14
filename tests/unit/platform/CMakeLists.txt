@@ -4,6 +4,9 @@
 add_executable(unit_platform
     result_test.cpp
     buf_test.cpp
-    secret_test.cpp)
+    secret_test.cpp
+    timer_wheel_test.cpp
+    runtime_test.cpp
+    pcapng_test.cpp)
 target_link_libraries(unit_platform PRIVATE ksim::platform ksim::warnings GTest::gtest_main)
 gtest_discover_tests(unit_platform DISCOVERY_MODE PRE_TEST)

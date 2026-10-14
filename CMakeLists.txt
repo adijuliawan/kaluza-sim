@@ -44,6 +44,8 @@ endif()
 
 find_package(OpenSSL 3.0 REQUIRED)
 find_package(GTest 1.14 REQUIRED)
+find_package(fmt 10 REQUIRED)
+find_package(Threads REQUIRED)
 ksim_asn1_generate()
 
 enable_testing()
