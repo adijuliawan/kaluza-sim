@@ -1,0 +1,111 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      },
+      "environment": { "KSIM_PRESET": "${presetName}" }
+    },
+    {
+      "name": "gcc",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_LINKER_TYPE": "MOLD"
+      }
+    },
+    {
+      "name": "clang",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_LINKER_TYPE": "LLD"
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "dev: gcc, debug, ccache",
+      "inherits": "gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "asan",
+      "displayName": "asan: gcc, AddressSanitizer + UBSan",
+      "inherits": "gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "KSIM_SANITIZE": "asan" }
+    },
+    {
+      "name": "tsan",
+      "displayName": "tsan: gcc, ThreadSanitizer",
+      "inherits": "gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo", "KSIM_SANITIZE": "tsan" }
+    },
+    {
+      "name": "release",
+      "displayName": "release: gcc, -O2, generic x86-64",
+      "inherits": "gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "release-lab",
+      "displayName": "release-lab: gcc, -O2, kaluza-uesim (Zen 3) target set",
+      "inherits": "gcc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "KSIM_ARCH_FLAGS": "-march=x86-64-v3 -maes -mpclmul -mvaes -mtune=znver3"
+      }
+    },
+    {
+      "name": "fuzz",
+      "displayName": "fuzz: clang, libFuzzer + ASan/UBSan",
+      "inherits": "clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "KSIM_SANITIZE": "asan",
+        "KSIM_FUZZ": "ON"
+      }
+    },
+    {
+      "name": "cov",
+      "displayName": "cov: gcc, gcov coverage",
+      "inherits": "gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "KSIM_COVERAGE": "ON" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "release-lab", "configurePreset": "release-lab" },
+    { "name": "fuzz", "configurePreset": "fuzz" },
+    { "name": "cov", "configurePreset": "cov" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    { "name": "dev", "inherits": "base", "configurePreset": "dev" },
+    { "name": "asan", "inherits": "base", "configurePreset": "asan" },
+    { "name": "tsan", "inherits": "base", "configurePreset": "tsan" },
+    { "name": "release", "inherits": "base", "configurePreset": "release" },
+    { "name": "release-lab", "inherits": "base", "configurePreset": "release-lab" },
+    { "name": "fuzz", "inherits": "base", "configurePreset": "fuzz" },
+    { "name": "cov", "inherits": "base", "configurePreset": "cov" }
+  ]
+}

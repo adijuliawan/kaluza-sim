@@ -1,0 +1,8 @@
+Copyright (c) 2026 Adi Juliawan. All rights reserved.
+
+This repository is private. No licence is granted to use, copy, modify or
+distribute its contents.
+
+The licence is to be decided later (docs/adr/0004-clean-room-licensing.md).
+The code is kept clean-room with respect to AGPL, GPL and CSSL sources so that
+any licence remains possible.

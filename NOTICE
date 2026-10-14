@@ -1,0 +1,9 @@
+kaluza-sim
+Copyright (c) 2026 Adi Juliawan. All rights reserved. (Licence: see LICENSES/ and
+docs/adr/0004-clean-room-licensing.md.)
+
+This repository contains third-party material under the licences named below.
+Each copied file keeps its original header. Each entry gives the source, the
+upstream commit and the licence.
+
+(No third-party material yet.)

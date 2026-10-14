@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# REUSE metadata (ADR 0004). Our own source files carry SPDX headers, which
+# tools/guards/check_spdx.py enforces. This file covers files that cannot carry
+# a header (Markdown, JSON, TSV, extracted ASN.1, …). Third-party trees get
+# their own, more specific annotations below the catch-all; the last matching
+# annotation wins.
+version = 1
+
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2026 Adi Juliawan"
+SPDX-License-Identifier = "LicenseRef-kaluza-sim-private"

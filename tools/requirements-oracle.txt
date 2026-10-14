@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+# Oracle-side Python tools only; never linked into kaluza-sim (ADR 0004).
+# Install: .venv/bin/pip install --require-hashes -r tools/requirements-oracle.txt
+pycrate==0.8.1 \
+    --hash=sha256:65c4dd48d93248a0a4aa2fc78bab10ea64087c6382827035fae9f8bba343db53

@@ -19,6 +19,8 @@ runs/
 # 3GPP / ETSI / O-RAN documents are fetched, not tracked (docs/specs.md says where from)
 spec/3gpp/**/*.zip
 spec/3gpp/**/*.docx
+spec/3gpp/**/*.doc
+spec/3gpp/**/*.pdf
 spec/etsi/**/*.pdf
 spec/oran/**
 

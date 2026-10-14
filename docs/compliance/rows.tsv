@@ -1,0 +1,5 @@
+id	kind	area	date	summary	evidence
+KS-PLAT-T1	T	platform	2026-10-14	Toolchain at P0 T0: gcc/g++ 15.2.0, clang/lld/clang-tidy 21.1.8, cmake 4.2.3, ninja 1.13.2, mold 2.40.4, ccache 4.12.3, gcovr 7.2, reuse 5.0.2, Python 3.14.4, OpenSSL 3.5.5, GoogleTest 1.17.0, tshark 4.6.4	tools/doctor.sh output, M1
+KS-PLAT-T2	T	platform	2026-10-14	pycrate 0.8.1 (LGPL, hash-pinned in tools/requirements-oracle.txt) imports on Python 3.14.4, so the planned Python 3.12 fallback venv is not needed. Its 'CryptoMobile not found' warning is expected: the oracle decodes plaintext only	tools/doctor.sh PYCRATE=0.8.1, M1
+KS-PLAT-B1	B	platform	2026-10-14	Reading of rule R7: socket/epoll/ioctl/setns calls belong in net/ and node/, with one exception, the epoll calls inside the platform reactor itself (architecture.md section 3 clarified)	tools/guards/check_layers.py SYSCALL_OK_PREFIX
+KS-PLAT-B2	B	platform	2026-10-14	Generated ASN.1 C and the vendored C runtime compile as C17 (gnu17). gcc 15 defaults to C23, where bool/true/false are keywords and f() means f(void)	CMakeLists.txt CMAKE_C_STANDARD 17

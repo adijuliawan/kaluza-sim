@@ -137,7 +137,7 @@ kaluza-sim/
 - **R4:** `entity` objects are passive. Time comes from an injected `TimerService` and I/O goes through injected notifiers. No threads, no sockets.
 - **R5:** `uicc/os` knows nothing of UEs, and `uicc/terminal` knows nothing of NAS.
 - **R6:** `proc` is single-threaded per actor and never blocks. It sends only through ports (`INgapTx`, `IF1Tx`, …).
-- **R7:** only `net` and `node` call socket, epoll, ioctl or setns.
+- **R7:** only `net` and `node` call socket, epoll, ioctl or setns. The one exception is the epoll calls inside `platform`'s reactor, which is the event loop they all run on.
 - **R8:** `radio` is pure.
 
 The rules are enforced by PRIVATE CMake link graphs plus `tools/check_layers.py`, the counterpart of kaluza-core's Maven enforcer.
