@@ -222,6 +222,16 @@ TEST(Kat, Eia2_33401) {
     }
 }
 
+// SNOW 3G f9 needs one bit or more; an empty message is refused, never read
+// past (KS-SEC-D1, found when the M16 self-test misread a KAT length).
+TEST(Kat, Eia1RefusesAnEmptyMessage) {
+    const SecretBytes ik = SecretBytes::copy_of(Bytes(16, 0x2b));
+    const Bytes msg(11, 0x33);
+    EXPECT_FALSE(nia(Nia::nia1, ik, SecInput{0, 1, 0}, msg, 0));
+    EXPECT_TRUE(nia(Nia::nia1, ik, SecInput{0, 1, 0}, msg, 1));
+    EXPECT_TRUE(nia(Nia::nia2, ik, SecInput{0, 1, 0}, msg, 0));   // CMAC of nothing is defined
+}
+
 TEST(Kat, Eia1_33401) {
     const auto sets = kat::load("eia1");
     ASSERT_EQ(sets.size(), 7U);

@@ -7,14 +7,14 @@ It is a **second implementation**. It shares no code, tables or reference output
 - The UE talks to its SIM through **real APDUs**.
 - PDCP runs with the keys the core hands out, so the core's K_gNB, NH and NCC are checked end to end.
 
-**Status (2026-10-14):** design done; no code yet. The next step is build phase **P0**.
+**Status (2026-10-14):** build phase **P0** is closed (`tools/p0_exit.sh`: P0_EXIT=PASS): spec intake, the codecs for every v1 PDU, crypto with KATs, the platform runtime, oracle and fuzz harnesses, the guards and the compliance registers. The next step is **P1**, on the user's go.
 
 **Review page (private artifact):** https://claude.ai/artifact/DdYiFQqkbaC8kaMCn4ft95. It summarises these docs as of the commit named in its header. Where they differ, the repo wins. Republish the page when the docs change.
 
 ## Start here (new session)
 
-1. [`docs/handoff/2026-10-14-design-session.md`](docs/handoff/2026-10-14-design-session.md): the resume point. It covers the decisions and their reasons, the research, the open items, and the first steps of P0.
-2. [`docs/roadmap.md`](docs/roadmap.md): build phases P0–P5 and their exit criteria.
+1. [`docs/handoff/2026-10-14-p0-close.md`](docs/handoff/2026-10-14-p0-close.md): the resume point after P0 (what exists, the exit check, what to know before P1, P1's first steps). [`docs/handoff/2026-10-14-design-session.md`](docs/handoff/2026-10-14-design-session.md) keeps the design decisions, their reasons and the research.
+2. [`docs/roadmap.md`](docs/roadmap.md): build phases P0–P5 and their exit criteria. The compliance registers are under [`docs/compliance/`](docs/compliance/).
 3. [`docs/architecture.md`](docs/architecture.md) and [`docs/requirements.md`](docs/requirements.md).
 
 **Standing rules:**

@@ -184,6 +184,11 @@ Result<Mac> nia(Nia alg, const SecretBytes& key, SecInput in, ByteView msg, std:
         if (key.size() != 16) {
             return bad("NIA: the key is 16 octets");
         }
+        if (alg == Nia::nia1 && bits == 0) {
+            // SNOW 3G f9 is defined for one bit or more; the vendored s3g_f9
+            // reads past the message for an empty one (KS-SEC-D1)
+            return bad("NIA1: the message is at least one bit");
+        }
         if (alg == Nia::nia1) {
             return uia2_f9(key, in.count, std::uint32_t{in.bearer} << 27, in.direction, msg, bits);  // 33.401 B.2.2
         } else {
