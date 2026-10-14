@@ -1,5 +1,5 @@
 component	version	id	source	licence	use
-asn1c	18e56503	pending-M4	https://github.com/mouse07410/asn1c	BSD-2-Clause	ASN.1 compiler (built to ~/.local/opt/asn1c-18e56503); its runtime skeletons vendored under third_party/asn1c
+asn1c	18e56503	commit:18e565032e52af8002c2353be20bdbba9233e700 binary-sha256:403a7ebb65870ab5ccb3dc798574a14cd778db6776ec8074851bf9ed8b841d0e runtime-manifest-sha256:66fea9fca9ec69713f6f4bddda586bc8ac3844952c2ab54ab1212812123ccd56	https://github.com/mouse07410/asn1c	BSD-2-Clause	ASN.1 compiler, built by tools/build-asn1c.sh (gcc 15.2, -std=gnu17 -O2 -g -fno-strict-aliasing; reproducible) to ~/.local/opt/asn1c-18e56503; runtime skeletons vendored unmodified in third_party/asn1c/runtime
 ocudu	489ed15c5c	489ed15c5cd6b1d4f52cf16c2e4cc79c2bde1775	https://gitlab.com/ocudu/ocudu (local /home/amadeus/Development/ran/ocudu)	BSD-3-Clause-Open-MPI	SNOW 3G and ZUC kernels copied verbatim (M9); unit-test vectors as an independent producer (M8, M12)
 pycrate	0.8.1	sha256:65c4dd48d93248a0a4aa2fc78bab10ea64087c6382827035fae9f8bba343db53	https://pypi.org/project/pycrate/0.8.1/	LGPL-2.1-or-later	external oracle only, in .venv; never linked
 tshark	4.6.4	deb:4.6.4-1	Ubuntu 26.04 package	GPL-2.0-or-later	external oracle only (pcaps fed on stdin); never linked

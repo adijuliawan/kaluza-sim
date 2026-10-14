@@ -6,4 +6,10 @@ This repository contains third-party material under the licences named below.
 Each copied file keeps its original header. Each entry gives the source, the
 upstream commit and the licence.
 
-(No third-party material yet.)
+third_party/asn1c/runtime/
+    The asn1c runtime ("skeletons"), unmodified, from
+    https://github.com/mouse07410/asn1c at 18e565032e52af8002c2353be20bdbba9233e700.
+    BSD-2-Clause. Copyright (c) 2003-2017 Lev Walkin <vlm@lionet.info> and
+    contributors. Licence text: third_party/asn1c/LICENSE.
+    File hashes: third_party/asn1c/MANIFEST.sha256. Patches, if any:
+    third_party/asn1c/patches/series.

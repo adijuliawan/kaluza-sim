@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# Patches applied to the vendored asn1c runtime, in order (one file name per
+# line). Each patch fixes a defect found in P0 or later and has a -D or -S row
+# in docs/compliance/rows.tsv. Empty: the runtime is as shipped at 18e56503.

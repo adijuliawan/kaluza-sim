@@ -150,8 +150,11 @@ The rules are enforced by PRIVATE CMake link graphs plus `tools/check_layers.py`
   - For RRC it takes `NR-RRC-Definitions` **and** `NR-InterNodeDefinitions`. The latter holds HandoverPreparationInformation, HandoverCommand, CG-ConfigInfo and UERadioPagingInformation, which the handover containers need.
   - The output is committed and byte-stable, next to the sha256 of the source docx.
 - **Compiler.** **asn1c, the mouse07410 fork at commit 18e56503** (2024-08-21; BSD-2). The fork's HEAD (2025/26) aborts on the parameterized `ProtocolIE-Container` family, and stock 0.9.29 cannot parse Rel-16+ `[[ ]]` CHOICE brackets. These are facts from the UERANSIM fork's notes; only the facts are taken.
-  - Flags: `-fcompound-names -findirect-choice -fno-include-deps -pdu=all -no-gen-OER -no-gen-random-fill -no-gen-example`, keeping UPER, APER and print. A JER build exists for oracle comparison.
-  - The fork's `#if`-guarded `encoding_constraints` initializers are post-processed by our own tool.
+  - Flags: `-fcompound-names -findirect-choice -fno-include-deps -pdu=all -no-gen-OER -no-gen-BER -no-gen-XER -no-gen-random-fill -no-gen-example -fprefix=<PROTO>_`. That keeps UPER, APER, print and **JER**: JER is always generated, for the oracle comparison and the `ksim-codec` dump.
+  - **Built from source** by `tools/build-asn1c.sh` with gcc 15 and `-std=gnu17 -O2 -fno-strict-aliasing`. Without that last flag the fixer segfaults on strict-aliasing UB, failing 33 of the fork's own 130 compiler tests; with it, all 130 pass (row KS-PLAT-T6).
+  - **One prefix per protocol** (`-fprefix`, complete at this commit) keeps five protocols in one binary without symbol clashes. A CI `nm` check guards it.
+  - **The runtime is vendored unmodified** (`third_party/asn1c/runtime`) and built once. It comes from the skeleton subset asn1c lists for these flags; the BER-only files are not built.
+  - **One forced-include config header,** `src/codec/asn1/ksim_asn1_config.h`, fixes the `ASN_DISABLE_*` set for every translation unit. The runtime's structures change layout with it, so no post-processing of the generated code is needed (rows KS-PLAT-B3 to B6).
 - **Build.** One shared runtime library and **one static library per protocol**.
   - Generation is keyed by a stamp: sha256 of (.asn, asn1c commit, flags, post-processor version). The stamp writes a `files.cmake` manifest, so there is no GLOB and no stale-file-list trap.
   - Generated C is built with `-O1 -g0 -ffunction-sections`, in unity batches where symbols allow, linked with `--gc-sections`, and cached by stamp in CI.
@@ -412,7 +415,7 @@ UeDevice (one actor, pinned to a shard)
 
 ## 10. Build and test
 
-- **Presets:** CMake ≥ 3.28 with presets `dev` (gcc 15.2 + ccache), `asan` (ASan + UBSan), `tsan`, `release`, `fuzz` (clang + libFuzzer), `oracle` (adds asn1c JER) and `cov`. clang and ccache are not on the dev box yet; P0 installs them.
+- **Presets:** CMake ≥ 3.28 with presets `dev` (gcc 15.2 + ccache + mold), `asan` (ASan + UBSan), `tsan`, `release`, `release-lab` (the kaluza-uesim x86-64-v3 set), `fuzz` (clang 21 + libFuzzer) and `cov`. There is no separate `oracle` preset, since JER is always generated (row KS-PLAT-B5). Every check runs through `tools/ci.sh`.
 - **Libraries:** OpenSSL 3, pcsc-lite, yaml-cpp, nlohmann/json, fmt + quill, CLI11, cpp-httplib, GoogleTest; libbpf later. No libsctp.
 - **Test layers:** unit (codecs, entities, KATs, card OS) → procedure tests on virtual time, named after spec clauses → component (all-in-one against a scripted core stub) → system gates against kaluza-core, plus an interop matrix ([`verification.md`](verification.md)).
 - **Oracles:**

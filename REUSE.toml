@@ -13,3 +13,12 @@ path = "**"
 precedence = "closest"
 SPDX-FileCopyrightText = "2026 Adi Juliawan"
 SPDX-License-Identifier = "LicenseRef-kaluza-sim-private"
+
+# asn1c runtime (mouse07410 fork at 18e565032e52), vendored unmodified except
+# for patches listed in third_party/asn1c/patches/series (ADR 0004: BSD-2 may
+# be copied with its licence).
+[[annotations]]
+path = ["third_party/asn1c/runtime/**", "third_party/asn1c/LICENSE"]
+precedence = "override"
+SPDX-FileCopyrightText = "2003-2017 Lev Walkin <vlm@lionet.info> and contributors"
+SPDX-License-Identifier = "BSD-2-Clause"

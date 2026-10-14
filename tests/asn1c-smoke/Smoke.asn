@@ -1,0 +1,28 @@
+-- SPDX-FileCopyrightText: 2026 Adi Juliawan
+-- SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+--
+-- asn1c smoke module (plan M4): the constructs of a 3GPP AP protocol in
+-- miniature: an information object class, a parameterized IE container, a
+-- CHOICE with [[ ]] extension additions, and an extensible INTEGER over 2^32.
+-- tests/asn1c-smoke/run.sh compiles it twice with different -fprefix values
+-- and checks the symbols do not clash.
+Smoke DEFINITIONS AUTOMATIC TAGS ::= BEGIN
+Criticality ::= ENUMERATED { reject, ignore, notify }
+Presence ::= ENUMERATED { optional, conditional, mandatory }
+ProtocolIE-ID ::= INTEGER (0..65535)
+PROTOCOL-IES ::= CLASS {
+  &id ProtocolIE-ID UNIQUE, &criticality Criticality, &Value, &presence Presence
+} WITH SYNTAX { ID &id CRITICALITY &criticality TYPE &Value PRESENCE &presence }
+ProtocolIE-Container {PROTOCOL-IES : IEsSetParam} ::= SEQUENCE (SIZE (0..65535)) OF ProtocolIE-Field {{IEsSetParam}}
+ProtocolIE-Field {PROTOCOL-IES : IEsSetParam} ::= SEQUENCE {
+  id PROTOCOL-IES.&id ({IEsSetParam}),
+  criticality PROTOCOL-IES.&criticality ({IEsSetParam}{@id}),
+  value PROTOCOL-IES.&Value ({IEsSetParam}{@id})
+}
+Cause ::= CHOICE { radioNetwork INTEGER (0..10), transport INTEGER (0..5), ..., [[ misc BOOLEAN ]] }
+BitRate ::= INTEGER (0..4000000000000, ...)
+Msg ::= SEQUENCE { protocolIEs ProtocolIE-Container { {MsgIEs} }, ... }
+MsgIEs PROTOCOL-IES ::= {
+  { ID 1 CRITICALITY reject TYPE Cause PRESENCE mandatory } |
+  { ID 2 CRITICALITY ignore TYPE BitRate PRESENCE optional }, ... }
+END
