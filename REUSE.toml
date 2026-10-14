@@ -22,3 +22,12 @@ path = ["third_party/asn1c/runtime/**", "third_party/asn1c/LICENSE"]
 precedence = "override"
 SPDX-FileCopyrightText = "2003-2017 Lev Walkin <vlm@lionet.info> and contributors"
 SPDX-License-Identifier = "BSD-2-Clause"
+
+# Text extracted verbatim from 3GPP specifications (ASN.1 modules, transcribed
+# tables and test vectors). The tools that extract them are ours; the content is
+# 3GPP's.
+[[annotations]]
+path = ["spec/asn1/**/*.asn"]
+precedence = "override"
+SPDX-FileCopyrightText = "3GPP Organizational Partners (ARIB, ATIS, CCSA, ETSI, TSDSI, TTA, TTC)"
+SPDX-License-Identifier = "LicenseRef-3GPP-Spec-Text"

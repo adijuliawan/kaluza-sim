@@ -1,0 +1,7 @@
+module	file	lines	sha256
+NGAP-PDU-Descriptions	spec/asn1/ngap/NGAP-PDU-Descriptions.asn	1009	7a5956ec31c4f07114138e5f22bf31d3c9ddfc2d099682c9b01ee90ffcfff109
+NGAP-PDU-Contents	spec/asn1/ngap/NGAP-PDU-Contents.asn	4023	170b0da01927c553308f0aa987d66d30ac0db64ea46368ea77016adc7fd940b7
+NGAP-IEs	spec/asn1/ngap/NGAP-IEs.asn	8701	b54fb1c85f819c3a1dd0e425bf9185aca0ec8f536822910705bb47f91925b355
+NGAP-CommonDataTypes	spec/asn1/ngap/NGAP-CommonDataTypes.asn	29	c520eeb1e95df93829294257cbd0eb1887b13677622e87a10adc499d1cd2f3c5
+NGAP-Constants	spec/asn1/ngap/NGAP-Constants.asn	746	79016fae168bf4c5ddc7ca74968c799e8ff9d3a5c823dc70c248d261e43dc202
+NGAP-Containers	spec/asn1/ngap/NGAP-Containers.asn	195	7154164d5c01c823d3f38fae50388fac33007a3048267f4ec8e84a39cc21e775

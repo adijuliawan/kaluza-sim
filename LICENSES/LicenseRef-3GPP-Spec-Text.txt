@@ -1,0 +1,10 @@
+Text extracted verbatim from 3GPP Technical Specifications.
+
+Copyright: 3GPP Organizational Partners (ARIB, ATIS, CCSA, ETSI, TSDSI, TTA, TTC).
+
+These files (extracted ASN.1 modules, and tables or test vectors transcribed
+from 3GPP specifications) are carried in this repository only as inputs to an
+implementation of the specifications they come from. Each file's header names
+the specification, its version and the sha256 of the source document
+(spec/INDEX.tsv). The copyright notice of that specification applies; no
+other licence is granted by this repository.

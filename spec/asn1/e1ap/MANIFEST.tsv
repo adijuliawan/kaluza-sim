@@ -1,0 +1,7 @@
+module	file	lines	sha256
+E1AP-PDU-Descriptions	spec/asn1/e1ap/E1AP-PDU-Descriptions.asn	554	b50ad20ec63953c3700a10a24e39a7348c2029a96406a5aebb690005fc340c0c
+E1AP-PDU-Contents	spec/asn1/e1ap/E1AP-PDU-Contents.asn	2253	27afb3ce612f103f73edf9be798c6cb9af5833b4f937dd5997ce127422ad087d
+E1AP-IEs	spec/asn1/e1ap/E1AP-IEs.asn	4101	589ad82c3f06558900f1f4fab789ee9411b285de79439d16e19b1179f82e3276
+E1AP-CommonDataTypes	spec/asn1/e1ap/E1AP-CommonDataTypes.asn	47	6d2e196634e03ffbc578d279c6686e1972451788ad8da92211e265ee8715de47
+E1AP-Constants	spec/asn1/e1ap/E1AP-Constants.asn	362	680614944cf77efbca59faecb6402e693eaf8b433ed041261e59080d513011ed
+E1AP-Containers	spec/asn1/e1ap/E1AP-Containers.asn	148	98c24b02986771aeceda8cd412934746dfb0929cb6eec81986a0e35a164450d6

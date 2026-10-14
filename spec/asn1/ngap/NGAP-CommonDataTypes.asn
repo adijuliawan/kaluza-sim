@@ -1,0 +1,29 @@
+-- Extracted by spec/tools/docx_asn1.py 1.0 from 3GPP TS 38.413 j40 (38413-j40.zip, sha256 7e559e1cfdcea8459e0b0c9e58f91b603c5f60ebebbda949b4d06acf4fcc5a4f).
+-- Do not edit: regenerate with spec/tools/docx_asn1.py. Text (c) 3GPP; see spec/INDEX.tsv for the source.
+
+NGAP-CommonDataTypes {
+itu-t (0) identified-organization (4) etsi (0) mobileDomain (0)
+ngran-Access (22) modules (3) ngap (1) version1 (1) ngap-CommonDataTypes (3) }
+
+DEFINITIONS AUTOMATIC TAGS ::=
+
+BEGIN
+
+Criticality		::= ENUMERATED { reject, ignore, notify }
+
+Presence		::= ENUMERATED { optional, conditional, mandatory }
+
+PrivateIE-ID	::= CHOICE {
+	local				INTEGER (0..65535),
+	global				OBJECT IDENTIFIER
+}
+
+ProcedureCode		::= INTEGER (0..255)
+
+ProtocolExtensionID	::= INTEGER (0..65535)
+
+ProtocolIE-ID		::= INTEGER (0..65535)
+
+TriggeringMessage	::= ENUMERATED { initiating-message, successful-outcome, unsuccessful-outcome }
+
+END

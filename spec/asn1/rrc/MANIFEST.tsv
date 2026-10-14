@@ -1,0 +1,3 @@
+module	file	lines	sha256
+NR-RRC-Definitions	spec/asn1/rrc/NR-RRC-Definitions.asn	29245	bb1f4408449d5e0e2669d25e887e5352bd799af3fbce5c60db89d1eb5855369b
+NR-InterNodeDefinitions	spec/asn1/rrc/NR-InterNodeDefinitions.asn	1113	aed88b2f9daed5e13820a27c2751f1f0f86a8a361131411cafa11146d0ecf062

@@ -1,0 +1,32 @@
+construct	rrc	ngap	f1ap	e1ap	xnap	description	handling	vector
+type-assignments	2740	1313	1860	655	1551	type assignments (scale)	-	-
+parameterized-types	1	11	9	8	11	parameterized type definitions (asn1c specializes each use)	-	-
+information-object-classes	0	5	5	4	5	information object classes (CLASS)	-	-
+information-object-sets	0	787	1161	388	875	information object sets (IE / procedure tables)	-	-
+open-type-fields	0	8	8	6	8	references to class type fields (open types: &Value, &InitiatingMessage)	-	-
+extension-markers	766	1543	1948	734	1831	extension markers ... in SEQUENCE/CHOICE/ENUMERATED	-	-
+extension-addition-groups	731	0	0	0	0	extension addition groups [[ ]] (Rel-16+ CHOICE brackets)	-	-
+choice	591	79	99	31	88	CHOICE types	-	-
+enumerated	4285	230	354	131	310	ENUMERATED types	-	-
+optional	8455	796	1181	497	1274	OPTIONAL components (presence bitmap)	-	-
+default	22	1	1	1	1	DEFAULT components (encoder must omit default values in canonical PER)	-	-
+containing	67	60	0	0	0	CONTAINING (an octet/bit string carrying another PDU)	-	-
+integer-constrained	2738	125	421	83	209	constrained INTEGER ranges	-	-
+integer-extensible	0	63	121	57	94	extensible INTEGER ranges (...) (the SRBID-width class)	-	-
+integer-negative-lower-bound	97	4	18	2	8	INTEGER ranges with a negative lower bound	-	-
+integer-range-over-2^32	5	5	2	7	6	INTEGER ranges wider than 2^32 (e.g. BitRate)	-	-
+integer-unresolved-bound	0	0	0	0	0	INTEGER bounds naming a value this tool did not resolve	-	-
+size-constrained	2167	339	469	171	426	SIZE-constrained strings and SEQUENCE OF	-	-
+size-extensible	0	26	8	7	7	extensible SIZE constraints	-	-
+size-upper-16K-or-more	76	40	32	8	40	SIZE upper bound of 16K or more (PER fragmentation)	-	-
+octet-string-unbounded	161	42	140	6	115	OCTET STRING without SIZE (length may reach 16K: fragmentation)	-	-
+bit-string-unbounded	0	0	0	0	0	BIT STRING without SIZE	-	-
+sequence-of-upper-16K-or-more	71	39	32	7	37	SEQUENCE OF with an upper bound of 16K or more	-	-
+printable-string	0	2	2	2	0	PrintableString (APER character width)	-	-
+visible-string	0	4	3	3	1	VisibleString	-	-
+utf8-string	0	3	2	2	0	UTF8String	-	-
+ia5-string	0	0	0	0	0	IA5String	-	-
+boolean	157	0	1	0	0	BOOLEAN	-	-
+null	197	6	14	0	3	NULL	-	-
+real	0	0	0	0	0	REAL (asn1c PER support is limited)	-	-
+object-identifier	0	1	1	1	1	OBJECT IDENTIFIER	-	-

@@ -1,0 +1,7 @@
+module	file	lines	sha256
+XnAP-PDU-Descriptions	spec/asn1/xnap/XnAP-PDU-Descriptions.asn	779	bb87c920961c9e4ca0324c359990b45ec8760e454782c47deb5bf244d927f5b5
+XnAP-PDU-Contents	spec/asn1/xnap/XnAP-PDU-Contents.asn	3986	d60bacb02fd920cd4551195ae543fe9ed1871432bbf216f95ac32e7f102782b0
+XnAP-IEs	spec/asn1/xnap/XnAP-IEs.asn	10527	0fc6e76f5e8e4bb0cad98baf011fe8f4adb24ac042da079a7f7de194315f5a80
+XnAP-CommonDataTypes	spec/asn1/xnap/XnAP-CommonDataTypes.asn	45	b9e873f15df249baa8af526da8f3116b040fac255b29e24f773f91facdfc5f7e
+XnAP-Constants	spec/asn1/xnap/XnAP-Constants.asn	804	ecba4449ab8f07a21a62897fcd9c174e035ab6682f4dd8512258fd2d1a1d3d73
+XnAP-Containers	spec/asn1/xnap/XnAP-Containers.asn	189	3b65a7ec0618f280d28ebe7c2c293ea75b21b1ee2145eaacf13cdd43887eaf06
