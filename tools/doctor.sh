@@ -45,7 +45,7 @@ probe PYTHON python3 --version
 probe VENV_PYTHON "$ROOT/.venv/bin/python" --version
 probe PYCRATE "$ROOT/.venv/bin/python" -c 'import importlib.metadata as m; print(m.version("pycrate"))'
 probe TSHARK tshark -v
-probe ASN1C "$ASN1C" -v
+probe ASN1C sh -c "\"$ASN1C\" -v 2>&1"   # asn1c prints its version on stderr
 probe PYSIM env PYTHONPATH="$PYSIM_DIR/pysim-src" "$PYSIM_PY" -c 'import pySim; print("ok")'
 if [[ -f /usr/lib/llvm-21/lib/clang/21/lib/linux/libclang_rt.fuzzer-x86_64.a ]]; then
     VER[LIBFUZZER]="llvm-21"; else VER[LIBFUZZER]="MISSING"; fi

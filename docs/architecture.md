@@ -154,9 +154,14 @@ The rules are enforced by PRIVATE CMake link graphs plus `tools/check_layers.py`
   - **Built from source** by `tools/build-asn1c.sh` with gcc 15 and `-std=gnu17 -O2 -fno-strict-aliasing`. Without that last flag the fixer segfaults on strict-aliasing UB, failing 33 of the fork's own 130 compiler tests; with it, all 130 pass (row KS-PLAT-T6).
   - **One prefix per protocol** (`-fprefix`, complete at this commit) keeps five protocols in one binary without symbol clashes. A CI `nm` check guards it.
   - **The runtime is vendored unmodified** (`third_party/asn1c/runtime`) and built once. It comes from the skeleton subset asn1c lists for these flags; the BER-only files are not built.
-  - **One forced-include config header,** `src/codec/asn1/ksim_asn1_config.h`, fixes the `ASN_DISABLE_*` set for every translation unit. The runtime's structures change layout with it, so no post-processing of the generated code is needed (rows KS-PLAT-B3 to B6).
+  - **One forced-include config header,** `src/codec/asn1/ksim_asn1_config.h`, fixes the `ASN_DISABLE_*` set for every translation unit. The runtime's structures change layout with it, and with it the `encoding_constraints` initializers need no post-processing (rows KS-PLAT-B3 to B6).
+  - **Two recorded renames after generation** (`spec/tools/asn1_gen.py`, logged per stamp in `postprocess.log`):
+    - a C enumerator that collides with its own typedef (RRC's `CA-BandwidthClassNR-r17` value `t`; row KS-RRC-B1);
+    - the six inner `…__Member` typedef names `-fprefix` leaves bare (row KS-PLAT-B8).
+
+    After these, all 8,110 generated headers of the five protocols compile together in one C++20 translation unit, so code may combine protocols freely.
 - **Build.** One shared runtime library and **one static library per protocol**.
-  - Generation is keyed by a stamp: sha256 of (.asn, asn1c commit, flags, post-processor version). The stamp writes a `files.cmake` manifest, so there is no GLOB and no stale-file-list trap.
+  - Generation is keyed by a stamp: sha256 of (.asn, asn1c binary, flags, prefix, config header, generator version). It runs once per stamp, in parallel across protocols, into a shared cache (`~/.cache/kaluza-sim/asn1-gen`), and writes a `files.cmake` manifest from asn1c's own `Makefile.am.libasncodec`, so there is no GLOB and no stale-file-list trap. A stamp miss costs about 4.5 min, mostly F1AP's fixer; a hit costs nothing (row KS-PLAT-T8).
   - Generated C is built with `-O1 -g0 -ffunction-sections`, in unity batches where symbols allow, linked with `--gc-sections`, and cached by stamp in CI.
 - **Access rule.** Hand-written code never names a container type whose name encodes a line number:
   ```cpp

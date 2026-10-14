@@ -70,7 +70,7 @@ step() {  # step NAME COMMAND...  (logs to $LOGDIR/NAME.log)
 
 echo "CI_MODE=$MODE JOBS=$JOBS LINK_JOBS=$LINK_JOBS MEM_AVAILABLE_MIB=$avail_mib LOGDIR=$LOGDIR"
 
-needs=(guards "${PRESETS[@]}")
+needs=(guards asn1 "${PRESETS[@]}")
 step doctor "$ROOT/tools/doctor.sh" "${needs[@]}"
 
 for g in "$ROOT"/tools/guards/check_*.py; do

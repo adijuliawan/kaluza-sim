@@ -44,6 +44,7 @@ endif()
 
 find_package(OpenSSL 3.0 REQUIRED)
 find_package(GTest 1.14 REQUIRED)
+ksim_asn1_generate()
 
 enable_testing()
 include(GoogleTest)
