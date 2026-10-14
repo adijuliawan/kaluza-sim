@@ -1,0 +1,59 @@
+# Extracted by spec/tools/docx_tables.py 1.0 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+protocol	value_hex	value	name	message_clause
+5GMM	41	65	Registration request	8.2.6
+5GMM	42	66	Registration accept	8.2.7
+5GMM	43	67	Registration complete	8.2.8
+5GMM	44	68	Registration reject	8.2.9
+5GMM	45	69	Deregistration request (UE originating) as specified in clause 8.2.12)	8.2.12
+5GMM	46	70	Deregistration accept (UE originating) as specified in clause 8.2.13)	8.2.13
+5GMM	47	71	Deregistration request (UE terminated) as specified in clause 8.2.14)	8.2.14
+5GMM	48	72	Deregistration accept (UE terminated) as specified in clause 8.2.15)	8.2.15
+5GMM	4C	76	Service request	8.2.16
+5GMM	4D	77	Service reject	8.2.18
+5GMM	4E	78	Service accept	8.2.17
+5GMM	4F	79	Control plane service request	8.2.30
+5GMM	50	80	Network slice-specific authentication command	8.2.31
+5GMM	51	81	Network slice-specific authentication complete	8.2.32
+5GMM	52	82	Network slice-specific authentication result	8.2.33
+5GMM	54	84	Configuration update command	8.2.19
+5GMM	55	85	Configuration update complete	8.2.20
+5GMM	56	86	Authentication request	8.2.1
+5GMM	57	87	Authentication response	8.2.2
+5GMM	58	88	Authentication reject	8.2.5
+5GMM	59	89	Authentication failure	8.2.4
+5GMM	5A	90	Authentication result	8.2.3
+5GMM	5B	91	Identity request	8.2.21
+5GMM	5C	92	Identity response	8.2.22
+5GMM	5D	93	Security mode command	8.2.25
+5GMM	5E	94	Security mode complete	8.2.26
+5GMM	5F	95	Security mode reject	8.2.27
+5GMM	64	100	5GMM status	8.2.29
+5GMM	65	101	Notification	8.2.23
+5GMM	66	102	Notification response	8.2.24
+5GMM	67	103	UL NAS transport	8.2.10
+5GMM	68	104	DL NAS transport	8.2.11
+5GMM	69	105	Relay key request	8.2.34
+5GMM	6A	106	Relay key accept	8.2.35
+5GMM	6B	107	Relay key reject	8.2.36
+5GMM	6C	108	Relay authentication request	8.2.37
+5GMM	6D	109	Relay authentication response	8.2.38
+5GSM	C1	193	PDU session establishment request	8.3.1
+5GSM	C2	194	PDU session establishment accept	8.3.2
+5GSM	C3	195	PDU session establishment reject	8.3.3
+5GSM	C5	197	PDU session authentication command	8.3.4
+5GSM	C6	198	PDU session authentication complete	8.3.5
+5GSM	C7	199	PDU session authentication result	8.3.6
+5GSM	C9	201	PDU session modification request	8.3.7
+5GSM	CA	202	PDU session modification reject	8.3.8
+5GSM	CB	203	PDU session modification command	8.3.9
+5GSM	CC	204	PDU session modification complete	8.3.10
+5GSM	CD	205	PDU session modification command reject	8.3.11
+5GSM	D1	209	PDU session release request	8.3.12
+5GSM	D2	210	PDU session release reject	8.3.13
+5GSM	D3	211	PDU session release command	8.3.14
+5GSM	D4	212	PDU session release complete	8.3.15
+5GSM	D6	214	5GSM status	8.3.16
+5GSM	D8	216	Service-level authentication command	8.3.17
+5GSM	D9	217	Service-level authentication complete	8.3.18
+5GSM	DA	218	Remote UE report	8.3.19
+5GSM	DB	219	Remote UE report response	8.3.20

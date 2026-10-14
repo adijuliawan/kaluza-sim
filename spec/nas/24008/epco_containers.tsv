@@ -1,0 +1,139 @@
+# Extracted by spec/tools/docx_tables.py 1.0 from 3GPP TS 24.008 j50 (24008-j50.zip, sha256 8f207733d33bd93111d00800ac76941fb2cabcd5850b3486e3e2e5467298cca0). Do not edit.
+direction	id_hex	name	length_octets
+UE-to-network	0001	P-CSCF IPv6 Address Request	1
+UE-to-network	0002	IM CN Subsystem Signaling Flag	1
+UE-to-network	0003	DNS Server IPv6 Address Request	1
+UE-to-network	0004	Not Supported	1
+UE-to-network	0005	MS Support of Network Requested Bearer Control indicator	1
+UE-to-network	0006	Reserved	1
+UE-to-network	0007	DSMIPv6 Home Agent Address Request	1
+UE-to-network	0008	DSMIPv6 Home Network Prefix Request	1
+UE-to-network	0009	DSMIPv6 IPv4 Home Agent Address Request	1
+UE-to-network	000A	IP address allocation via NAS signalling	1
+UE-to-network	000B	IPv4 address allocation via DHCPv4	1
+UE-to-network	000C	P-CSCF IPv4 Address Request	1
+UE-to-network	000D	DNS Server IPv4 Address Request	1
+UE-to-network	000E	MSISDN Request	1
+UE-to-network	000F	IFOM-Support-Request	1
+UE-to-network	0010	IPv4 Link MTU Request	1
+UE-to-network	0011	MS support of Local address in TFT indicator) (see NOTE 4	1
+UE-to-network	0012	P-CSCF Re-selection support	1
+UE-to-network	0013	NBIFOM request indicator	1
+UE-to-network	0014	NBIFOM mode	1
+UE-to-network	0015	Non-IP Link MTU Request	1
+UE-to-network	0016	APN rate control support indicator	1
+UE-to-network	0017	3GPP PS data off UE status	1
+UE-to-network	0018	Reliable Data Service request indicator	1
+UE-to-network	0019	Additional APN rate control for exception data support indicator	1
+UE-to-network	001A	PDU session ID	1
+UE-to-network	001B	reserved	1
+UE-to-network	001C	Reserved	1
+UE-to-network	001D	Reserved	1
+UE-to-network	001E	Reserved	1
+UE-to-network	001F	Reserved	1
+UE-to-network	0020	Ethernet Frame Payload MTU Request	1
+UE-to-network	0021	Unstructured Link MTU Request	1
+UE-to-network	0022	5GSM cause value	1
+UE-to-network	0023	QoS rules with the length of two octets support indicator	2
+UE-to-network	0024	QoS flow descriptions with the length of two octets support indicator	2
+UE-to-network	0025	Reserved	1
+UE-to-network	0026	Reserved	1
+UE-to-network	0027	ACS information request	1
+UE-to-network	0029	Reserved	1
+UE-to-network	002A	Reserved	1
+UE-to-network	002B	Reserved	1
+UE-to-network	0030	ATSSS request	2
+UE-to-network	0031	DNS server security information indicator	2
+UE-to-network	0032	ECS configuration information provisioning support indicator	2
+UE-to-network	0035	Reserved	1
+UE-to-network	0036	PVS information request	1
+UE-to-network	0037	Reserved	1
+UE-to-network	0038	Reserved	1
+UE-to-network	0039	DNS server security protocol support	1
+UE-to-network	003A	EAS rediscovery support indication	1
+UE-to-network	003B	Reserved	1
+UE-to-network	003C	Reserved	1
+UE-to-network	003D	Reserved	1
+UE-to-network	003E	Reserved	1
+UE-to-network	003F	Reserved	1
+UE-to-network	0040	Reserved	1
+UE-to-network	0041	Service-level-AA container with the length of two octets	2
+UE-to-network	0047	EDC support indicator	1
+UE-to-network	0048	Reserved	1
+UE-to-network	0049	Reserved	1
+UE-to-network	004A	MS support of MAC address range in 5GS indicator	1
+UE-to-network	0050	SDNAEPC support indicator	1
+UE-to-network	0051	SDNAEPC EAP message with the length of two octets	2
+UE-to-network	0052	SDNAEPC DN-specific identity	1
+UE-to-network	0056	UE policy container with the length of two octets	2
+UE-to-network	0057	URSP provisioning in EPS support indicator	1
+UE-to-network	0058	S-NSSAI selected by MS	1
+network-to-UE	0001	P-CSCF IPv6 Address	1
+network-to-UE	0002	IM CN Subsystem Signaling Flag	1
+network-to-UE	0003	DNS Server IPv6 Address	1
+network-to-UE	0004	Policy Control rejection code	1
+network-to-UE	0005	Selected Bearer Control Mode	1
+network-to-UE	0006	Reserved	1
+network-to-UE	0007	DSMIPv6 Home Agent Address	1
+network-to-UE	0008	DSMIPv6 Home Network Prefix	1
+network-to-UE	0009	DSMIPv6 IPv4 Home Agent Address	1
+network-to-UE	000A	Reserved	1
+network-to-UE	000B	Reserved	1
+network-to-UE	000C	P-CSCF IPv4 Address	1
+network-to-UE	000D	DNS Server IPv4 Address	1
+network-to-UE	000E	MSISDN	1
+network-to-UE	000F	IFOM-Support	1
+network-to-UE	0010	IPv4 Link MTU	1
+network-to-UE	0011	Network support of Local address in TFT indicator	1
+network-to-UE	0012	Reserved	1
+network-to-UE	0013	NBIFOM accepted indicator	1
+network-to-UE	0014	NBIFOM mode	1
+network-to-UE	0015	Non-IP Link MTU	1
+network-to-UE	0016	APN rate control parameters	1
+network-to-UE	0017	3GPP PS data off support indication	1
+network-to-UE	0018	Reliable Data Service accepted indicator	1
+network-to-UE	0019	Additional APN rate control for exception data parameters	1
+network-to-UE	001A	reserved	1
+network-to-UE	001B	S-NSSAI	1
+network-to-UE	001C	QoS rules	1
+network-to-UE	001D	Session-AMBR	1
+network-to-UE	001E	PDU session address lifetime	1
+network-to-UE	001F	QoS flow descriptions	1
+network-to-UE	0020	Ethernet Frame Payload MTU	1
+network-to-UE	0021	Unstructured Link MTU	1
+network-to-UE	0022	Reserved	1
+network-to-UE	0023	QoS rules with the length of two octets	2
+network-to-UE	0024	QoS flow descriptions with the length of two octets	2
+network-to-UE	0025	Small data rate control parameters	1
+network-to-UE	0026	Additional small data rate control for exception data parameters	1
+network-to-UE	0027	ACS information	1
+network-to-UE	0028	Initial small data rate control parameters	1
+network-to-UE	0029	Initial additional small data rate control for exception data parameters	1
+network-to-UE	002A	Initial APN rate control parameters	1
+network-to-UE	002B	Initial additional APN rate control for exception data parameters	1
+network-to-UE	0030	ATSSS response with the length of two octets	2
+network-to-UE	0031	DNS server security information with length of two octets	2
+network-to-UE	0032	ECS address with the length of two octets	2
+network-to-UE	0035	ECSP identifier	1
+network-to-UE	0036	PVS IPv4 Address	1
+network-to-UE	0037	PVS IPv6 Address	1
+network-to-UE	0038	PVS name	1
+network-to-UE	0039	reserved	1
+network-to-UE	003A	EAS rediscovery indication without indicated impact	1
+network-to-UE	003B	EAS rediscovery indication with impacted EAS IPv4 address range	1
+network-to-UE	003C	EAS rediscovery indication with impacted EAS IPv6 address range	1
+network-to-UE	003D	EAS rediscovery indication with impacted EAS FQDN	1
+network-to-UE	003E	Uplink data not allowed	1
+network-to-UE	003F	Uplink data allowed	1
+network-to-UE	0040	UAS services not allowed indication	1
+network-to-UE	0041	Service-level-AA container with the length of two octets	2
+network-to-UE	0047	Reserved	1
+network-to-UE	0048	EDC usage allowed indicator	1
+network-to-UE	0049	EDC usage required indicator	1
+network-to-UE	004A	Network support of MAC address range in 5GS indicator	1
+network-to-UE	0050	Reserved	1
+network-to-UE	0051	SDNAEPC EAP message with the length of two octets	2
+network-to-UE	0052	Reserved	1
+network-to-UE	0056	UE policy container with the length of two octets	2
+network-to-UE	0057	URSP provisioning in EPS support indicator	1
+network-to-UE	0058	Reserved	1

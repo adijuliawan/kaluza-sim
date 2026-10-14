@@ -1,0 +1,48 @@
+# Extracted by spec/tools/docx_tables.py 1.0 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+value	value_hex	name
+8	08	Operator determined barring
+26	1A	Insufficient resources
+27	1B	Missing or unknown DNN
+28	1C	Unknown PDU session type
+29	1D	User authentication or authorization failed
+31	1F	Request rejected, unspecified
+32	20	Service option not supported
+33	21	Requested service option not subscribed
+35	23	PTI already in use
+36	24	Regular deactivation
+37	25	5GS QoS not accepted
+38	26	Network failure
+39	27	Reactivation requested
+41	29	Semantic error in the TFT operation
+42	2A	Syntactical error in the TFT operation
+43	2B	Invalid PDU session identity
+44	2C	Semantic errors in packet filter(s)
+45	2D	Syntactical error in packet filter(s)
+46	2E	Out of LADN service area
+47	2F	PTI mismatch
+50	32	PDU session type IPv4 only allowed
+51	33	PDU session type IPv6 only allowed
+54	36	PDU session does not exist
+57	39	PDU session type IPv4v6 only allowed
+58	3A	PDU session type Unstructured only allowed
+59	3B	Unsupported 5QI value
+61	3D	PDU session type Ethernet only allowed
+67	43	Insufficient resources for specific slice and DNN
+68	44	Not supported SSC mode
+69	45	Insufficient resources for specific slice
+70	46	Missing or unknown DNN in a slice
+81	51	Invalid PTI value
+82	52	Maximum data rate per UE for user-plane integrity protection is too low
+83	53	Semantic error in the QoS operation
+84	54	Syntactical error in the QoS operation
+85	55	Invalid mapped EPS bearer identity
+86	56	UAS services not allowed
+87	57	QoS differentiation for non-3GPP device identifier(s) not available
+95	5F	Semantically incorrect message
+96	60	Invalid mandatory information
+97	61	Message type non-existent or not implemented
+98	62	Message type not compatible with the protocol state
+99	63	Information element non-existent or not implemented
+100	64	Conditional IE error
+101	65	Message not compatible with the protocol state
+111	6F	Protocol error, unspecified

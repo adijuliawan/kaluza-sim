@@ -1,0 +1,52 @@
+# Extracted by spec/tools/docx_tables.py 1.0 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+value	value_hex	name
+3	03	Illegal UE
+5	05	PEI not accepted
+6	06	Illegal ME
+7	07	5GS services not allowed
+9	09	UE identity cannot be derived by the network
+10	0A	Implicitly de-registered
+11	0B	PLMN not allowed
+12	0C	Tracking area not allowed
+13	0D	Roaming not allowed in this tracking area
+15	0F	No suitable cells in tracking area
+20	14	MAC failure
+21	15	Synch failure
+22	16	Congestion
+23	17	UE security capabilities mismatch
+24	18	Security mode rejected, unspecified
+26	1A	Non-5G authentication unacceptable
+27	1B	N1 mode not allowed
+28	1C	Restricted service area
+31	1F	Redirection to EPC required
+36	24	IAB-node operation not authorized
+43	2B	LADN not available
+62	3E	No network slices available
+65	41	Maximum number of PDU sessions reached
+67	43	Insufficient resources for specific slice and DNN
+69	45	Insufficient resources for specific slice
+71	47	ngKSI already in use
+72	48	Non-3GPP access to 5GCN not allowed
+73	49	Serving network not authorized
+74	4A	Temporarily not authorized for this SNPN
+75	4B	Permanently not authorized for this SNPN
+76	4C	Not authorized for this CAG or authorized for CAG cells only
+77	4D	Wireline access area not allowed
+78	4E	PLMN not allowed to operate at the present UE location
+79	4F	UAS services not allowed
+80	50	Disaster roaming for the determined PLMN with disaster condition not allowed
+81	51	Selected N3IWF is not compatible with the allowed NSSAI
+82	52	Selected TNGF is not compatible with the allowed NSSAI
+90	5A	Payload was not forwarded
+91	5B	DNN not supported or not subscribed in the slice
+92	5C	Insufficient user-plane resources for the PDU session
+93	5D	Onboarding services terminated
+94	5E	User plane positioning not authorized
+95	5F	Semantically incorrect message
+96	60	Invalid mandatory information
+97	61	Message type non-existent or not implemented
+98	62	Message type not compatible with the protocol state
+99	63	Information element non-existent or not implemented
+100	64	Conditional IE error
+101	65	Message not compatible with the protocol state
+111	6F	Protocol error, unspecified

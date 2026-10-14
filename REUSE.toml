@@ -31,3 +31,23 @@ path = ["spec/asn1/**/*.asn"]
 precedence = "override"
 SPDX-FileCopyrightText = "3GPP Organizational Partners (ARIB, ATIS, CCSA, ETSI, TSDSI, TTA, TTC)"
 SPDX-License-Identifier = "LicenseRef-3GPP-Spec-Text"
+
+[[annotations]]
+path = ["spec/nas/**/*.tsv", "spec/kat/milenage.tsv", "spec/kat/rijndael.tsv", "spec/kat/keccak.tsv",
+        "spec/kat/tuak.tsv", "spec/kat/milenage256.tsv", "spec/kat/eea2.tsv", "spec/kat/eia2.tsv",
+        "spec/kat/eia1.tsv", "spec/kat/ecies.tsv"]
+precedence = "override"
+SPDX-FileCopyrightText = "3GPP Organizational Partners (ARIB, ATIS, CCSA, ETSI, TSDSI, TTA, TTC)"
+SPDX-License-Identifier = "LicenseRef-3GPP-Spec-Text"
+
+[[annotations]]
+path = ["spec/kat/uea2.tsv", "spec/kat/uia2.tsv"]
+precedence = "override"
+SPDX-FileCopyrightText = "ETSI SAGE"
+SPDX-License-Identifier = "LicenseRef-SAGE-Test-Data"
+
+[[annotations]]
+path = ["spec/kat/eap_aka_prime.tsv"]
+precedence = "override"
+SPDX-FileCopyrightText = "IETF Trust and the persons identified as the document authors (RFC 9048)"
+SPDX-License-Identifier = "LicenseRef-IETF-RFC-Text"

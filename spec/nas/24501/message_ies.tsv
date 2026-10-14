@@ -1,0 +1,671 @@
+# Extracted by spec/tools/docx_tables.py 1.0 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+key	message	seq	iei	ie_name	type_name	reference	presence	format	length
+8.2.1	AUTHENTICATION REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.1	AUTHENTICATION REQUEST	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.1	AUTHENTICATION REQUEST	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.1	AUTHENTICATION REQUEST	4		Authentication request message identity	Message type	9.7	M	V	1
+8.2.1	AUTHENTICATION REQUEST	5		ngKSI	NAS key set identifier	9.11.3.32	M	V	1/2
+8.2.1	AUTHENTICATION REQUEST	6		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.1	AUTHENTICATION REQUEST	7		ABBA	ABBA	9.11.3.10	M	LV	3-n
+8.2.1	AUTHENTICATION REQUEST	8	21	Authentication parameter RAND (5G authentication challenge)	Authentication parameter RAND	9.11.3.16	O	TV	17
+8.2.1	AUTHENTICATION REQUEST	9	20	Authentication parameter AUTN (5G authentication challenge)	Authentication parameter AUTN	9.11.3.15	O	TLV	18
+8.2.1	AUTHENTICATION REQUEST	10	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.2	AUTHENTICATION RESPONSE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.2	AUTHENTICATION RESPONSE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.2	AUTHENTICATION RESPONSE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.2	AUTHENTICATION RESPONSE	4		Authentication response message identity	Message type	9.7	M	V	1
+8.2.2	AUTHENTICATION RESPONSE	5	2D	Authentication response parameter	Authentication response parameter	9.11.3.17	O	TLV	18
+8.2.2	AUTHENTICATION RESPONSE	6	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.3	AUTHENTICATION RESULT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.3	AUTHENTICATION RESULT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.3	AUTHENTICATION RESULT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.3	AUTHENTICATION RESULT	4		Authentication result message identity	Message type	9.7	M	V	1
+8.2.3	AUTHENTICATION RESULT	5		ngKSI	NAS key set identifier	9.11.3.32	M	V	1/2
+8.2.3	AUTHENTICATION RESULT	6		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.3	AUTHENTICATION RESULT	7		EAP message	EAP message	9.11.2.2	M	LV-E	6-1502
+8.2.3	AUTHENTICATION RESULT	8	38	ABBA	ABBA	9.11.3.10	O	TLV	4-n
+8.2.3	AUTHENTICATION RESULT	9	55	AUN3 device security key	AUN3 device security key	9.11.3.107	O	TLV	36-n
+8.2.4	AUTHENTICATION FAILURE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.4	AUTHENTICATION FAILURE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.4	AUTHENTICATION FAILURE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.4	AUTHENTICATION FAILURE	4		Authentication failure message identity	Message type	9.7	M	V	1
+8.2.4	AUTHENTICATION FAILURE	5		5GMM cause	5GMM cause	9.11.3.2	M	V	1
+8.2.4	AUTHENTICATION FAILURE	6	30	Authentication failure parameter	Authentication failure parameter	9.11.3.14	O	TLV	16
+8.2.5	AUTHENTICATION REJECT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.5	AUTHENTICATION REJECT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.5	AUTHENTICATION REJECT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.5	AUTHENTICATION REJECT	4		Authentication reject message identity	Message type	9.7	M	V	1
+8.2.5	AUTHENTICATION REJECT	5	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.6	REGISTRATION REQUEST	1		Extended protocol discriminator	Extended Protocol discriminator	9.2	M	V	1
+8.2.6	REGISTRATION REQUEST	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.6	REGISTRATION REQUEST	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.6	REGISTRATION REQUEST	4		Registration request message identity	Message type	9.7	M	V	1
+8.2.6	REGISTRATION REQUEST	5		5GS registration type	5GS registration type	9.11.3.7	M	V	1/2
+8.2.6	REGISTRATION REQUEST	6		ngKSI	NAS key set identifier	9.11.3.32	M	V	1/2
+8.2.6	REGISTRATION REQUEST	7		5GS mobile identity	5GS mobile identity	9.11.3.4	M	LV-E	6-n
+8.2.6	REGISTRATION REQUEST	8	C-	Non-current native NAS key set identifier	NAS key set identifier	9.11.3.32	O	TV	1
+8.2.6	REGISTRATION REQUEST	9	10	5GMM capability	5GMM capability	9.11.3.1	O	TLV	3-15
+8.2.6	REGISTRATION REQUEST	10	2E	UE security capability	UE security capability	9.11.3.54	O	TLV	4-10
+8.2.6	REGISTRATION REQUEST	11	2F	Requested NSSAI	NSSAI	9.11.3.37	O	TLV	4-74
+8.2.6	REGISTRATION REQUEST	12	52	Last visited registered TAI	5GS tracking area identity	9.11.3.8	O	TV	7
+8.2.6	REGISTRATION REQUEST	13	17	S1 UE network capability	S1 UE network capability	9.11.3.48	O	TLV	4-15
+8.2.6	REGISTRATION REQUEST	14	40	Uplink data status	Uplink data status	9.11.3.57	O	TLV	4-34
+8.2.6	REGISTRATION REQUEST	15	50	PDU session status	PDU session status	9.11.3.44	O	TLV	4-34
+8.2.6	REGISTRATION REQUEST	16	B-	MICO indication	MICO indication	9.11.3.31	O	TV	1
+8.2.6	REGISTRATION REQUEST	17	2B	UE status	UE status	9.11.3.56	O	TLV	3
+8.2.6	REGISTRATION REQUEST	18	77	Additional GUTI	5GS mobile identity	9.11.3.4	O	TLV-E	14
+8.2.6	REGISTRATION REQUEST	19	25	Allowed PDU session status	Allowed PDU session status	9.11.3.13	O	TLV	4-34
+8.2.6	REGISTRATION REQUEST	20	18	UE's usage setting	UE's usage setting	9.11.3.55	O	TLV	3
+8.2.6	REGISTRATION REQUEST	21	51	Requested DRX parameters	5GS DRX parameters	9.11.3.2A	O	TLV	3
+8.2.6	REGISTRATION REQUEST	22	70	EPS NAS message container	EPS NAS message container	9.11.3.24	O	TLV-E	4-n
+8.2.6	REGISTRATION REQUEST	23	74	LADN indication	LADN indication	9.11.3.29	O	TLV-E	3-811
+8.2.6	REGISTRATION REQUEST	24	8-	Payload container type	Payload container type	9.11.3.40	O	TV	1
+8.2.6	REGISTRATION REQUEST	25	7B	Payload container	Payload container	9.11.3.39	O	TLV-E	4-65538
+8.2.6	REGISTRATION REQUEST	26	9-	Network slicing indication	Network slicing indication	9.11.3.36	O	TV	1
+8.2.6	REGISTRATION REQUEST	27	53	5GS update type	5GS update type	9.11.3.9A	O	TLV	3
+8.2.6	REGISTRATION REQUEST	28	41	Mobile station classmark 2	Mobile station classmark 2	9.11.3.31C	O	TLV	5
+8.2.6	REGISTRATION REQUEST	29	42	Supported codecs	Supported codec list	9.11.3.51A	O	TLV	5-n
+8.2.6	REGISTRATION REQUEST	30	71	NAS message container	NAS message container	9.11.3.33	O	TLV-E	4-n
+8.2.6	REGISTRATION REQUEST	31	60	EPS bearer context status	EPS bearer context status	9.11.3.23A	O	TLV	4
+8.2.6	REGISTRATION REQUEST	32	6E	Requested extended DRX parameters	Extended DRX parameters	9.11.3.26A	O	TLV	3-4
+8.2.6	REGISTRATION REQUEST	33	6A	T3324 value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.6	REGISTRATION REQUEST	34	67	UE radio capability ID	UE radio capability ID	9.11.3.68	O	TLV	3-n
+8.2.6	REGISTRATION REQUEST	35	35	Requested mapped NSSAI	Mapped NSSAI	9.11.3.31B	O	TLV	3-42
+8.2.6	REGISTRATION REQUEST	36	48	Additional information requested	Additional information requested	9.11.3.12A	O	TLV	3
+8.2.6	REGISTRATION REQUEST	37	1A	Requested WUS assistance information	WUS assistance information	9.11.3.71	O	TLV	3
+8.2.6	REGISTRATION REQUEST	38	A-	N5GC indication	N5GC indication	9.11.3.72	O	TV	1
+8.2.6	REGISTRATION REQUEST	39	30	Requested NB-N1 mode DRX parameters	NB-N1 mode DRX parameters	9.11.3.73	O	TLV	3
+8.2.6	REGISTRATION REQUEST	40	29	UE request type	UE request type	9.11.3.76	O	TLV	3
+8.2.6	REGISTRATION REQUEST	41	28	Paging restriction	Paging restriction	9.11.3.77	O	TLV	3-35
+8.2.6	REGISTRATION REQUEST	42	72	Service-level-AA container	Service-level-AA container	9.11.2.10	O	TLV-E	4-65538
+8.2.6	REGISTRATION REQUEST	43	32	NID	NID	9.11.3.79	O	TLV	8
+8.2.6	REGISTRATION REQUEST	44	16	UE determined PLMN with disaster condition	PLMN identity	9.11.3.85	O	TLV	5
+8.2.6	REGISTRATION REQUEST	45	2A	Requested PEIPS assistance information	PEIPS assistance information	9.11.3.80	O	TLV	3
+8.2.6	REGISTRATION REQUEST	46	3B	Requested T3512 value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.6	REGISTRATION REQUEST	47	3C	Unavailability information	Unavailability information	9.11.2.20	O	TLV	3-9
+8.2.6	REGISTRATION REQUEST	48	3F	Non-3GPP path switching information	Non-3GPP path switching information	9.11.3.102	O	TLV	3
+8.2.6	REGISTRATION REQUEST	49	56	AUN3 indication	AUN3 indication	9.11.3.104	O	TLV	3
+8.2.6	REGISTRATION REQUEST	50	64	Requested LP-WUSPS assistance information	LP-WUSPS assistance information	9.11.3.111	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.7	REGISTRATION ACCEPT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.7	REGISTRATION ACCEPT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.7	REGISTRATION ACCEPT	4		Registration accept message identity	Message type	9.7	M	V	1
+8.2.7	REGISTRATION ACCEPT	5		5GS registration result	5GS registration result	9.11.3.6	M	LV	2
+8.2.7	REGISTRATION ACCEPT	6	77	5G-GUTI	5GS mobile identity	9.11.3.4	O	TLV-E	14
+8.2.7	REGISTRATION ACCEPT	7	4A	Equivalent PLMNs	PLMN list	9.11.3.45	O	TLV	5-47
+8.2.7	REGISTRATION ACCEPT	8	54	TAI list	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.7	REGISTRATION ACCEPT	9	15	Allowed NSSAI	NSSAI	9.11.3.37	O	TLV	4-74
+8.2.7	REGISTRATION ACCEPT	10	11	Rejected NSSAI	Rejected NSSAI	9.11.3.46	O	TLV	4-42
+8.2.7	REGISTRATION ACCEPT	11	31	Configured NSSAI	NSSAI	9.11.3.37	O	TLV	4-146
+8.2.7	REGISTRATION ACCEPT	12	21	5GS network feature support	5GS network feature support	9.11.3.5	O	TLV	3-6
+8.2.7	REGISTRATION ACCEPT	13	50	PDU session status	PDU session status	9.11.3.44	O	TLV	4-34
+8.2.7	REGISTRATION ACCEPT	14	26	PDU session reactivation result	PDU session reactivation result	9.11.3.42	O	TLV	4-34
+8.2.7	REGISTRATION ACCEPT	15	72	PDU session reactivation result error cause	PDU session reactivation result error cause	9.11.3.43	O	TLV-E	5-515
+8.2.7	REGISTRATION ACCEPT	16	79	LADN information	LADN information	9.11.3.30	O	TLV-E	13-1715
+8.2.7	REGISTRATION ACCEPT	17	B-	MICO indication	MICO indication	9.11.3.31	O	TV	1
+8.2.7	REGISTRATION ACCEPT	18	9-	Network slicing indication	Network slicing indication	9.11.3.36	O	TV	1
+8.2.7	REGISTRATION ACCEPT	19	27	Service area list	Service area list	9.11.3.49	O	TLV	6-114
+8.2.7	REGISTRATION ACCEPT	20	5E	T3512 value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	21	5D	Non-3GPP de-registration timer value	GPRS timer 2	9.11.2.4	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	22	16	T3502 value	GPRS timer 2	9.11.2.4	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	23	34	Emergency number list	Emergency number list	9.11.3.23	O	TLV	5-50
+8.2.7	REGISTRATION ACCEPT	24	7A	Extended emergency number list	Extended emergency number list	9.11.3.26	O	TLV-E	7-65538
+8.2.7	REGISTRATION ACCEPT	25	73	SOR transparent container	SOR transparent container	9.11.3.51	O	TLV-E	20-n
+8.2.7	REGISTRATION ACCEPT	26	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.7	REGISTRATION ACCEPT	27	A-	NSSAI inclusion mode	NSSAI inclusion mode	9.11.3.37A	O	TV	1
+8.2.7	REGISTRATION ACCEPT	28	76	Operator-defined access category definitions	Operator-defined access category definitions	9.11.3.38	O	TLV-E	3-8323
+8.2.7	REGISTRATION ACCEPT	29	51	Negotiated DRX parameters	5GS DRX parameters	9.11.3.2A	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	30	D-	Non-3GPP NW policies	Non-3GPP NW provided policies	9.11.3.36A	O	TV	1
+8.2.7	REGISTRATION ACCEPT	31	60	EPS bearer context status	EPS bearer context status	9.11.3.23A	O	TLV	4
+8.2.7	REGISTRATION ACCEPT	32	6E	Negotiated extended DRX parameters	Extended DRX parameters	9.11.3.26A	O	TLV	3-4
+8.2.7	REGISTRATION ACCEPT	33	6C	T3447 value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	34	6B	T3448 value	GPRS timer 2	9.11.2.4	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	35	6A	T3324 value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	36	67	UE radio capability ID	UE radio capability ID	9.11.3.68	O	TLV	3-n
+8.2.7	REGISTRATION ACCEPT	37	E-	UE radio capability ID deletion indication	UE radio capability ID deletion indication	9.11.3.69	O	TV	1
+8.2.7	REGISTRATION ACCEPT	38	39	Pending NSSAI	NSSAI	9.11.3.37	O	TLV	4-146
+8.2.7	REGISTRATION ACCEPT	39	74	Ciphering key data	Ciphering key data	9.11.3.18C	O	TLV-E	34-n
+8.2.7	REGISTRATION ACCEPT	40	75	CAG information list	CAG information list	9.11.3.18A	O	TLV-E	3-n
+8.2.7	REGISTRATION ACCEPT	41	1B	Truncated 5G-S-TMSI configuration	Truncated 5G-S-TMSI configuration	9.11.3.70	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	42	1C	Negotiated WUS assistance information	WUS assistance information	9.11.3.71	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	43	29	Negotiated NB-N1 mode DRX parameters	NB-N1 mode DRX parameters	9.11.3.73	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	44	68	Extended rejected NSSAI	Extended rejected NSSAI	9.11.3.75	O	TLV	5-90
+8.2.7	REGISTRATION ACCEPT	45	7B	Service-level-AA container	Service-level-AA container	9.11.2.10	O	TLV-E	4-65538
+8.2.7	REGISTRATION ACCEPT	46	33	Negotiated PEIPS assistance information	PEIPS assistance information	9.11.3.80	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	47	35	5GS additional request result	5GS additional request result	9.11.3.81	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	48	70	NSSRG information	NSSRG information	9.11.3.82	O	TLV-E	7-4099
+8.2.7	REGISTRATION ACCEPT	49	14	Disaster roaming wait range	Registration wait range	9.11.3.84	O	TLV	4
+8.2.7	REGISTRATION ACCEPT	50	2C	Disaster return wait range	Registration wait range	9.11.3.84	O	TLV	4
+8.2.7	REGISTRATION ACCEPT	51	13	List of PLMNs to be used in disaster condition	List of PLMNs to be used in disaster condition	9.11.3.83	O	TLV	2-n
+8.2.7	REGISTRATION ACCEPT	52	1D	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for roaming"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.7	REGISTRATION ACCEPT	53	1E	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for regional provision of service"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.7	REGISTRATION ACCEPT	54	71	Extended CAG information list	Extended CAG information list	9.11.3.86	O	TLV-E	3-n
+8.2.7	REGISTRATION ACCEPT	55	7C	NSAG information	NSAG information	9.11.3.87	O	TLV-E	9-3143
+8.2.7	REGISTRATION ACCEPT	56	3D	Equivalent SNPNs	SNPN list	9.11.3.92	O	TLV	11-137
+8.2.7	REGISTRATION ACCEPT	57	32	NID	NID	9.11.3.79	O	TLV	8
+8.2.7	REGISTRATION ACCEPT	58	7D	Registration accept type 6 IE container	Type 6 IE container	9.11.3.98	O	TLV-E	6-65538
+8.2.7	REGISTRATION ACCEPT	59	4B	RAN timing synchronization	RAN timing synchronization	9.11.3.95	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	60	4C	Alternative NSSAI	Alternative NSSAI	9.11.3.97	O	TLV	2-146
+8.2.7	REGISTRATION ACCEPT	61	4F	Discontinuous coverage maximum time offset	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	62	5B	S-NSSAI time validity information	S-NSSAI time validity information	9.11.3.101	O	TLV	23-257
+8.2.7	REGISTRATION ACCEPT	63	3C	Unavailability configuration	Unavailability configuration	9.11.2.21	O	TLV	3-6
+8.2.7	REGISTRATION ACCEPT	64	5C	Feature authorization indication	Feature authorization indication	9.11.3.105	O	TLV	3-257
+8.2.7	REGISTRATION ACCEPT	65	61	On-demand NSSAI	On-demand NSSAI	9.11.3.108	O	TLV	5-210
+8.2.7	REGISTRATION ACCEPT	66	63	Access technology utilization control	Access technology utilization control	9.11.3.110	O	TLV	4-5
+8.2.7	REGISTRATION ACCEPT	67	64	Negotiated LP-WUSPS assistance information	LP-WUSPS assistance information	9.11.3.111	O	TLV	3
+8.2.7	REGISTRATION ACCEPT	68	8-	LP-WUS status	LP-WUS status	9.11.3.112	O	TV	1
+8.2.8	REGISTRATION COMPLETE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.8	REGISTRATION COMPLETE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.8	REGISTRATION COMPLETE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.8	REGISTRATION COMPLETE	4		Registration complete message identity	Message type	9.7	M	V	1
+8.2.8	REGISTRATION COMPLETE	5	73	SOR transparent container	SOR transparent container	9.11.3.51	O	TLV-E	20
+8.2.9	REGISTRATION REJECT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.9	REGISTRATION REJECT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.9	REGISTRATION REJECT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.9	REGISTRATION REJECT	4		Registration reject message identity	Message type	9.7	M	V	1
+8.2.9	REGISTRATION REJECT	5		5GMM cause	5GMM cause	9.11.3.2	M	V	1
+8.2.9	REGISTRATION REJECT	6	5F	T3346 value	GPRS timer 2	9.11.2.4	O	TLV	3
+8.2.9	REGISTRATION REJECT	7	16	T3502 value	GPRS timer 2	9.11.2.4	O	TLV	3
+8.2.9	REGISTRATION REJECT	8	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.9	REGISTRATION REJECT	9	69	Rejected NSSAI	Rejected NSSAI	9.11.3.46	O	TLV	4-42
+8.2.9	REGISTRATION REJECT	10	75	CAG information list	CAG information list	9.11.3.18A	O	TLV-E	3-n
+8.2.9	REGISTRATION REJECT	11	68	Extended rejected NSSAI	Extended rejected NSSAI	9.11.3.75	O	TLV	5-90
+8.2.9	REGISTRATION REJECT	12	2C	Disaster return wait range	Registration wait range	9.11.3.84	O	TLV	4
+8.2.9	REGISTRATION REJECT	13	71	Extended CAG information list	Extended CAG information list	9.11.3.86	O	TLV-E	3-n
+8.2.9	REGISTRATION REJECT	14	3A	Lower bound timer value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.9	REGISTRATION REJECT	15	1D	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for roaming"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.9	REGISTRATION REJECT	16	1E	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for regional provision of service"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.9	REGISTRATION REJECT	17	3E	N3IWF identifier	N3IWF identifier	9.11.3.93	O	TLV	7-n
+8.2.9	REGISTRATION REJECT	18	4D	TNAN information	TNAN information	9.11.3.94	O	TLV	3-n
+8.2.9	REGISTRATION REJECT	19	62	Extended 5GMM cause	Extended 5GMM cause	9.11.3.109	O	TLV	3
+8.2.9	REGISTRATION REJECT	20	63	Access technology utilization control	Access technology utilization control	9.11.3.110	O	TLV	4-5
+8.2.10	UL NAS TRANSPORT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.10	UL NAS TRANSPORT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.10	UL NAS TRANSPORT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.10	UL NAS TRANSPORT	4		UL NAS TRANSPORT message identity	Message type	9.7	M	V	1
+8.2.10	UL NAS TRANSPORT	5		Payload container type	Payload container type	9.11.3.40	M	V	1/2
+8.2.10	UL NAS TRANSPORT	6		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.10	UL NAS TRANSPORT	7		Payload container	Payload container	9.11.3.39	M	LV-E	3-65537
+8.2.10	UL NAS TRANSPORT	8	12	PDU session ID	PDU session identity 2	9.11.3.41	C	TV	2
+8.2.10	UL NAS TRANSPORT	9	59	Old PDU session ID	PDU session identity 2	9.11.3.41	O	TV	2
+8.2.10	UL NAS TRANSPORT	10	8-	Request type	Request type	9.11.3.47	O	TV	1
+8.2.10	UL NAS TRANSPORT	11	22	S-NSSAI	S-NSSAI	9.11.2.8	O	TLV	3-10
+8.2.10	UL NAS TRANSPORT	12	25	DNN	DNN	9.11.2.1B	O	TLV	3-102
+8.2.10	UL NAS TRANSPORT	13	24	Additional information	Additional information	9.11.2.1	O	TLV	3-n
+8.2.10	UL NAS TRANSPORT	14	A-	MA PDU session information	MA PDU session information	9.11.3.31A	O	TV	1
+8.2.10	UL NAS TRANSPORT	15	F-	Release assistance indication	Release assistance indication	9.11.3.46A	O	TV	1
+8.2.10	UL NAS TRANSPORT	16	4E	Non-3GPP access path switching indication	Non-3GPP access path switching indication	9.11.3.99	O	TLV	3
+8.2.10	UL NAS TRANSPORT	17	5A	Alternative S-NSSAI	S-NSSAI	9.11.2.8	O	TLV	3-10
+8.2.10	UL NAS TRANSPORT	18	9-	Payload container information	Payload container information	9.11.3.106	O	TV	1
+8.2.11	DL NAS TRANSPORT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.11	DL NAS TRANSPORT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.11	DL NAS TRANSPORT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.11	DL NAS TRANSPORT	4		DL NAS TRANSPORT message identity	Message type	9.7	M	V	1
+8.2.11	DL NAS TRANSPORT	5		Payload container type	Payload container type	9.11.3.40	M	V	1/2
+8.2.11	DL NAS TRANSPORT	6		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.11	DL NAS TRANSPORT	7		Payload container	Payload container	9.11.3.39	M	LV-E	3-65537
+8.2.11	DL NAS TRANSPORT	8	12	PDU session ID	PDU session identity 2	9.11.3.41	C	TV	2
+8.2.11	DL NAS TRANSPORT	9	24	Additional information	Additional information	9.11.2.1	O	TLV	3-n
+8.2.11	DL NAS TRANSPORT	10	58	5GMM cause	5GMM cause	9.11.3.2	O	TV	2
+8.2.11	DL NAS TRANSPORT	11	37	Back-off timer value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.11	DL NAS TRANSPORT	12	3A	Lower bound timer value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.12	DEREGISTRATION REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.12	DEREGISTRATION REQUEST	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.12	DEREGISTRATION REQUEST	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.12	DEREGISTRATION REQUEST	4		De-registration request message identity	Message type	9.7	M	V	1
+8.2.12	DEREGISTRATION REQUEST	5		De-registration type	De-registration type	9.11.3.20	M	V	1/2
+8.2.12	DEREGISTRATION REQUEST	6		ngKSI	NAS key set identifier	9.11.3.32	M	V	1/2
+8.2.12	DEREGISTRATION REQUEST	7		5GS mobile identity	5GS mobile identity	9.11.3.4	M	LV-E	6-n
+8.2.12	DEREGISTRATION REQUEST	8	3C	Unavailability information	Unavailability information	9.11.2.20	O	TLV	3-9
+8.2.12	DEREGISTRATION REQUEST	9	71	NAS message container	NAS message container	9.11.3.33	O	TLV-E	4-n
+8.2.13	DEREGISTRATION ACCEPT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.13	DEREGISTRATION ACCEPT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.13	DEREGISTRATION ACCEPT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.13	DEREGISTRATION ACCEPT	4		De-registration accept message identity	Message type	9.7	M	V	1
+8.2.14	DEREGISTRATION REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.14	DEREGISTRATION REQUEST	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.14	DEREGISTRATION REQUEST	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.14	DEREGISTRATION REQUEST	4		De-registration request message identity	Message type	9.7	M	V	1
+8.2.14	DEREGISTRATION REQUEST	5		De-registration type	De-registration type	9.11.3.20	M	V	1/2
+8.2.14	DEREGISTRATION REQUEST	6		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.14	DEREGISTRATION REQUEST	7	58	5GMM cause	5GMM cause	9.11.3.2	O	TV	2
+8.2.14	DEREGISTRATION REQUEST	8	5F	T3346 value	GPRS timer 2	9.11.2.4	O	TLV	3
+8.2.14	DEREGISTRATION REQUEST	9	6D	Rejected NSSAI	Rejected NSSAI	9.11.3.46	O	TLV	4-42
+8.2.14	DEREGISTRATION REQUEST	10	75	CAG information list	CAG information list	9.11.3.18A	O	TLV-E	3-n
+8.2.14	DEREGISTRATION REQUEST	11	68	Extended rejected NSSAI	Extended rejected NSSAI	9.11.3.75	O	TLV	5-90
+8.2.14	DEREGISTRATION REQUEST	12	2C	Disaster return wait range	Registration wait range	9.11.3.84	O	TLV	4
+8.2.14	DEREGISTRATION REQUEST	13	71	Extended CAG information list	Extended CAG information list	9.11.3.86	O	TLV-E	3-n
+8.2.14	DEREGISTRATION REQUEST	14	3A	Lower bound timer value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.14	DEREGISTRATION REQUEST	15	1D	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for roaming"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.14	DEREGISTRATION REQUEST	16	1E	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for regional provision of service"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.14	DEREGISTRATION REQUEST	17	63	Access technology utilization control	Access technology utilization control	9.11.3.110	O	TLV	4-5
+8.2.15	DEREGISTRATION ACCEPT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.15	DEREGISTRATION ACCEPT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.15	DEREGISTRATION ACCEPT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.15	DEREGISTRATION ACCEPT	4		De-registration accept message identity	Message type	9.7	M	V	1
+8.2.16	SERVICE REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.16	SERVICE REQUEST	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.16	SERVICE REQUEST	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.16	SERVICE REQUEST	4		Service request message identity	Message type	9.7	M	V	1
+8.2.16	SERVICE REQUEST	5		ngKSI	NAS key set identifier	9.11.3.32	M	V	1/2
+8.2.16	SERVICE REQUEST	6		Service type	Service type	9.11.3.50	M	V	1/2
+8.2.16	SERVICE REQUEST	7		5G-S-TMSI	5GS mobile identity	9.11.3.4	M	LV-E	9
+8.2.16	SERVICE REQUEST	8	40	Uplink data status	Uplink data status	9.11.3.57	O	TLV	4-34
+8.2.16	SERVICE REQUEST	9	50	PDU session status	PDU session status	9.11.3.44	O	TLV	4-34
+8.2.16	SERVICE REQUEST	10	25	Allowed PDU session status	Allowed PDU session status	9.11.3.13	O	TLV	4-34
+8.2.16	SERVICE REQUEST	11	71	NAS message container	NAS message container	9.11.3.33	O	TLV-E	4-n
+8.2.16	SERVICE REQUEST	12	29	UE request type	UE request type	9.11.3.76	O	TLV	3
+8.2.16	SERVICE REQUEST	13	28	Paging restriction	Paging restriction	9.11.3.77	O	TLV	3-35
+8.2.17	SERVICE ACCEPT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.17	SERVICE ACCEPT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.17	SERVICE ACCEPT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.17	SERVICE ACCEPT	4		Service accept message identity	Message type	9.7	M	V	1
+8.2.17	SERVICE ACCEPT	5	50	PDU session status	PDU session status	9.11.3.44	O	TLV	4-34
+8.2.17	SERVICE ACCEPT	6	26	PDU session reactivation result	PDU session reactivation result	9.11.3.42	O	TLV	4-34
+8.2.17	SERVICE ACCEPT	7	72	PDU session reactivation result error cause	PDU session reactivation result error cause	9.11.3.43	O	TLV-E	5-515
+8.2.17	SERVICE ACCEPT	8	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.17	SERVICE ACCEPT	9	6B	T3448 value	GPRS timer 2	9.11.2.4	O	TLV	3
+8.2.17	SERVICE ACCEPT	10	34	5GS additional request result	5GS additional request result	9.11.3.81	O	TLV	3
+8.2.17	SERVICE ACCEPT	11	1D	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for roaming"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.17	SERVICE ACCEPT	12	1E	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for regional provision of service"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.18	SERVICE REJECT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.18	SERVICE REJECT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.18	SERVICE REJECT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.18	SERVICE REJECT	4		Service reject message identity	Message type	9.7	M	V	1
+8.2.18	SERVICE REJECT	5		5GMM cause	5GMM cause	9.11.3.2	M	V	1
+8.2.18	SERVICE REJECT	6	50	PDU session status	PDU session status	9.11.3.44	O	TLV	4-34
+8.2.18	SERVICE REJECT	7	5F	T3346 value	GPRS timer 2	9.11.2.4	O	TLV	3
+8.2.18	SERVICE REJECT	8	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.18	SERVICE REJECT	9	6B	T3448 value	GPRS timer 2	9.11.2.4	O	TLV	3
+8.2.18	SERVICE REJECT	10	75	CAG information list	CAG information list	9.11.3.18A	O	TLV-E	3-n
+8.2.18	SERVICE REJECT	11	2C	Disaster return wait range	Registration wait range	9.11.3.84	O	TLV	4
+8.2.18	SERVICE REJECT	12	71	Extended CAG information list	Extended CAG information list	9.11.3.86	O	TLV-E	3-n
+8.2.18	SERVICE REJECT	13	3A	Lower bound timer value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.18	SERVICE REJECT	14	1D	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for roaming"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.18	SERVICE REJECT	15	1E	"Forbidden TAI(s) for the list of ""5GS forbidden tracking areas for regional provision of service"""	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.18	SERVICE REJECT	16	63	Access technology utilization control	Access technology utilization control	9.11.3.110	O	TLV	4-5
+8.2.19	CONFIGURATION UPDATE COMMAND	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.19	CONFIGURATION UPDATE COMMAND	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.19	CONFIGURATION UPDATE COMMAND	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.19	CONFIGURATION UPDATE COMMAND	4		Configuration update command message identity	Message type	9.7	M	V	1
+8.2.19	CONFIGURATION UPDATE COMMAND	5	D-	Configuration update indication	Configuration update indication	9.11.3.18	O	TV	1
+8.2.19	CONFIGURATION UPDATE COMMAND	6	77	5G-GUTI	5GS mobile identity	9.11.3.4	O	TLV-E	14
+8.2.19	CONFIGURATION UPDATE COMMAND	7	54	TAI list	5GS tracking area identity list	9.11.3.9	O	TLV	9-114
+8.2.19	CONFIGURATION UPDATE COMMAND	8	15	Allowed NSSAI	NSSAI	9.11.3.37	O	TLV	4-74
+8.2.19	CONFIGURATION UPDATE COMMAND	9	27	Service area list	Service area list	9.11.3.49	O	TLV	6-114
+8.2.19	CONFIGURATION UPDATE COMMAND	10	43	Full name for network	Network name	9.11.3.35	O	TLV	3-n
+8.2.19	CONFIGURATION UPDATE COMMAND	11	45	Short name for network	Network name	9.11.3.35	O	TLV	3-n
+8.2.19	CONFIGURATION UPDATE COMMAND	12	46	Local time zone	Time zone	9.11.3.52	O	TV	2
+8.2.19	CONFIGURATION UPDATE COMMAND	13	47	Universal time and local time zone	Time zone and time	9.11.3.53	O	TV	8
+8.2.19	CONFIGURATION UPDATE COMMAND	14	49	Network daylight saving time	Daylight saving time	9.11.3.19	O	TLV	3
+8.2.19	CONFIGURATION UPDATE COMMAND	15	79	LADN information	LADN information	9.11.3.30	O	TLV-E	3-1715
+8.2.19	CONFIGURATION UPDATE COMMAND	16	B-	MICO indication	MICO indication	9.11.3.31	O	TV	1
+8.2.19	CONFIGURATION UPDATE COMMAND	17	9-	Network slicing indication	Network slicing indication	9.11.3.36	O	TV	1
+8.2.19	CONFIGURATION UPDATE COMMAND	18	31	Configured NSSAI	NSSAI	9.11.3.37	O	TLV	4-146
+8.2.19	CONFIGURATION UPDATE COMMAND	19	11	Rejected NSSAI	Rejected NSSAI	9.11.3.46	O	TLV	4-42
+8.2.19	CONFIGURATION UPDATE COMMAND	20	76	Operator-defined access category definitions	Operator-defined access category definitions	9.11.3.38	O	TLV-E	3-8323
+8.2.19	CONFIGURATION UPDATE COMMAND	21	F-	SMS indication	SMS indication	9.11.3.50A	O	TV	1
+8.2.19	CONFIGURATION UPDATE COMMAND	22	6C	T3447 value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.19	CONFIGURATION UPDATE COMMAND	23	75	CAG information list	CAG information list	9.11.3.18A	O	TLV-E	3-n
+8.2.19	CONFIGURATION UPDATE COMMAND	24	67	UE radio capability ID	UE radio capability ID	9.11.3.68	O	TLV	3-n
+8.2.19	CONFIGURATION UPDATE COMMAND	25	A-	UE radio capability ID deletion indication	UE radio capability ID deletion indication	9.11.3.69	O	TV	1
+8.2.19	CONFIGURATION UPDATE COMMAND	26	44	5GS registration result	5GS registration result	9.11.3.6	O	TLV	3
+8.2.19	CONFIGURATION UPDATE COMMAND	27	1B	Truncated 5G-S-TMSI configuration	Truncated 5G-S-TMSI configuration	9.11.3.70	O	TLV	3
+8.2.19	CONFIGURATION UPDATE COMMAND	28	C-	Additional configuration indication	Additional configuration indication	9.11.3.74	O	TV	1
+8.2.19	CONFIGURATION UPDATE COMMAND	29	68	Extended rejected NSSAI	Extended rejected NSSAI	9.11.3.75	O	TLV	5-90
+8.2.19	CONFIGURATION UPDATE COMMAND	30	72	Service-level-AA container	Service-level-AA container	9.11.2.10	O	TLV-E	4-65538
+8.2.19	CONFIGURATION UPDATE COMMAND	31	70	NSSRG information	NSSRG information	9.11.3.82	O	TLV-E	7-4099
+8.2.19	CONFIGURATION UPDATE COMMAND	32	14	Disaster roaming wait range	Registration wait range	9.11.3.84	O	TLV	4
+8.2.19	CONFIGURATION UPDATE COMMAND	33	2C	Disaster return wait range	Registration wait range	9.11.3.84	O	TLV	4
+8.2.19	CONFIGURATION UPDATE COMMAND	34	13	List of PLMNs to be used in disaster condition	List of PLMNs to be used in disaster condition	9.11.3.83	O	TLV	2-n
+8.2.19	CONFIGURATION UPDATE COMMAND	35	71	Extended CAG information list	Extended CAG information list	9.11.3.86	O	TLV-E	3-n
+8.2.19	CONFIGURATION UPDATE COMMAND	36	1F	Updated PEIPS assistance information	PEIPS assistance information	9.11.3.80	O	TLV	3
+8.2.19	CONFIGURATION UPDATE COMMAND	37	73	NSAG information	NSAG information	9.11.3.87	O	TLV-E	9-3143
+8.2.19	CONFIGURATION UPDATE COMMAND	38	E-	Priority indicator	Priority indicator	9.11.3.91	O	TV	1
+8.2.19	CONFIGURATION UPDATE COMMAND	39	4B	RAN timing synchronization	RAN timing synchronization	9.11.3.95	O	TLV	3
+8.2.19	CONFIGURATION UPDATE COMMAND	40	78	Extended LADN information	Extended LADN information	9.11.3.96	O	TLV-E	3-1787
+8.2.19	CONFIGURATION UPDATE COMMAND	41	4C	Alternative NSSAI	Alternative NSSAI	9.11.3.97	O	TLV	2-146
+8.2.19	CONFIGURATION UPDATE COMMAND	42	7B	S-NSSAI location validity information	S-NSSAI location validity information	9.11.3.100	O	TLV-E	17-38611
+8.2.19	CONFIGURATION UPDATE COMMAND	43	5B	S-NSSAI time validity information	S-NSSAI time validity information	9.11.3.101	O	TLV	23-257
+8.2.19	CONFIGURATION UPDATE COMMAND	44	4F	Discontinuous coverage maximum time offset	GPRS timer 3	9.11.2.5	O	TLV	3
+8.2.19	CONFIGURATION UPDATE COMMAND	45	74	Partially allowed NSSAI	Partial NSSAI	9.11.3.103	O	TLV-E	3-808
+8.2.19	CONFIGURATION UPDATE COMMAND	46	7A	Partially rejected NSSAI	Partial NSSAI	9.11.3.103	O	TLV-E	3-808
+8.2.19	CONFIGURATION UPDATE COMMAND	47	5C	Feature authorization indication	Feature authorization indication	9.11.3.105	O	TLV	3-257
+8.2.19	CONFIGURATION UPDATE COMMAND	48	61	On-demand NSSAI	On-demand NSSAI	9.11.3.108	O	TLV	5-210
+8.2.19	CONFIGURATION UPDATE COMMAND	49	63	Access technology utilization control	Access technology utilization control	9.11.3.110	O	TLV	2-5
+8.2.19	CONFIGURATION UPDATE COMMAND	50	64	Updated LP-WUSPS assistance information	LP-WUSPS assistance information	9.11.3.111	O	TLV	2-3
+8.2.19	CONFIGURATION UPDATE COMMAND	51	8-	LP-WUS status	LP-WUS status	9.11.3.112	O	TV	1
+8.2.20	CONFIGURATION UPDATE COMPLETE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.20	CONFIGURATION UPDATE COMPLETE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.20	CONFIGURATION UPDATE COMPLETE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.20	CONFIGURATION UPDATE COMPLETE	4		Configuration update complete message identity	Message type	9.7	M	V	1
+8.2.21	IDENTITY REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.21	IDENTITY REQUEST	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.21	IDENTITY REQUEST	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.21	IDENTITY REQUEST	4		Identity request message identity	Message type	9.7	M	V	1
+8.2.21	IDENTITY REQUEST	5		Identity type	5GS identity type	9.11.3.3	M	V	1/2
+8.2.21	IDENTITY REQUEST	6		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.22	IDENTITY RESPONSE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.22	IDENTITY RESPONSE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.22	IDENTITY RESPONSE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.22	IDENTITY RESPONSE	4		Identity response message identity	Message type	9.7	M	V	1
+8.2.22	IDENTITY RESPONSE	5		Mobile identity	5GS mobile identity	9.11.3.4	M	LV-E	3-n
+8.2.23	NOTIFICATION	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.23	NOTIFICATION	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.23	NOTIFICATION	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.23	NOTIFICATION	4		Notification message identity	Message type	9.7	M	V	1
+8.2.23	NOTIFICATION	5		Access type	Access type	9.11.2.1A	M	V	1/2
+8.2.23	NOTIFICATION	6		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.24	NOTIFICATION RESPONSE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.24	NOTIFICATION RESPONSE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.24	NOTIFICATION RESPONSE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.24	NOTIFICATION RESPONSE	4		Notification response message identity	Message type	9.7	M	V	1
+8.2.24	NOTIFICATION RESPONSE	5	50	PDU session status	PDU session status	9.11.3.44	O	TLV	4-34
+8.2.25	SECURITY MODE COMMAND	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.25	SECURITY MODE COMMAND	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.25	SECURITY MODE COMMAND	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.25	SECURITY MODE COMMAND	4		Security mode command message identity	Message type	9.7	M	V	1
+8.2.25	SECURITY MODE COMMAND	5		Selected NAS security algorithms	NAS security algorithms	9.11.3.34	M	V	1
+8.2.25	SECURITY MODE COMMAND	6		ngKSI	NAS key set identifier	9.11.3.32	M	V	1/2
+8.2.25	SECURITY MODE COMMAND	7		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.25	SECURITY MODE COMMAND	8		Replayed UE security capabilities	UE security capability	9.11.3.54	M	LV	3-9
+8.2.25	SECURITY MODE COMMAND	9	E-	IMEISV request	IMEISV request	9.11.3.28	O	TV	1
+8.2.25	SECURITY MODE COMMAND	10	57	Selected EPS NAS security algorithms	EPS NAS security algorithms	9.11.3.25	O	TV	2
+8.2.25	SECURITY MODE COMMAND	11	36	Additional 5G security information	Additional 5G security information	9.11.3.12	O	TLV	3
+8.2.25	SECURITY MODE COMMAND	12	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.25	SECURITY MODE COMMAND	13	38	ABBA	ABBA	9.11.3.10	O	TLV	4-n
+8.2.25	SECURITY MODE COMMAND	14	19	Replayed S1 UE security capabilities	S1 UE security capability	9.11.3.48A	O	TLV	4-7
+8.2.25	SECURITY MODE COMMAND	15	55	AUN3 device security key	AUN3 device security key	9.11.3.107	O	TLV	36-257
+8.2.26	SECURITY MODE COMPLETE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.26	SECURITY MODE COMPLETE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.26	SECURITY MODE COMPLETE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.26	SECURITY MODE COMPLETE	4		Security mode complete message identity	Message type	9.6	M	V	1
+8.2.26	SECURITY MODE COMPLETE	5	77	IMEISV	5GS mobile identity	9.11.3.4	O	TLV-E	12
+8.2.26	SECURITY MODE COMPLETE	6	71	NAS message container	NAS message container	9.11.3.33	O	TLV-E	4-n
+8.2.26	SECURITY MODE COMPLETE	7	78	non-IMEISV PEI	5GS mobile identity	9.11.3.4	O	TLV-E	7-n
+8.2.27	SECURITY MODE REJECT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.27	SECURITY MODE REJECT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.27	SECURITY MODE REJECT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.27	SECURITY MODE REJECT	4		Security mode reject message identity	Message type	9.6	M	V	1
+8.2.27	SECURITY MODE REJECT	5		5GMM cause	5GMM cause	9.11.3.2	M	V	1
+8.2.28	SECURITY PROTECTED 5GS NAS MESSAGE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.28	SECURITY PROTECTED 5GS NAS MESSAGE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.28	SECURITY PROTECTED 5GS NAS MESSAGE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.28	SECURITY PROTECTED 5GS NAS MESSAGE	4		Message authentication code	Message authentication code	9.8	M	V	4
+8.2.28	SECURITY PROTECTED 5GS NAS MESSAGE	5		Sequence number	Sequence number	9.10	M	V	1
+8.2.28	SECURITY PROTECTED 5GS NAS MESSAGE	6		Plain 5GS NAS message	Plain 5GS NAS message	9.9	M	V	3-n
+8.2.29	5GMM STATUS	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.29	5GMM STATUS	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.29	5GMM STATUS	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.29	5GMM STATUS	4		5GMM STATUS message identity	Message type	9.7	M	V	1
+8.2.29	5GMM STATUS	5		5GMM cause	5GMM cause	9.11.3.2	M	V	1
+8.2.30	CONTROL PLANE SERVICE REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.30	CONTROL PLANE SERVICE REQUEST	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.30	CONTROL PLANE SERVICE REQUEST	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.30	CONTROL PLANE SERVICE REQUEST	4		Control plane service request message identity	Message type	9.7	M	V	1
+8.2.30	CONTROL PLANE SERVICE REQUEST	5		Control plane service type	Control plane service type	9.11.3.18D	M	V	1/2
+8.2.30	CONTROL PLANE SERVICE REQUEST	6		ngKSI	NAS key set identifier	9.11.3.32	M	V	1/2
+8.2.30	CONTROL PLANE SERVICE REQUEST	7	6F	CIoT small data container	CIoT small data container	9.11.3.18B	O	TLV	4-257
+8.2.30	CONTROL PLANE SERVICE REQUEST	8	8-	Payload container type	Payload container type	9.11.3.40	O	TV	1
+8.2.30	CONTROL PLANE SERVICE REQUEST	9	7B	Payload container	Payload container	9.11.3.39	O	TLV-E	4-65538
+8.2.30	CONTROL PLANE SERVICE REQUEST	10	12	PDU session ID	PDU session identity 2	9.11.3.41	C	TV	2
+8.2.30	CONTROL PLANE SERVICE REQUEST	11	50	PDU session status	PDU session status	9.11.3.44	O	TLV	4-34
+8.2.30	CONTROL PLANE SERVICE REQUEST	12	F-	Release assistance indication	Release assistance indication	9.11.3.46A	O	TV	1
+8.2.30	CONTROL PLANE SERVICE REQUEST	13	40	Uplink data status	Uplink data status	9.11.3.57	O	TLV	4-34
+8.2.30	CONTROL PLANE SERVICE REQUEST	14	71	NAS message container	NAS message container	9.11.3.33	O	TLV-E	4-n
+8.2.30	CONTROL PLANE SERVICE REQUEST	15	24	Additional information	Additional information	9.11.2.1	O	TLV	3-n
+8.2.30	CONTROL PLANE SERVICE REQUEST	16	25	Allowed PDU session status	Allowed PDU session status	9.11.3.13	O	TLV	4-34
+8.2.30	CONTROL PLANE SERVICE REQUEST	17	29	UE request type	UE request type	9.11.3.76	O	TLV	3
+8.2.30	CONTROL PLANE SERVICE REQUEST	18	28	Paging restriction	Paging restriction	9.11.3.77	O	TLV	3-35
+8.2.31	NETWORK SLICE-SPECIFIC AUTHENTICATION COMMAND	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.31	NETWORK SLICE-SPECIFIC AUTHENTICATION COMMAND	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.31	NETWORK SLICE-SPECIFIC AUTHENTICATION COMMAND	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.31	NETWORK SLICE-SPECIFIC AUTHENTICATION COMMAND	4		NETWORK SLICE-SPECIFIC AUTHENTICATION COMMAND message identity	Message type	9.7	M	V	1
+8.2.31	NETWORK SLICE-SPECIFIC AUTHENTICATION COMMAND	5		S-NSSAI	S-NSSAI	9.11.2.8	M	LV	2-5
+8.2.31	NETWORK SLICE-SPECIFIC AUTHENTICATION COMMAND	6		EAP message	EAP message	9.11.2.2	M	LV-E	6-1502
+8.2.32	NETWORK SLICE-SPECIFIC AUTHENTICATION COMPLETE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.32	NETWORK SLICE-SPECIFIC AUTHENTICATION COMPLETE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.32	NETWORK SLICE-SPECIFIC AUTHENTICATION COMPLETE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.32	NETWORK SLICE-SPECIFIC AUTHENTICATION COMPLETE	4		NETWORK SLICE-SPECIFIC AUTHENTICATION COMPLETE message identity	Message type	9.7	M	V	1
+8.2.32	NETWORK SLICE-SPECIFIC AUTHENTICATION COMPLETE	5		S-NSSAI	S-NSSAI	9.11.2.8	M	LV	2-5
+8.2.32	NETWORK SLICE-SPECIFIC AUTHENTICATION COMPLETE	6		EAP message	EAP message	9.11.2.2	M	LV-E	6-1502
+8.2.33	NETWORK SLICE-SPECIFIC AUTHENTICATION RESULT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.33	NETWORK SLICE-SPECIFIC AUTHENTICATION RESULT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.33	NETWORK SLICE-SPECIFIC AUTHENTICATION RESULT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.33	NETWORK SLICE-SPECIFIC AUTHENTICATION RESULT	4		NETWORK SLICE-SPECIFIC AUTHENTICATION RESULT message identity	Message type	9.7	M	V	1
+8.2.33	NETWORK SLICE-SPECIFIC AUTHENTICATION RESULT	5		S-NSSAI	S-NSSAI	9.11.2.8	M	LV	2-5
+8.2.33	NETWORK SLICE-SPECIFIC AUTHENTICATION RESULT	6		EAP message	EAP message	9.11.2.2	M	LV-E	6-1502
+8.2.34	RELAY KEY REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.34	RELAY KEY REQUEST	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.34	RELAY KEY REQUEST	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.34	RELAY KEY REQUEST	4		Relay key request message identity	Message type	9.7	M	V	1
+8.2.34	RELAY KEY REQUEST	5		PRTI	ProSe relay transaction identity	9.11.3.88	M	V	1
+8.2.34	RELAY KEY REQUEST	6		Relay key request parameters	Relay key request parameters	9.11.3.89	M	LV	22-65537
+8.2.35	RELAY KEY ACCEPT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.35	RELAY KEY ACCEPT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.35	RELAY KEY ACCEPT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.35	RELAY KEY ACCEPT	4		Relay key accept message identity	Message type	9.7	M	V	1
+8.2.35	RELAY KEY ACCEPT	5		PRTI	ProSe relay transaction identity	9.11.3.88	M	V	1
+8.2.35	RELAY KEY ACCEPT	6		Relay key response parameters	Relay key response parameters	9.11.3.90	M	LV-E	51-65537
+8.2.35	RELAY KEY ACCEPT	7	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.36	RELAY KEY REJECT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.36	RELAY KEY REJECT	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.36	RELAY KEY REJECT	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.36	RELAY KEY REJECT	4		Relay key reject message identity	Message type	9.7	M	V	1
+8.2.36	RELAY KEY REJECT	5		PRTI	ProSe relay transaction identity	9.11.3.88	M	V	1
+8.2.36	RELAY KEY REJECT	6	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.2.37	RELAY AUTHENTICATION REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.37	RELAY AUTHENTICATION REQUEST	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.37	RELAY AUTHENTICATION REQUEST	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.37	RELAY AUTHENTICATION REQUEST	4		Relay authentication request message identity	Message type	9.7	M	V	1
+8.2.37	RELAY AUTHENTICATION REQUEST	5		PRTI	ProSe relay transaction identity	9.11.3.88	M	V	1
+8.2.37	RELAY AUTHENTICATION REQUEST	6		EAP message	EAP message	9.11.2.2	M	LV-E	7-1503
+8.2.38	RELAY AUTHENTICATION RESPONSE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.2.38	RELAY AUTHENTICATION RESPONSE	2		Security header type	Security header type	9.3	M	V	1/2
+8.2.38	RELAY AUTHENTICATION RESPONSE	3		Spare half octet	Spare half octet	9.5	M	V	1/2
+8.2.38	RELAY AUTHENTICATION RESPONSE	4		Relay authentication response message identity	Message type	9.7	M	V	1
+8.2.38	RELAY AUTHENTICATION RESPONSE	5		PRTI	ProSe relay transaction identity	9.11.3.88	M	V	1
+8.2.38	RELAY AUTHENTICATION RESPONSE	6		EAP message	EAP message	9.11.2.2	M	LV-E	6-1502
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	4		PDU SESSION ESTABLISHMENT REQUEST message identity	Message type	9.7	M	V	1
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	5		Integrity protection maximum data rate	Integrity protection maximum data rate	9.11.4.7	M	V	2
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	6	9-	PDU session type	PDU session type	9.11.4.11	O	TV	1
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	7	A-	SSC mode	SSC mode	9.11.4.16	O	TV	1
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	8	28	5GSM capability	5GSM capability	9.11.4.1	O	TLV	3-15
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	9	55	Maximum number of supported packet filters	Maximum number of supported packet filters	9.11.4.9	O	TV	3
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	10	B-	Always-on PDU session requested	Always-on PDU session requested	9.11.4.4	O	TV	1
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	11	39	SM PDU DN request container	SM PDU DN request container	9.11.4.15	O	TLV	3-255
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	12	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	13	66	IP header compression configuration	IP header compression configuration	9.11.4.24	O	TLV	5-257
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	14	6E	DS-TT Ethernet port MAC address	DS-TT Ethernet port MAC address	9.11.4.25	O	TLV	8
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	15	6F	UE-DS-TT residence time	UE-DS-TT residence time	9.11.4.26	O	TLV	10
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	16	74	Port management information container	Port management information container	9.11.4.27	O	TLV-E	8-65538
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	17	1F	Ethernet header compression configuration	Ethernet header compression configuration	9.11.4.28	O	TLV	3
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	18	29	Suggested interface identifier	PDU address	9.11.4.10	O	TLV	11
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	19	72	Service-level-AA container	Service-level-AA container	9.11.2.10	O	TLV-E	4-65538
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	20	70	Requested MBS container	Requested MBS container	9.11.4.30	O	TLV-E	8-65538
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	21	34	PDU session pair ID	PDU session pair ID	9.11.4.32	O	TLV	3
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	22	35	RSN	RSN	9.11.4.33	O	TLV	3
+8.3.1	PDU SESSION ESTABLISHMENT REQUEST	23	36	URSP rule enforcement reports	URSP rule enforcement reports	9.11.4.38	O	TLV	4-n
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	4		PDU SESSION ESTABLISHMENT ACCEPT message identity	Message type	9.7	M	V	1
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	5		Selected PDU session type	PDU session type	9.11.4.11	M	V	1/2
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	6		Selected SSC mode	SSC mode	9.11.4.16	M	V	1/2
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	7		Authorized QoS rules	QoS rules	9.11.4.13	M	LV-E	6-65538
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	8		Session AMBR	Session-AMBR	9.11.4.14	M	LV	7
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	9	59	5GSM cause	5GSM cause	9.11.4.2	O	TV	2
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	10	29	PDU address	PDU address	9.11.4.10	O	TLV	7-31
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	11	56	RQ timer value	GPRS timer	9.11.2.3	O	TV	2
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	12	22	S-NSSAI	S-NSSAI	9.11.2.8	O	TLV	3-10
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	13	8-	Always-on PDU session indication	Always-on PDU session indication	9.11.4.3	O	TV	1
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	14	75	Mapped EPS bearer contexts	Mapped EPS bearer contexts	9.11.4.8	O	TLV-E	7-65538
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	15	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	16	79	Authorized QoS flow descriptions	QoS flow descriptions	9.11.4.12	O	TLV-E	6-65538
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	17	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	18	25	DNN	DNN	9.11.2.1B	O	TLV	3-102
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	19	17	5GSM network feature support	5GSM network feature support	9.11.4.18	O	TLV	3-15
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	20	18	Serving PLMN rate control	Serving PLMN rate control	9.11.4.20	O	TLV	4
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	21	77	ATSSS container	ATSSS container	9.11.4.22	O	TLV-E	3-65538
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	22	C-	Control plane only indication	Control plane only indication	9.11.4.23	O	TV	1
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	23	66	IP header compression configuration	IP header compression configuration	9.11.4.24	O	TLV	5-257
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	24	1F	Ethernet header compression configuration	Ethernet header compression configuration	9.11.4.28	O	TLV	3
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	25	72	Service-level-AA container	Service-level-AA container	9.11.2.10	O	TLV-E	4-65538
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	26	71	Received MBS container	Received MBS container	9.11.4.31	O	TLV-E	9-65538
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	27	70	N3QAI	N3QAI	9.11.4.36	O	TLV-E	9-n
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	28	73	Protocol description	Protocol description	9.11.4.39	O	TLV-E	6-n
+8.3.2	PDU SESSION ESTABLISHMENT ACCEPT	29	38	ECN marking for L4S indication	ECN marking for L4S indication	9.11.4.40	O	TLV	2-257
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	4		PDU SESSION ESTABLISHMENT REJECT message identity	Message type	9.7	M	V	1
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	5		5GSM cause	5GSM cause	9.11.4.2	M	V	1
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	6	37	Back-off timer value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	7	F-	Allowed SSC mode	Allowed SSC mode	9.11.4.5	O	TV	1
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	8	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	9	61	5GSM congestion re-attempt indicator	5GSM congestion re-attempt indicator	9.11.4.21	O	TLV	3
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	10	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	11	1D	Re-attempt indicator	Re-attempt indicator	9.11.4.17	O	TLV	3
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	12	72	Service-level-AA container	Service-level-AA container	9.11.2.10	O	TLV-E	4-65538
+8.3.3	PDU SESSION ESTABLISHMENT REJECT	13	77	ATSSS container	ATSSS container	9.11.4.22	O	TLV-E	3-65538
+8.3.4	PDU SESSION AUTHENTICATION COMMAND	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.4	PDU SESSION AUTHENTICATION COMMAND	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.4	PDU SESSION AUTHENTICATION COMMAND	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.4	PDU SESSION AUTHENTICATION COMMAND	4		PDU SESSION AUTHENTICATION COMMAND message identity	Message type	9.7	M	V	1
+8.3.4	PDU SESSION AUTHENTICATION COMMAND	5		EAP message	EAP message	9.11.2.2	M	LV-E	6-1502
+8.3.4	PDU SESSION AUTHENTICATION COMMAND	6	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.5	PDU SESSION AUTHENTICATION COMPLETE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.5	PDU SESSION AUTHENTICATION COMPLETE	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.5	PDU SESSION AUTHENTICATION COMPLETE	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.5	PDU SESSION AUTHENTICATION COMPLETE	4		PDU SESSION AUTHENTICATION COMPLETE message identity	Message type	9.7	M	V	1
+8.3.5	PDU SESSION AUTHENTICATION COMPLETE	5		EAP message	EAP message	9.11.2.2	M	LV-E	6-1502
+8.3.5	PDU SESSION AUTHENTICATION COMPLETE	6	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.6	PDU SESSION AUTHENTICATION RESULT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.6	PDU SESSION AUTHENTICATION RESULT	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.6	PDU SESSION AUTHENTICATION RESULT	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.6	PDU SESSION AUTHENTICATION RESULT	4		PDU SESSION AUTHENTICATION RESULT message identity	Message type	9.7	M	V	1
+8.3.6	PDU SESSION AUTHENTICATION RESULT	5	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.3.6	PDU SESSION AUTHENTICATION RESULT	6	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.7	PDU SESSION MODIFICATION REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.7	PDU SESSION MODIFICATION REQUEST	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.7	PDU SESSION MODIFICATION REQUEST	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.7	PDU SESSION MODIFICATION REQUEST	4		PDU SESSION MODIFICATION REQUEST message identity	Message type	9.7	M	V	1
+8.3.7	PDU SESSION MODIFICATION REQUEST	5	28	5GSM capability	5GSM capability	9.11.4.1	O	TLV	3-15
+8.3.7	PDU SESSION MODIFICATION REQUEST	6	59	5GSM cause	5GSM cause	9.11.4.2	O	TV	2
+8.3.7	PDU SESSION MODIFICATION REQUEST	7	55	Maximum number of supported packet filters	Maximum number of supported packet filters	9.11.4.9	O	TV	3
+8.3.7	PDU SESSION MODIFICATION REQUEST	8	B-	Always-on PDU session requested	Always-on PDU session requested	9.11.4.4	O	TV	1
+8.3.7	PDU SESSION MODIFICATION REQUEST	9	13	Integrity protection maximum data rate	Integrity protection maximum data rate	9.11.4.7	O	TV	3
+8.3.7	PDU SESSION MODIFICATION REQUEST	10	7A	Requested QoS rules	QoS rules	9.11.4.13	O	TLV-E	7-65538
+8.3.7	PDU SESSION MODIFICATION REQUEST	11	79	Requested QoS flow descriptions	QoS flow descriptions	9.11.4.12	O	TLV-E	6-65538
+8.3.7	PDU SESSION MODIFICATION REQUEST	12	75	Mapped EPS bearer contexts	Mapped EPS bearer contexts	9.11.4.8	O	TLV-E	7-65538
+8.3.7	PDU SESSION MODIFICATION REQUEST	13	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.7	PDU SESSION MODIFICATION REQUEST	14	74	Port management information container	Port management information container	9.11.4.27	O	TLV-E	4-65538
+8.3.7	PDU SESSION MODIFICATION REQUEST	15	66	IP header compression configuration	Header compression configuration	9.11.4.24	O	TLV	5-257
+8.3.7	PDU SESSION MODIFICATION REQUEST	16	1F	Ethernet header compression configuration	Ethernet header compression configuration	9.11.4.28	O	TLV	3
+8.3.7	PDU SESSION MODIFICATION REQUEST	17	70	Requested MBS container	Requested MBS container	9.11.4.30	O	TLV-E	8-65538
+8.3.7	PDU SESSION MODIFICATION REQUEST	18	72	Service-level-AA container	Service-level-AA container	9.11.2.10	O	TLV-E	4-65538
+8.3.7	PDU SESSION MODIFICATION REQUEST	19	73	Non-3GPP delay budget	Non-3GPP delay budget	9.11.4.37	O	TLV-E	6-n
+8.3.7	PDU SESSION MODIFICATION REQUEST	20	36	URSP rule enforcement reports	URSP rule enforcement reports	9.11.4.38	O	TLV	4-n
+8.3.7	PDU SESSION MODIFICATION REQUEST	21	7C	Non-3GPP device information	Non-3GPP device information	9.11.4.41	O	TLV-E	7-n
+8.3.8	PDU SESSION MODIFICATION REJECT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.8	PDU SESSION MODIFICATION REJECT	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.8	PDU SESSION MODIFICATION REJECT	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.8	PDU SESSION MODIFICATION REJECT	4		PDU SESSION MODIFICATION REJECT message identity	Message type	9.7	M	V	1
+8.3.8	PDU SESSION MODIFICATION REJECT	5		5GSM cause	5GSM cause	9.11.4.2	M	V	1
+8.3.8	PDU SESSION MODIFICATION REJECT	6	37	Back-off timer value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.3.8	PDU SESSION MODIFICATION REJECT	7	61	5GSM congestion re-attempt indicator	5GSM congestion re-attempt indicator	9.11.4.21	O	TLV	3
+8.3.8	PDU SESSION MODIFICATION REJECT	8	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.8	PDU SESSION MODIFICATION REJECT	9	1D	Re-attempt indicator	Re-attempt indicator	9.11.4.17	O	TLV	3
+8.3.9	PDU SESSION MODIFICATION COMMAND	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.9	PDU SESSION MODIFICATION COMMAND	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.9	PDU SESSION MODIFICATION COMMAND	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.9	PDU SESSION MODIFICATION COMMAND	4		PDU SESSION MODIFICATION COMMAND message identity	Message type	9.7	M	V	1
+8.3.9	PDU SESSION MODIFICATION COMMAND	5	59	5GSM cause	5GSM cause	9.11.4.2	O	TV	2
+8.3.9	PDU SESSION MODIFICATION COMMAND	6	2A	Session AMBR	Session-AMBR	9.11.4.14	O	TLV	8
+8.3.9	PDU SESSION MODIFICATION COMMAND	7	56	RQ timer value	GPRS timer	9.11.2.3	O	TV	2
+8.3.9	PDU SESSION MODIFICATION COMMAND	8	8-	Always-on PDU session indication	Always-on PDU session indication	9.11.4.3	O	TV	1
+8.3.9	PDU SESSION MODIFICATION COMMAND	9	7A	Authorized QoS rules	QoS rules	9.11.4.13	O	TLV-E	7-65538
+8.3.9	PDU SESSION MODIFICATION COMMAND	10	75	Mapped EPS bearer contexts	Mapped EPS bearer contexts	9.11.4.8	O	TLV-E	7-65538
+8.3.9	PDU SESSION MODIFICATION COMMAND	11	79	Authorized QoS flow descriptions	QoS flow descriptions	9.11.4.12	O	TLV-E	6-65538
+8.3.9	PDU SESSION MODIFICATION COMMAND	12	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.9	PDU SESSION MODIFICATION COMMAND	13	77	ATSSS container	ATSSS container	9.11.4.22	O	TLV-E	3-65538
+8.3.9	PDU SESSION MODIFICATION COMMAND	14	66	IP header compression configuration	IP header compression configuration	9.11.4.24	O	TLV	5-257
+8.3.9	PDU SESSION MODIFICATION COMMAND	15	74	Port management information container	Port management information container	9.11.4.27	O	TLV-E	4-65538
+8.3.9	PDU SESSION MODIFICATION COMMAND	16	1E	Serving PLMN rate control	Serving PLMN rate control	9.11.4.20	O	TLV	4
+8.3.9	PDU SESSION MODIFICATION COMMAND	17	1F	Ethernet header compression configuration	Ethernet header compression configuration	9.11.4.28	O	TLV	3
+8.3.9	PDU SESSION MODIFICATION COMMAND	18	71	Received MBS container	Received MBS container	9.11.4.31	O	TLV-E	9-65538
+8.3.9	PDU SESSION MODIFICATION COMMAND	19	72	Service-level-AA container	Service-level-AA container	9.11.2.10	O	TLV-E	4-65538
+8.3.9	PDU SESSION MODIFICATION COMMAND	20	5A	Alternative S-NSSAI	S-NSSAI	9.11.2.8	O	TLV	3-10
+8.3.9	PDU SESSION MODIFICATION COMMAND	21	70	N3QAI	N3QAI	9.11.4.36	O	TLV-E	9-n
+8.3.9	PDU SESSION MODIFICATION COMMAND	22	73	Protocol description	Protocol description	9.11.4.39	O	TLV-E	6-n
+8.3.9	PDU SESSION MODIFICATION COMMAND	23	38	ECN marking for L4S indication	ECN marking for L4S indication	9.11.4.40	O	TLV	2-257
+8.3.10	PDU SESSION MODIFICATION COMPLETE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.10	PDU SESSION MODIFICATION COMPLETE	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.10	PDU SESSION MODIFICATION COMPLETE	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.10	PDU SESSION MODIFICATION COMPLETE	4		PDU SESSION MODIFICATION COMPLETE message identity	Message type	9.7	M	V	1
+8.3.10	PDU SESSION MODIFICATION COMPLETE	5	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.10	PDU SESSION MODIFICATION COMPLETE	6	74	Port management information container	Port management information container	9.11.4.27	O	TLV-E	4-65538
+8.3.11	PDU SESSION MODIFICATION COMMAND REJECT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.11	PDU SESSION MODIFICATION COMMAND REJECT	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.11	PDU SESSION MODIFICATION COMMAND REJECT	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.11	PDU SESSION MODIFICATION COMMAND REJECT	4		PDU SESSION MODIFICATION COMMAND REJECT message identity	Message type	9.7	M	V	1
+8.3.11	PDU SESSION MODIFICATION COMMAND REJECT	5		5GSM cause	5GSM cause	9.11.4.2	M	V	1
+8.3.11	PDU SESSION MODIFICATION COMMAND REJECT	6	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.12	PDU SESSION RELEASE REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.12	PDU SESSION RELEASE REQUEST	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.12	PDU SESSION RELEASE REQUEST	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.12	PDU SESSION RELEASE REQUEST	4		PDU SESSION RELEASE REQUEST message identity	Message type	9.7	M	V	1
+8.3.12	PDU SESSION RELEASE REQUEST	5	59	5GSM cause	5GSM cause	9.11.4.2	O	TV	2
+8.3.12	PDU SESSION RELEASE REQUEST	6	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.13	PDU SESSION RELEASE REJECT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.13	PDU SESSION RELEASE REJECT	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.13	PDU SESSION RELEASE REJECT	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.13	PDU SESSION RELEASE REJECT	4		PDU SESSION RELEASE REJECT message identity	Message type	9.7	M	V	1
+8.3.13	PDU SESSION RELEASE REJECT	5		5GSM cause	5GSM cause	9.11.4.2	M	V	1
+8.3.13	PDU SESSION RELEASE REJECT	6	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.14	PDU SESSION RELEASE COMMAND	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.14	PDU SESSION RELEASE COMMAND	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.14	PDU SESSION RELEASE COMMAND	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.14	PDU SESSION RELEASE COMMAND	4		PDU SESSION RELEASE COMMAND message identity	Message type	9.7	M	V	1
+8.3.14	PDU SESSION RELEASE COMMAND	5		5GSM cause	5GSM cause	9.11.4.2	M	V	1
+8.3.14	PDU SESSION RELEASE COMMAND	6	37	Back-off timer value	GPRS timer 3	9.11.2.5	O	TLV	3
+8.3.14	PDU SESSION RELEASE COMMAND	7	78	EAP message	EAP message	9.11.2.2	O	TLV-E	7-1503
+8.3.14	PDU SESSION RELEASE COMMAND	8	61	5GSM congestion re-attempt indicator	5GSM congestion re-attempt indicator	9.11.4.21	O	TLV	3
+8.3.14	PDU SESSION RELEASE COMMAND	9	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.14	PDU SESSION RELEASE COMMAND	10	D-	Access type	Access type	9.11.2.1A	O	TV	1
+8.3.14	PDU SESSION RELEASE COMMAND	11	72	Service-level-AA container	Service-level-AA container	9.11.2.10	O	TLV-E	4-65538
+8.3.14	PDU SESSION RELEASE COMMAND	12	5A	Alternative S-NSSAI	S-NSSAI	9.11.2.8	O	TLV	3-10
+8.3.15	PDU SESSION RELEASE COMPLETE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.15	PDU SESSION RELEASE COMPLETE	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.15	PDU SESSION RELEASE COMPLETE	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.15	PDU SESSION RELEASE COMPLETE	4		PDU SESSION RELEASE COMPLETE message identity	Message type	9.7	M	V	1
+8.3.15	PDU SESSION RELEASE COMPLETE	5	59	5GSM cause	5GSM cause	9.11.4.2	O	TV	2
+8.3.15	PDU SESSION RELEASE COMPLETE	6	7B	Extended protocol configuration options	Extended protocol configuration options	9.11.4.6	O	TLV-E	4-65538
+8.3.16	5GSM STATUS	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.16	5GSM STATUS	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.16	5GSM STATUS	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.16	5GSM STATUS	4		5GSM STATUS message identity	Message type	9.7	M	V	1
+8.3.16	5GSM STATUS	5		5GSM cause	5GSM cause	9.11.4.2	M	V	1
+8.3.17	SERVICE-LEVEL AUTHENTICATION COMMAND	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.17	SERVICE-LEVEL AUTHENTICATION COMMAND	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.17	SERVICE-LEVEL AUTHENTICATION COMMAND	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.17	SERVICE-LEVEL AUTHENTICATION COMMAND	4		SERVICE-LEVEL AUTHENTICATION COMMAND message identity	Message type	9.7	M	V	1
+8.3.17	SERVICE-LEVEL AUTHENTICATION COMMAND	5		Service-level-AA container	Service-level-AA container	9.11.2.10	M	LV-E	5-65538
+8.3.18	SERVICE-LEVEL AUTHENTICATION COMPLETE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.18	SERVICE-LEVEL AUTHENTICATION COMPLETE	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.18	SERVICE-LEVEL AUTHENTICATION COMPLETE	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.18	SERVICE-LEVEL AUTHENTICATION COMPLETE	4		SERVICE-LEVEL AUTHENTICATION COMPLETE message identity	Message type	9.7	M	V	1
+8.3.18	SERVICE-LEVEL AUTHENTICATION COMPLETE	5		Service-level-AA container	Service-level-AA container	9.11.2.10	M	LV-E	5-65538
+8.3.19	REMOTE UE REPORT	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.19	REMOTE UE REPORT	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.19	REMOTE UE REPORT	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.19	REMOTE UE REPORT	4		Remote UE report message identity	Message type	9.7	M	V	1
+8.3.19	REMOTE UE REPORT	5	76	Remote UE context connected	Remote UE context list	9.11.4.29	O	TLV-E	16-65538
+8.3.19	REMOTE UE REPORT	6	70	Remote UE context disconnected	Remote UE context list	9.11.4.29	O	TLV-E	16-65538
+8.3.20	REMOTE UE REPORT RESPONSE	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
+8.3.20	REMOTE UE REPORT RESPONSE	2		PDU session ID	PDU session identity	9.4	M	V	1
+8.3.20	REMOTE UE REPORT RESPONSE	3		PTI	Procedure transaction identity	9.6	M	V	1
+8.3.20	REMOTE UE REPORT RESPONSE	4		Remote UE report response message identity	Message type	9.7	M	V	1

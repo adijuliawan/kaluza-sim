@@ -1,0 +1,60 @@
+# Extracted by spec/tools/docx_tables.py 1.0 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+key	protocol	clause	title	table	message	significance	direction	message_type_hex
+8.2.1	5GMM	8.2.1	Authentication request	8.2.1.1.1	AUTHENTICATION REQUEST	dual	network to UE	56
+8.2.2	5GMM	8.2.2	Authentication response	8.2.2.1.1	AUTHENTICATION RESPONSE	dual	UE to network	57
+8.2.3	5GMM	8.2.3	Authentication result	8.2.3.1.1	AUTHENTICATION RESULT	dual	network to UE	5A
+8.2.4	5GMM	8.2.4	Authentication failure	8.2.4.1.1	AUTHENTICATION FAILURE	dual	UE to network	59
+8.2.5	5GMM	8.2.5	Authentication reject	8.2.5.1.1	AUTHENTICATION REJECT	dual	network to UE	58
+8.2.6	5GMM	8.2.6	Registration request	8.2.6.1.1	REGISTRATION REQUEST	dual	UE to network	41
+8.2.7	5GMM	8.2.7	Registration accept	8.2.7.1.1	REGISTRATION ACCEPT	dual	network to UE	42
+8.2.8	5GMM	8.2.8	Registration complete	8.2.8.1.1	REGISTRATION COMPLETE	dual	UE to network	43
+8.2.9	5GMM	8.2.9	Registration reject	8.2.9.1.1	REGISTRATION REJECT	dual	network to UE	44
+8.2.10	5GMM	8.2.10	UL NAS transport	8.2.10.1.1	UL NAS TRANSPORT	dual	UE to network	67
+8.2.11	5GMM	8.2.11	DL NAS transport	8.2.11.1.1	DL NAS TRANSPORT	dual	network to UE	68
+8.2.12	5GMM	8.2.12	De-registration request (UE originating de-registration)	8.2.12.1.1	DEREGISTRATION REQUEST	dual	UE to network	45
+8.2.13	5GMM	8.2.13	De-registration accept (UE originating de-registration)	8.2.13.1.1	DEREGISTRATION ACCEPT	dual	network to UE	46
+8.2.14	5GMM	8.2.14	De-registration request (UE terminated de-registration)	8.2.14.1.1	DEREGISTRATION REQUEST	dual	network to UE	47
+8.2.15	5GMM	8.2.15	De-registration accept (UE terminated de-registration)	8.2.15.1.1.1	DEREGISTRATION ACCEPT	dual	UE to network	48
+8.2.16	5GMM	8.2.16	Service request	8.2.16.1.1	SERVICE REQUEST	dual	UE to network	4C
+8.2.17	5GMM	8.2.17	Service accept	8.2.17.1.1	SERVICE ACCEPT	dual	network to UE	4E
+8.2.18	5GMM	8.2.18	Service reject	8.2.18.1.1	SERVICE REJECT	dual	network to UE	4D
+8.2.19	5GMM	8.2.19	Configuration update command	8.2.19.1.1	CONFIGURATION UPDATE COMMAND	dual	network to UE	54
+8.2.20	5GMM	8.2.20	Configuration update complete	8.2.20.1.1	CONFIGURATION UPDATE COMPLETE	dual	UE to network	55
+8.2.21	5GMM	8.2.21	Identity request	8.2.21.1.1	IDENTITY REQUEST	dual	AMF to UE	5B
+8.2.22	5GMM	8.2.22	Identity response	8.2.22.1.1	IDENTITY RESPONSE	dual	UE to AMF	5C
+8.2.23	5GMM	8.2.23	Notification	8.2.23.1.1	NOTIFICATION	dual	network to UE	65
+8.2.24	5GMM	8.2.24	Notification response	8.2.24.1.1	NOTIFICATION RESPONSE	dual	UE to network	66
+8.2.25	5GMM	8.2.25	Security mode command	8.2.25.1.1	SECURITY MODE COMMAND	dual	network to UE	5D
+8.2.26	5GMM	8.2.26	Security mode complete	8.2.26.1.1	SECURITY MODE COMPLETE	dual	UE to network	5E
+8.2.27	5GMM	8.2.27	Security mode reject	8.2.27.1.1	SECURITY MODE REJECT	dual	UE to network	5F
+8.2.28	5GMM	8.2.28	Security protected 5GS NAS message	8.2.28.1.1	SECURITY PROTECTED 5GS NAS MESSAGE	dual	both	
+8.2.29	5GMM	8.2.29	5GMM status	8.2.29.1.1	5GMM STATUS	local	both	64
+8.2.30	5GMM	8.2.30	Control Plane Service request	8.2.30.1.1	CONTROL PLANE SERVICE REQUEST	dual	UE to network	4F
+8.2.31	5GMM	8.2.31	Network slice-specific authentication command	8.2.31.1.1	NETWORK SLICE-SPECIFIC AUTHENTICATION COMMAND	dual	network to UE	50
+8.2.32	5GMM	8.2.32	Network slice-specific authentication complete	8.2.32.1.1	NETWORK SLICE-SPECIFIC AUTHENTICATION COMPLETE	dual	UE to network	51
+8.2.33	5GMM	8.2.33	Network slice-specific authentication result	8.2.33.1.1	NETWORK SLICE-SPECIFIC AUTHENTICATION RESULT	dual	network to UE	52
+8.2.34	5GMM	8.2.34	Relay key request	8.2.34.1	RELAY KEY REQUEST	dual	UE to network	69
+8.2.35	5GMM	8.2.35	Relay key accept	8.2.35.1	RELAY KEY ACCEPT	dual	network to UE	6A
+8.2.36	5GMM	8.2.36	Relay key reject	8.2.36.1	RELAY KEY REJECT	dual	network to UE	6B
+8.2.37	5GMM	8.2.37	Relay authentication request	8.2.37.1	RELAY AUTHENTICATION REQUEST	dual	Network to UE	6C
+8.2.38	5GMM	8.2.38	Relay authentication response	8.2.38.1	RELAY AUTHENTICATION RESPONSE	dual	UE to network	6D
+8.3.1	5GSM	8.3.1	PDU session establishment request	8.3.1.1.1	PDU SESSION ESTABLISHMENT REQUEST	dual	UE to network	C1
+8.3.2	5GSM	8.3.2	PDU session establishment accept	8.3.2.1.1	PDU SESSION ESTABLISHMENT ACCEPT	dual	network to UE	C2
+8.3.3	5GSM	8.3.3	PDU session establishment reject	8.3.3.1.1	PDU SESSION ESTABLISHMENT REJECT	dual	network to UE	C3
+8.3.4	5GSM	8.3.4	PDU session authentication command	8.3.4.1.1	PDU SESSION AUTHENTICATION COMMAND	dual	network to UE	C5
+8.3.5	5GSM	8.3.5	PDU session authentication complete	8.3.5.1.1	PDU SESSION AUTHENTICATION COMPLETE	dual	UE to network	C6
+8.3.6	5GSM	8.3.6	PDU session authentication result	8.3.6.1.1	PDU SESSION AUTHENTICATION RESULT	dual	network to UE	C7
+8.3.7	5GSM	8.3.7	PDU session modification request	8.3.7.1.1	PDU SESSION MODIFICATION REQUEST	dual	UE to network	C9
+8.3.8	5GSM	8.3.8	PDU session modification reject	8.3.8.1.1	PDU SESSION MODIFICATION REJECT	dual	network to UE	CA
+8.3.9	5GSM	8.3.9	PDU session modification command	8.3.9.1.1	PDU SESSION MODIFICATION COMMAND	dual	network to UE	CB
+8.3.10	5GSM	8.3.10	PDU session modification complete	8.3.10.1.1	PDU SESSION MODIFICATION COMPLETE	dual	UE to network	CC
+8.3.11	5GSM	8.3.11	PDU session modification command reject	8.3.11.1.1	PDU SESSION MODIFICATION COMMAND REJECT	dual	UE to network	CD
+8.3.12	5GSM	8.3.12	PDU session release request	8.3.12.1.1	PDU SESSION RELEASE REQUEST	dual	UE to network	D1
+8.3.13	5GSM	8.3.13	PDU session release reject	8.3.13.1.1	PDU SESSION RELEASE REJECT	dual	network to UE	D2
+8.3.14	5GSM	8.3.14	PDU session release command	8.3.14.1.1	PDU SESSION RELEASE COMMAND	dual	network to UE	D3
+8.3.15	5GSM	8.3.15	PDU session release complete	8.3.15.1.1	PDU SESSION RELEASE COMPLETE	dual	UE to network	D4
+8.3.16	5GSM	8.3.16	5GSM status	8.3.16.1.1	5GSM STATUS	dual	both	D6
+8.3.17	5GSM	8.3.17	Service-level authentication command	8.3.17.1.1	SERVICE-LEVEL AUTHENTICATION COMMAND	dual	network to UE	D8
+8.3.18	5GSM	8.3.18	Service-level authentication complete	8.3.18.1.1	SERVICE-LEVEL AUTHENTICATION COMPLETE	dual	UE to network	D9
+8.3.19	5GSM	8.3.19	Remote UE report	8.3.19.1	REMOTE UE REPORT	dual	UE to network	DA
+8.3.20	5GSM	8.3.20	Remote UE report response	8.3.20.1	REMOTE UE REPORT RESPONSE	dual	network to UE	DB

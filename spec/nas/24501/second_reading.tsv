@@ -1,0 +1,24 @@
+# Second readings of spec/nas/24501 (spec/tools/nas_second_reading.py). A difference is a lead; the j80 text decides.
+source	protocol	type_hex	message	only_ours	only_theirs	classification
+pycrate-0.8.1	5GMM	41	REGISTRATION REQUEST	3C,3F,56,64,A-	0A	only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80); pycrate defines N5GC indication (9.11.3.72) as a full-octet type 2 IEI 0A, j80 Table 8.2.6.1.1 gives the half-octet IEI A- (TV, 1): ours follows j80
+pycrate-0.8.1	5GMM	42	REGISTRATION ACCEPT	1C,32,33,35,3C,3D,4B,4C,4F,5B,5C,61,63,64,7D,8-	1A,2A	only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80); pycrate puts the Requested WUS/PEIPS IEIs 1A/2A in REGISTRATION ACCEPT, j80 Table 8.2.7.1.1 (and the user's j70) give the Negotiated ones 1C/33
+pycrate-0.8.1	5GMM	44	REGISTRATION REJECT	3E,4D,62,63		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GMM	45	DEREGISTRATION REQUEST	3C,71		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GMM	47	DEREGISTRATION REQUEST	63		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GMM	4D	SERVICE REJECT	63		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GMM	54	CONFIGURATION UPDATE COMMAND	4B,4C,4F,5B,5C,61,63,64,74,78,7A,7B,8-		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GMM	5A	AUTHENTICATION RESULT	55		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GMM	5D	SECURITY MODE COMMAND	55		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GMM	67	UL NAS TRANSPORT	4E,5A,9-		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GSM	C1	PDU SESSION ESTABLISHMENT REQUEST	36		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GSM	C2	PDU SESSION ESTABLISHMENT ACCEPT	38,70,73		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GSM	C3	PDU SESSION ESTABLISHMENT REJECT	1D,77	00	only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80); pycrate's Re-attempt indicator carries IEI 00 (unset), j80 gives 1D
+pycrate-0.8.1	5GSM	C9	PDU SESSION MODIFICATION REQUEST	36,73,7C		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GSM	CA	PDU SESSION MODIFICATION REJECT	1D	00	only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80); pycrate's Re-attempt indicator carries IEI 00 (unset), j80 gives 1D
+pycrate-0.8.1	5GSM	CB	PDU SESSION MODIFICATION COMMAND	38,5A,70,73		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+pycrate-0.8.1	5GSM	D3	PDU SESSION RELEASE COMMAND	5A		only-ours: IEs newer than pycrate 0.8.1's tables (Rel-18/19 additions in j80)
+kaluza-ue-j70	5GMM	42	REGISTRATION ACCEPT	1D,1E		j80 addition: the Forbidden TAI(s) lists 1D/1E (9.11.3.9) are new since j70
+kaluza-ue-j70	5GMM	44	REGISTRATION REJECT	1D,1E		j80 addition: the Forbidden TAI(s) lists 1D/1E (9.11.3.9) are new since j70
+kaluza-ue-j70	5GMM	47	DEREGISTRATION REQUEST	1D,1E		j80 addition: the Forbidden TAI(s) lists 1D/1E (9.11.3.9) are new since j70
+kaluza-ue-j70	5GMM	4D	SERVICE REJECT	1D,1E		j80 addition: the Forbidden TAI(s) lists 1D/1E (9.11.3.9) are new since j70
+kaluza-ue-j70	5GMM	4E	SERVICE ACCEPT	1D,1E		j80 addition: the Forbidden TAI(s) lists 1D/1E (9.11.3.9) are new since j70

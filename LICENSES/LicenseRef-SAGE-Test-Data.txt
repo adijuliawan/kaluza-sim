@@ -1,0 +1,9 @@
+Test data transcribed from an ETSI SAGE specification of a 3GPP security
+algorithm (e.g. "Specification of the 3GPP Confidentiality and Integrity
+Algorithms UEA2 & UIA2, Document 3: Implementors' Test Data").
+
+Copyright: ETSI. Use of these algorithms and documents is subject to the
+custodian's conditions (the GSMA restricted usage undertaking for SNOW 3G).
+Carried in this private repository only as known-answer tests for an
+implementation used by a holder of that undertaking (docs/roadmap.md,
+"The GSMA SAGE undertaking for SNOW 3G").

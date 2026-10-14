@@ -1,0 +1,6 @@
+Text extracted from an IETF RFC (spec/ietf/, see spec/INDEX.tsv).
+
+Copyright (c) IETF Trust and the persons identified as the document authors.
+All rights reserved. The RFC's own copyright notice and the IETF Trust's Legal
+Provisions Relating to IETF Documents apply. Carried here only as test vectors
+for an implementation of the RFC.

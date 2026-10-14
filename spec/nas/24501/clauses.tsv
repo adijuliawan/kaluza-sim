@@ -1,0 +1,216 @@
+# Extracted by spec/tools/docx_tables.py 1.0 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+clause	title
+9.1	Overview
+9.1.1	NAS message format
+9.1.2	Field format and mapping
+9.2	Extended protocol discriminator
+9.3	Security header type
+9.4	PDU session identity
+9.5	Spare half octet
+9.6	Procedure transaction identity
+9.7	Message type
+9.8	Message authentication code
+9.9	Plain 5GS NAS message
+9.10	Sequence number
+9.11	Other information elements
+9.11.1	General
+9.11.2	Common information elements
+9.11.2.1	Additional information
+9.11.2.1A	Access type
+9.11.2.1B	DNN
+9.11.2.2	EAP message
+9.11.2.3	GPRS timer
+9.11.2.4	GPRS timer 2
+9.11.2.5	GPRS timer 3
+9.11.2.6	Intra N1 mode NAS transparent container
+9.11.2.7	N1 mode to S1 mode NAS transparent container
+9.11.2.8	S-NSSAI
+9.11.2.9	S1 mode to N1 mode NAS transparent container
+9.11.2.10	Service-level-AA container
+9.11.2.11	Service-level device ID
+9.11.2.12	Service-level-AA server address
+9.11.2.13	Service-level-AA payload
+9.11.2.14	Service-level-AA response
+9.11.2.15	Service-level-AA payload type
+9.11.2.16	Void
+9.11.2.17	Service-level-AA pending indication
+9.11.2.18	Service-level-AA service status indication
+9.11.2.19	Time duration
+9.11.2.20	Unavailability information
+9.11.2.21	Unavailability configuration
+9.11.3	5GS mobility management (5GMM) information elements
+9.11.3.1	5GMM capability
+9.11.3.2	5GMM cause
+9.11.3.2A	5GS DRX parameters
+9.11.3.3	5GS identity type
+9.11.3.4	5GS mobile identity
+9.11.3.5	5GS network feature support
+9.11.3.6	5GS registration result
+9.11.3.7	5GS registration type
+9.11.3.8	5GS tracking area identity
+9.11.3.9	5GS tracking area identity list
+9.11.3.9A	5GS update type
+9.11.3.10	ABBA
+9.11.3.11	Void
+9.11.3.12	Additional 5G security information
+9.11.3.12A	Additional information requested
+9.11.3.13	Allowed PDU session status
+9.11.3.14	Authentication failure parameter
+9.11.3.15	Authentication parameter AUTN
+9.11.3.16	Authentication parameter RAND
+9.11.3.17	Authentication response parameter
+9.11.3.18	Configuration update indication
+9.11.3.18A	CAG information list
+9.11.3.18B	CIoT small data container
+9.11.3.18C	Ciphering key data
+9.11.3.18D	Control plane service type
+9.11.3.19	Daylight saving time
+9.11.3.20	De-registration type
+9.11.3.21	Void
+9.11.3.22	Void
+9.11.3.23	Emergency number list
+9.11.3.23A	EPS bearer context status
+9.11.3.24	EPS NAS message container
+9.11.3.25	EPS NAS security algorithms
+9.11.3.26	Extended emergency number list
+9.11.3.26A	Extended DRX parameters
+9.11.3.27	Void
+9.11.3.28	IMEISV request
+9.11.3.29	LADN indication
+9.11.3.30	LADN information
+9.11.3.31	MICO indication
+9.11.3.31A	MA PDU session information
+9.11.3.31B	Mapped NSSAI
+9.11.3.31C	Mobile station classmark 2
+9.11.3.32	NAS key set identifier
+9.11.3.33	NAS message container
+9.11.3.34	NAS security algorithms
+9.11.3.35	Network name
+9.11.3.36	Network slicing indication
+9.11.3.36A	Non-3GPP NW provided policies
+9.11.3.37	NSSAI
+9.11.3.37A	NSSAI inclusion mode
+9.11.3.38	Operator-defined access category definitions
+9.11.3.39	Payload container
+9.11.3.40	Payload container type
+9.11.3.41	PDU session identity 2
+9.11.3.42	PDU session reactivation result
+9.11.3.43	PDU session reactivation result error cause
+9.11.3.44	PDU session status
+9.11.3.45	PLMN list
+9.11.3.46	Rejected NSSAI
+9.11.3.46A	Release assistance indication
+9.11.3.47	Request type
+9.11.3.48	S1 UE network capability
+9.11.3.48A	S1 UE security capability
+9.11.3.49	Service area list
+9.11.3.50	Service type
+9.11.3.50A	SMS indication
+9.11.3.51	SOR transparent container
+9.11.3.51A	Supported codec list
+9.11.3.52	Time zone
+9.11.3.53	Time zone and time
+9.11.3.53A	UE parameters update transparent container
+9.11.3.54	UE security capability
+9.11.3.55	UE's usage setting
+9.11.3.56	UE status
+9.11.3.57	Uplink data status
+9.11.3.58	Void
+9.11.3.59	Void
+9.11.3.60	Void
+9.11.3.61	Void
+9.11.3.62	Void
+9.11.3.63	Void
+9.11.3.64	Void
+9.11.3.65	Void
+9.11.3.66	Void
+9.11.3.67	Void
+9.11.3.68	UE radio capability ID
+9.11.3.69	UE radio capability ID deletion indication
+9.11.3.70	Truncated 5G-S-TMSI configuration
+9.11.3.71	WUS assistance information
+9.11.3.72	N5GC indication
+9.11.3.73	NB-N1 mode DRX parameters
+9.11.3.74	Additional configuration indication
+9.11.3.75	Extended rejected NSSAI
+9.11.3.76	UE request type
+9.11.3.77	Paging restriction
+9.11.3.78	Void
+9.11.3.79	NID
+9.11.3.80	PEIPS assistance information
+9.11.3.81	5GS additional request result
+9.11.3.82	NSSRG information
+9.11.3.83	List of PLMNs to be used in disaster condition
+9.11.3.84	Registration wait range
+9.11.3.85	PLMN identity
+9.11.3.86	Extended CAG information list
+9.11.3.87	NSAG information
+9.11.3.88	ProSe relay transaction identity
+9.11.3.89	Relay key request parameters
+9.11.3.90	Relay key response parameters
+9.11.3.91	Priority indicator
+9.11.3.92	SNPN list
+9.11.3.93	N3IWF identifier
+9.11.3.94	TNAN information
+9.11.3.95	RAN timing synchronization
+9.11.3.96	Extended LADN information
+9.11.3.97	Alternative NSSAI
+9.11.3.98	Type 6 IE container
+9.11.3.99	Non-3GPP access path switching indication
+9.11.3.100	S-NSSAI location validity information
+9.11.3.101	S-NSSAI time validity information
+9.11.3.102	Non-3GPP path switching information
+9.11.3.103	Partial NSSAI
+9.11.3.104	AUN3 indication
+9.11.3.105	Feature authorization indication
+9.11.3.106	Payload container information
+9.11.3.107	AUN3 device security key
+9.11.3.108	On-demand NSSAI
+9.11.3.109	Extended 5GMM cause
+9.11.3.110	Access technology utilization control
+9.11.3.111	LP-WUSPS assistance information
+9.11.3.112	LP-WUS status
+9.11.4	5GS session management (5GSM) information elements
+9.11.4.1	5GSM capability
+9.11.4.2	5GSM cause
+9.11.4.3	Always-on PDU session indication
+9.11.4.4	Always-on PDU session requested
+9.11.4.5	Allowed SSC mode
+9.11.4.6	Extended protocol configuration options
+9.11.4.7	Integrity protection maximum data rate
+9.11.4.8	Mapped EPS bearer contexts
+9.11.4.9	Maximum number of supported packet filters
+9.11.4.10	PDU address
+9.11.4.11	PDU session type
+9.11.4.12	QoS flow descriptions
+9.11.4.13	QoS rules
+9.11.4.14	Session-AMBR
+9.11.4.15	SM PDU DN request container
+9.11.4.16	SSC mode
+9.11.4.17	Re-attempt indicator
+9.11.4.18	5GSM network feature support
+9.11.4.19	Void
+9.11.4.20	Serving PLMN rate control
+9.11.4.21	5GSM congestion re-attempt indicator
+9.11.4.22	ATSSS container
+9.11.4.23	Control plane only indication
+9.11.4.24	IP header compression configuration
+9.11.4.25	DS-TT Ethernet port MAC address
+9.11.4.26	UE-DS-TT residence time
+9.11.4.27	Port management information container
+9.11.4.28	Ethernet header compression configuration
+9.11.4.29	Remote UE context list
+9.11.4.30	Requested MBS container
+9.11.4.31	Received MBS container
+9.11.4.32	PDU session pair ID
+9.11.4.33	RSN
+9.11.4.34	ECS address
+9.11.4.35	Void
+9.11.4.36	N3QAI
+9.11.4.37	Non-3GPP delay budget
+9.11.4.38	URSP rule enforcement reports
+9.11.4.39	Protocol description
+9.11.4.40	ECN marking for L4S indication
+9.11.4.41	Non-3GPP device information
+9.12	3GPP specific coding information defined within present document
+9.12.1	Serving network name (SNN)
