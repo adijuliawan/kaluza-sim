@@ -1,0 +1,172 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The IE types of P1's NAS messages (P1 N4; closes KS-NAS-G1 for P1): every type the messages below use is
+# header (framed by nas.cpp), typed (a struct of ie/ie.hpp) or raw (its contents stay octets, with the reason).
+# tools/guards/check_nas_ies.py checks this file against spec/nas/24501/message_ies.tsv and ie/ie.hpp.
+# messages: 8.2.1 8.2.2 8.2.3 8.2.4 8.2.5 8.2.6 8.2.7 8.2.8 8.2.9 8.2.10 8.2.11 8.2.12 8.2.13 8.2.14 8.2.15 8.2.16 8.2.17 8.2.18 8.2.19 8.2.20 8.2.21 8.2.22 8.2.25 8.2.26 8.2.27 8.2.29 8.3.1 8.3.2 8.3.3 8.3.7 8.3.8 8.3.9 8.3.10 8.3.11 8.3.12 8.3.13 8.3.14 8.3.15 8.3.16
+reference	type_name	status	cxx	reason
+9.2	Extended protocol discriminator	header	-	framed by the generic codec (nas.cpp)
+9.3	Security header type	header	-	framed by the generic codec (nas.cpp)
+9.4	PDU session identity	header	-	framed by the generic codec (nas.cpp)
+9.5	Spare half octet	header	-	framed by the generic codec (nas.cpp)
+9.6	Message type	header	-	framed by the generic codec (nas.cpp)
+9.7	Message type	header	-	framed by the generic codec (nas.cpp)
+9.11.2.1	Additional information	raw	-	location services, UUAA or UE unavailability: not a P1 procedure
+9.11.2.2	EAP message	typed	EapMessage	-
+9.11.2.3	GPRS timer	typed	GprsTimer	-
+9.11.2.4	GPRS timer 2	typed	GprsTimer2	-
+9.11.2.5	GPRS timer 3	typed	GprsTimer3	-
+9.11.2.8	S-NSSAI	typed	Snssai	-
+9.11.2.10	Service-level-AA container	raw	-	location services, UUAA or UE unavailability: not a P1 procedure
+9.11.2.20	Unavailability information	raw	-	location services, UUAA or UE unavailability: not a P1 procedure
+9.11.2.21	Unavailability configuration	raw	-	location services, UUAA or UE unavailability: not a P1 procedure
+9.11.2.1A	Access type	typed	AccessType	-
+9.11.2.1B	DNN	typed	Dnn	-
+9.11.3.1	5GMM capability	typed	FiveGmmCapability	-
+9.11.3.2	5GMM cause	typed	Cause	-
+9.11.3.3	5GS identity type	typed	IdentityType	-
+9.11.3.4	5GS mobile identity	typed	MobileIdentity	-
+9.11.3.5	5GS network feature support	typed	NetworkFeatureSupport	-
+9.11.3.6	5GS registration result	typed	RegistrationResult	-
+9.11.3.7	5GS registration type	typed	RegistrationType	-
+9.11.3.8	5GS tracking area identity	typed	TaiIe	-
+9.11.3.9	5GS tracking area identity list	typed	TaiList	-
+9.11.3.10	ABBA	typed	Abba	-
+9.11.3.12	Additional 5G security information	typed	Additional5gSecurityInformation	-
+9.11.3.13	Allowed PDU session status	typed	PsiBitmap	-
+9.11.3.14	Authentication failure parameter	typed	AuthenticationFailureParameter	-
+9.11.3.15	Authentication parameter AUTN	typed	Autn	-
+9.11.3.16	Authentication parameter RAND	typed	Rand	-
+9.11.3.17	Authentication response parameter	typed	AuthenticationResponseParameter	-
+9.11.3.18	Configuration update indication	typed	ConfigurationUpdateIndication	-
+9.11.3.19	Daylight saving time	raw	-	network name and time: reported in events, not interpreted in P1
+9.11.3.20	De-registration type	typed	DeregistrationType	-
+9.11.3.23	Emergency number list	raw	-	emergency numbers: emergency services are later
+9.11.3.24	EPS NAS message container	raw	-	EPS interworking (N26) or roaming mapped NSSAI: later phases
+9.11.3.25	EPS NAS security algorithms	raw	-	EPS interworking (N26) or roaming mapped NSSAI: later phases
+9.11.3.26	Extended emergency number list	raw	-	emergency numbers: emergency services are later
+9.11.3.28	IMEISV request	typed	ImeisvRequest	-
+9.11.3.29	LADN indication	raw	-	LADN: later
+9.11.3.30	LADN information	raw	-	LADN: later
+9.11.3.31	MICO indication	typed	MicoIndication	-
+9.11.3.32	NAS key set identifier	typed	NgKsi	-
+9.11.3.33	NAS message container	typed	NasMessageContainer	-
+9.11.3.34	NAS security algorithms	typed	NasSecurityAlgorithms	-
+9.11.3.35	Network name	raw	-	network name and time: reported in events, not interpreted in P1
+9.11.3.36	Network slicing indication	typed	NetworkSlicingIndication	-
+9.11.3.37	NSSAI	typed	Nssai	-
+9.11.3.38	Operator-defined access category definitions	raw	-	operator-defined access categories: P1 runs basic UAC only
+9.11.3.39	Payload container	typed	PayloadContainer	-
+9.11.3.40	Payload container type	typed	PayloadContainerType	-
+9.11.3.41	PDU session identity 2	typed	PduSessionIdentity2	-
+9.11.3.42	PDU session reactivation result	typed	PsiBitmap	-
+9.11.3.43	PDU session reactivation result error cause	typed	ReactivationErrorCause	-
+9.11.3.44	PDU session status	typed	PsiBitmap	-
+9.11.3.45	PLMN list	typed	PlmnList	-
+9.11.3.46	Rejected NSSAI	typed	RejectedNssai	-
+9.11.3.47	Request type	typed	RequestType	-
+9.11.3.48	S1 UE network capability	typed	S1UeNetworkCapability	-
+9.11.3.49	Service area list	raw	-	service area restrictions: mobility rows are P3
+9.11.3.50	Service type	typed	ServiceType	-
+9.11.3.51	SOR transparent container	raw	-	steering of roaming: later
+9.11.3.52	Time zone	raw	-	network name and time: reported in events, not interpreted in P1
+9.11.3.53	Time zone and time	raw	-	network name and time: reported in events, not interpreted in P1
+9.11.3.54	UE security capability	typed	UeSecurityCapability	-
+9.11.3.55	UE's usage setting	typed	UsageSetting	-
+9.11.3.56	UE status	typed	UeStatus	-
+9.11.3.57	Uplink data status	typed	PsiBitmap	-
+9.11.3.68	UE radio capability ID	raw	-	UE radio capability ID (RACS): later
+9.11.3.69	UE radio capability ID deletion indication	raw	-	UE radio capability ID (RACS): later
+9.11.3.70	Truncated 5G-S-TMSI configuration	raw	-	eDRX, NB-IoT, WUS or CIoT: not simulated
+9.11.3.71	WUS assistance information	raw	-	eDRX, NB-IoT, WUS or CIoT: not simulated
+9.11.3.72	N5GC indication	raw	-	non-3GPP or wireline access: phase 2
+9.11.3.73	NB-N1 mode DRX parameters	raw	-	eDRX, NB-IoT, WUS or CIoT: not simulated
+9.11.3.74	Additional configuration indication	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.75	Extended rejected NSSAI	raw	-	extended rejected NSSAI (slice back-off): kept raw while P1 has one slice; typed with the NSSAI rows later
+9.11.3.76	UE request type	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.77	Paging restriction	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.79	NID	raw	-	CAG, SNPN, disaster roaming (MINT) or priority: later phases
+9.11.3.80	PEIPS assistance information	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.81	5GS additional request result	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.82	NSSRG information	raw	-	network slicing extensions (NSSRG, NSAG, alternative, validity, partial, on-demand): later
+9.11.3.83	List of PLMNs to be used in disaster condition	raw	-	CAG, SNPN, disaster roaming (MINT) or priority: later phases
+9.11.3.84	Registration wait range	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.85	PLMN identity	raw	-	CAG, SNPN, disaster roaming (MINT) or priority: later phases
+9.11.3.86	Extended CAG information list	raw	-	CAG, SNPN, disaster roaming (MINT) or priority: later phases
+9.11.3.87	NSAG information	raw	-	network slicing extensions (NSSRG, NSAG, alternative, validity, partial, on-demand): later
+9.11.3.91	Priority indicator	raw	-	CAG, SNPN, disaster roaming (MINT) or priority: later phases
+9.11.3.92	SNPN list	raw	-	CAG, SNPN, disaster roaming (MINT) or priority: later phases
+9.11.3.93	N3IWF identifier	raw	-	non-3GPP or wireline access: phase 2
+9.11.3.94	TNAN information	raw	-	non-3GPP or wireline access: phase 2
+9.11.3.95	RAN timing synchronization	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.96	Extended LADN information	raw	-	LADN: later
+9.11.3.97	Alternative NSSAI	raw	-	network slicing extensions (NSSRG, NSAG, alternative, validity, partial, on-demand): later
+9.11.3.98	Type 6 IE container	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.99	Non-3GPP access path switching indication	raw	-	non-3GPP or wireline access: phase 2
+9.11.3.100	S-NSSAI location validity information	raw	-	network slicing extensions (NSSRG, NSAG, alternative, validity, partial, on-demand): later
+9.11.3.101	S-NSSAI time validity information	raw	-	network slicing extensions (NSSRG, NSAG, alternative, validity, partial, on-demand): later
+9.11.3.102	Non-3GPP path switching information	raw	-	non-3GPP or wireline access: phase 2
+9.11.3.103	Partial NSSAI	raw	-	network slicing extensions (NSSRG, NSAG, alternative, validity, partial, on-demand): later
+9.11.3.104	AUN3 indication	raw	-	non-3GPP or wireline access: phase 2
+9.11.3.105	Feature authorization indication	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.106	Payload container information	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.107	AUN3 device security key	raw	-	non-3GPP or wireline access: phase 2
+9.11.3.108	On-demand NSSAI	raw	-	network slicing extensions (NSSRG, NSAG, alternative, validity, partial, on-demand): later
+9.11.3.109	Extended 5GMM cause	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.110	Access technology utilization control	raw	-	Rel-17/18 features not in P1 (SCMR, paging restriction, PEIPS, RAN timing, feature authorization, extended causes, access technology control)
+9.11.3.111	LP-WUSPS assistance information	raw	-	eDRX, NB-IoT, WUS or CIoT: not simulated
+9.11.3.112	LP-WUS status	raw	-	eDRX, NB-IoT, WUS or CIoT: not simulated
+9.11.3.12A	Additional information requested	raw	-	location services ciphering keys: not P1
+9.11.3.18A	CAG information list	raw	-	CAG, SNPN, disaster roaming (MINT) or priority: later phases
+9.11.3.18C	Ciphering key data	raw	-	location services ciphering keys: not P1
+9.11.3.23A	EPS bearer context status	raw	-	EPS interworking (N26) or roaming mapped NSSAI: later phases
+9.11.3.26A	Extended DRX parameters	raw	-	eDRX, NB-IoT, WUS or CIoT: not simulated
+9.11.3.2A	5GS DRX parameters	typed	DrxParameters	-
+9.11.3.31A	MA PDU session information	raw	-	MA PDU sessions (ATSSS): later
+9.11.3.31B	Mapped NSSAI	raw	-	EPS interworking (N26) or roaming mapped NSSAI: later phases
+9.11.3.31C	Mobile station classmark 2	raw	-	MS classmark 2 and codecs (SRVCC, IMS emergency): later
+9.11.3.36A	Non-3GPP NW provided policies	raw	-	non-3GPP or wireline access: phase 2
+9.11.3.37A	NSSAI inclusion mode	raw	-	NSSAI inclusion mode: P1 sends no NSSAI at the AS (one slice)
+9.11.3.46A	Release assistance indication	raw	-	eDRX, NB-IoT, WUS or CIoT: not simulated
+9.11.3.48A	S1 UE security capability	raw	-	EPS interworking (N26) or roaming mapped NSSAI: later phases
+9.11.3.50A	SMS indication	typed	SmsIndication	-
+9.11.3.51A	Supported codec list	raw	-	MS classmark 2 and codecs (SRVCC, IMS emergency): later
+9.11.3.9A	5GS update type	typed	UpdateType	-
+9.11.4.1	5GSM capability	typed	FiveGsmCapability	-
+9.11.4.2	5GSM cause	typed	Cause	-
+9.11.4.3	Always-on PDU session indication	raw	-	always-on PDU sessions (URLLC): later
+9.11.4.4	Always-on PDU session requested	raw	-	always-on PDU sessions (URLLC): later
+9.11.4.5	Allowed SSC mode	typed	AllowedSscMode	-
+9.11.4.6	Extended protocol configuration options	typed	EpcoIpv4Dns	-
+9.11.4.7	Integrity protection maximum data rate	typed	IntegrityProtectionMaxDataRate	-
+9.11.4.8	Mapped EPS bearer contexts	raw	-	mapped EPS bearer contexts (EPS interworking): later
+9.11.4.9	Maximum number of supported packet filters	typed	MaxPacketFilters	-
+9.11.4.10	PDU address	typed	PduAddress	-
+9.11.4.11	PDU session type	typed	PduSessionType	-
+9.11.4.12	QoS flow descriptions	typed	QosFlowDescriptions	-
+9.11.4.13	QoS rules	typed	QosRules	-
+9.11.4.14	Session-AMBR	typed	SessionAmbr	-
+9.11.4.15	SM PDU DN request container	raw	-	secondary authentication (SM PDU DN request container): P4
+9.11.4.16	SSC mode	typed	SscMode	-
+9.11.4.17	Re-attempt indicator	typed	ReattemptIndicator	-
+9.11.4.18	5GSM network feature support	raw	-	5GSM network features, rate control, CIoT and header compression: not P1
+9.11.4.20	Serving PLMN rate control	raw	-	5GSM network features, rate control, CIoT and header compression: not P1
+9.11.4.21	5GSM congestion re-attempt indicator	typed	CongestionReattemptIndicator	-
+9.11.4.22	ATSSS container	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.23	Control plane only indication	raw	-	5GSM network features, rate control, CIoT and header compression: not P1
+9.11.4.24	IP header compression configuration	raw	-	5GSM network features, rate control, CIoT and header compression: not P1
+9.11.4.25	DS-TT Ethernet port MAC address	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.26	UE-DS-TT residence time	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.27	Port management information container	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.28	Ethernet header compression configuration	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.30	Requested MBS container	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.31	Received MBS container	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.32	PDU session pair ID	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.33	RSN	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.36	N3QAI	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.37	Non-3GPP delay budget	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.38	URSP rule enforcement reports	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.39	Protocol description	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.40	ECN marking for L4S indication	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
+9.11.4.41	Non-3GPP device information	raw	-	ATSSS, TSN, Ethernet, MBS, redundancy, non-3GPP QoS, URSP reports, L4S: later phases
