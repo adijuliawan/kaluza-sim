@@ -307,13 +307,15 @@ The on-air link measures 41 Mbit/s DL and 7 Mbit/s UL, so the sim is never the b
 - **Where keys come from:** only 0600 files (checked at start) or sealed card secrets.
 - **Key logs:** the test-only key log is opt-in, recorded in the manifest, and written 0600. Only AS keys can be exported (for `pdcp-nr` decryption); K and OPc have no export path.
 - **Real cards:** the PC/SC backend keeps K inside the card.
+- **Provisioning:** K and OPc reach the core's UDR only inside `ksim-sim`'s API calls. Bodies are built in memory and never logged, and the client credential is a 0600 file on the dev PC ([ADR 0008](adr/0008-subscriber-provisioning-api.md)).
 - **Lab card files:** never copy them into the repo or any log. `/home/amadeus/Development/ran/usim/*.md` holds keys and an ADM1 PIN in clear text.
 - **CI canary:** the "secret canary" runs a scenario with a known test K and expects 0 hits in every log, event and pcap.
 
 ### 3.7 Operability
 - **Host:** kaluza-uesim (Proxmox VM 105), VLAN 30.
 - **Addresses:** kaluza-uesim holds .20–.23 (UERANSIM, n3iwue and their aliases). kaluza-sim's RAN nodes use **172.30.30.30–.39**, each in its own ipvlan netns, and bind their own GTP-U port 2152. F1 and E1 stay on a host-internal bridge ([`lab.md`](lab.md)).
-- **ID collisions:** gNB IDs, NCIs and TACs must not collide with OCUDU or UERANSIM. A startup check refuses collisions it can see.
+- **ID collisions:** gNB IDs, NCIs and PCIs must not collide with OCUDU or UERANSIM. A startup check refuses collisions it can see.
+- **TACs are shared:** every cell advertises one the AMF serves (000001; 000003 on SNPN cells; 000007 from wave 40) and never a non-3GPP TAC ([`lab.md`](lab.md) §3).
 - **No RF:** no RF libraries. The systemd units use PrivateDevices, except `/dev/net/tun`.
 - **Lab etiquette:**
   - stop processes with `pkill -x`, never `pkill -f`;

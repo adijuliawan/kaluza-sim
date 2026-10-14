@@ -55,6 +55,7 @@ Peers are pinned per row: the OCUDU commit, the Open5GS fork commit, the kaluza-
 
 - **Baseline:** the 1,633 rows of the 23 gates that start a UERANSIM gNB, in `/home/amadeus/Development/kaluza-core/docs/compliance/smf/phase-2/rows-k3s-963130e1-native-eupf-75d3202.tsv` (`phase-2-final`).
 - **Target:** the same gates run with `UE_IMPL=kaluza-sim`, which a kaluza-core session adds (§6).
+- **Same-day control:** the baseline is also phase 3's control. If the lab has moved on (core or UPF commits) by P4, UERANSIM is scored again on the same day as the sim, and the crosswalk compares those two runs, not the old TSV (kaluza-core, 2026-10-14).
 - **Every baseline row must end in exactly one of these, with 0 rows unaccounted:**
 
 | Outcome | Meaning |
@@ -102,3 +103,8 @@ This repo edits nothing in kaluza-core. A kaluza-core session adopts the contrac
 | Probes | `ksim-ctl <node> capabilities` (`CAP.SMS_NAS=1`, …), `VERSION=`, `COMMIT=`, `SPEC_PINS=` |
 | Lifecycle | `ksim run -c scenario.yaml --run-dir D` as a systemd service (survives SSH loss); logs, pcaps and the manifest in the run directory; `ksim stop`; `FAULTS=0` checked before a set starts |
 | Rows | Scenario assertions print kaluza-core's row format (`  PASS  name got=…`), but pass/fail rows stay in the gates |
+
+**kaluza-core's response (2026-10-14):** no objection. It asked for three things, which the contract adopts:
+1. **Row text stays identical.** The `UE_IMPL` switch never appears in a gate's row text, so row IDs match under both RANs and the parity diff is a plain TSV compare.
+2. **`wait` keeps the evidence.** `ksim-ctl ue <sel> wait <event>` must leave the same evidence the log-grep rows read today: registration and PDU session state, the assigned IP and the TEID. It prints them as KEY=value lines on success, and the NDJSON event carries them. Otherwise those rows lose their proof.
+3. **A same-day control.** The 1,633-row baseline (`963130e1` native + eUPF `75d3202`) is phase 3's control. If the lab moves on before P4, UERANSIM is scored on the same day as the sim, not against the old TSV (§4).

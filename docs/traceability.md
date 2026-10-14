@@ -22,7 +22,7 @@ This page maps three things from kaluza-core to the kaluza-sim release that serv
 | Charging, exposure, OAM: chf (81), ee (65), oam (112), fm-pm (56) | Traffic volumes, reachability events, two gNBs, SCTP-loss alarms | v1 |
 | dn-aaa (150) | EAP/PAP/CHAP over 5GSM; back-off honoured | v1.x (P4) |
 | ipv6 (48), plus the ims `v6` part | IPv6 and IPv4v6, SLAAC | v1.x (P4) |
-| roaming (258) | A 999/70 SUPI in the visited PLMN; LBO and home-routed sessions; `ps-modify` | v1 |
+| roaming (258) | A 999/70 SUPI in the visited PLMN; LBO and home-routed sessions (the `home` DNN; eUPF-only between UPF-VPP W5 and W7); `ps-modify`. The roamer's routing indicator must be 0000 or the default 0 ([`sim-uicc.md`](sim-uicc.md) §8) | v1 |
 | smsf (121) | SMS over NAS, MO/MT from idle, SMS test hooks | v1 (hooks v1.x) |
 | ims (76) | The `ims` DNN as transport for sipp | v1. The IMS UA (Ph2) lets kaluza-core retire IM-X1/IM-X7 ("soft UEs have no sec-agree") |
 | snpn (50) | SNPN access mode | later; stays on UERANSIM until then |

@@ -19,7 +19,7 @@ It is a **second implementation**. It shares no code, tables or reference output
 
 **Standing rules:**
 - **Never print secrets.** That covers K, OPc, ADM codes, seeds and card images.
-- **Read-only on kaluza-core.** Coordinate lab and B220 use with its session.
+- **Read-only on kaluza-core.** The one exception is subscriber data for our own IMSI ranges, written through its provisioning API ([ADR 0008](docs/adr/0008-subscriber-provisioning-api.md)). Coordinate lab and B220 use with its session.
 - **Wait for an explicit go** after a plan is approved.
 - **Commits and pushes:** only when told, with no AI attribution.
 - **Clean room:** AGPL, GPL and CSSL code is read for ideas only, never copied.
@@ -50,6 +50,7 @@ kaluza-sim targets:
 | Independence | Our own reading of the spec. Nothing from kaluza-core is used to produce an expected value | [0005](docs/adr/0005-independence-from-kaluza-core.md) |
 | RRC_INACTIVE | v1.x (build phase P3b), right after the v1 handover milestone | [0006](docs/adr/0006-rrc-inactive-in-v1x.md) |
 | Phase 2 | Positioning (LPP/NRPPa) comes first, to land with wave 41 | [0007](docs/adr/0007-positioning-first-in-phase-2.md) |
+| Subscribers | The sim ranges go into the core's UDR through its provisioning API, under kaluza-sim's own Keycloak client; null SUCI until P1's SUCI rows | [0008](docs/adr/0008-subscriber-provisioning-api.md) |
 
 ## Documents
 
@@ -66,7 +67,7 @@ kaluza-sim targets:
 | [`docs/roadmap.md`](docs/roadmap.md) | P0–P5, exit criteria, risks |
 | [`docs/lab.md`](docs/lab.md) | Where it runs: the dev PC for builds and tier 1; kaluza-uesim (VM 105) for runs against the core on 172.30.30.30–.39; the card bridge |
 | [`docs/specs.md`](docs/specs.md) | Pinned spec index: local or to fetch, with versions |
-| [`docs/adr/`](docs/adr/) | Decision records 0001–0007 |
+| [`docs/adr/`](docs/adr/) | Decision records 0001–0008 |
 | [`docs/research/`](docs/research/) | OCUDU, duranta-ran (OAI), UERANSIM fork, PacketRusher, SIM tooling, Quectel material |
 
 ## Repository

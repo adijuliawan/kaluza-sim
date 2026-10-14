@@ -6,6 +6,7 @@ The resume point for the next kaluza-sim session. The session that wrote it ran 
 
 - **Done:** requirements and architecture, decided with the user. This repo was initialised (`git init -b main`, origin `ssh://git@ssh.github.com:443/adijuliawan/kaluza-sim.git`), and the docs were written.
 - **Committed and pushed** at the user's request: `15508d9` (the docs), then this link commit. No code exists yet.
+- **Later the same day:** kaluza-core answered the open items, and the user decided the three that were theirs. The answers are recorded in [`../lab.md`](../lab.md) §3, §4 and §8, [`../sim-uicc.md`](../sim-uicc.md) §8, [`../verification.md`](../verification.md) §4 and §6, and [ADR 0008](../adr/0008-subscriber-provisioning-api.md); §5 below has the statuses. The kaluza-core session now talks to kaluza-sim directly about lab matters.
 - **A private review page** summarises the docs: https://claude.ai/artifact/DdYiFQqkbaC8kaMCn4ft95.
   - The source HTML from this session is not in the repo.
   - To update it, read the artifact (`Artifact` action `read`), then republish with `url=` so the link stays the same.
@@ -54,9 +55,10 @@ kaluza-core is a Java 25 / Quarkus 5G core, Rel-19.
 **Lab facts the sim needs:**
 - **VLAN 30 172.30.30.0/24:**
   - AMF N2 is .1:38412; the V-UPF N3 is .2; the OCUDU gNB N3 is .10.
-  - **.11 is the N3IWF DNAT alias.** The phase-3 plan's example address for kaluza-gnb2 clashes with it; flagged to the user.
+  - **.11 is the N3IWF DNAT alias.** kaluza-gnb2 moves to .12 in the phase-3 plan (user's go, 2026-10-14).
+  - **The V-UPF never ARPs for its N3 peers.** Each one needs a static neighbour entry, and kaluza-core adds .30–.39 before P1 ([`../lab.md`](../lab.md) §4).
   - kaluza-uesim is .20, where UERANSIM and n3iwue run. Its aliases .21–.23 carry n3iwue multi-UE runs and UERANSIM's handover-target gNB.
-  - **kaluza-sim takes .30–.39** (decided 2026-10-14, after the first draft's .21–.29 was found to collide). The full lab plan is [`../lab.md`](../lab.md).
+  - **kaluza-sim takes .30–.39** (decided 2026-10-14, after the first draft's .21–.29 was found to collide; kaluza-core checked .30–.39 free in every repo and live). The full lab plan is [`../lab.md`](../lab.md).
 - **DN:** 172.30.61.1, the dev PC on VLAN 61, used for iperf3 and ping.
 - **IMS** sits on VLAN 63: P-CSCF at .10, RTPEngine at .11.
 - **UE host:** `kaluza-uesim`, Proxmox VM 105, Ubuntu 26.04, reached with `ssh kaluza-uesim`. Kernel, CPU and memory are to be measured at P0.
@@ -74,14 +76,18 @@ kaluza-core is a Java 25 / Quarkus 5G core, Rel-19.
 
 ## 5. Open items
 
-1. **Importing the sim subscriber range into the core.** `ksim-sim` writes a 0600 seed fragment, and a kaluza-core session imports it. This repo never edits kaluza-core. Real cards keep the core's "K/OPc typed by a person" rule.
-2. **Adopting the gate contract** (`docs/verification.md` §6) is a kaluza-core session's call.
-3. **The .11 address clash** in the phase-3 plan. The user was told; the core and RAN sessions still need to hear it.
+Statuses as of 2026-10-14, after kaluza-core's answers.
+
+1. **Importing the sim subscriber ranges into the core.** *Decided:* through the UDR's provisioning API, from the dev PC, under kaluza-sim's own Keycloak client. The seed fragment is only the fallback ([ADR 0008](../adr/0008-subscriber-provisioning-api.md), [`../sim-uicc.md`](../sim-uicc.md) §8). kaluza-core creates the client and its step-up exemption before P1. Real cards keep the core's "K/OPc typed by a person" rule.
+2. **Adopting the gate contract** (`docs/verification.md` §6) is still a kaluza-core session's call. It raised no objection and asked for three things, now in §6.
+3. **The .11 address clash.** *Resolved:* kaluza-gnb2 moves to .12 (user's go). A kaluza-core session edits its phase-3 plan.
 4. **O-RAN specs** (E2AP, E2SM-KPM/RC, O1, WG4/WG5) need the user's O-RAN registration. Only phase 2 needs them.
 5. **Side finding for the user:** `/home/amadeus/Development/ran/usim/2026-09-21-test-sims.md` (around line 172) holds an ADM1 PIN in clear text. Never print it.
 6. **Measured 2026-10-14:** kaluza-uesim has 4 vCPU, 8 GB and Linux 7.0.0-34 ([`../lab.md`](../lab.md) §2). P2 checks the performance targets there.
-7. **Recording 172.30.30.30–.39 (kaluza-sim) in kaluza-core's `lab-relayout.md`** is a kaluza-core session's job.
-8. **A second TAC served by the AMF**, for mobility-registration rows in P3, is a kaluza-core session's job.
+7. **Recording 172.30.30.30–.39 (kaluza-sim) in kaluza-core's `lab-relayout.md`.** The block was checked free. With the user's go, a kaluza-core session records it.
+8. **A second TAC served by the AMF.** *Answered:* 000007 comes with wave 40, for P3's mobility-registration rows. Until then, cells use 000001 ([`../lab.md`](../lab.md) §3).
+9. **New P1 prerequisites on kaluza-core's side:** the V-UPF neighbour entries for .30–.39 (a V-UPF roll in a window core gives) and kaluza-sim's Keycloak client. Lab windows are asked at P1 ([`../roadmap.md`](../roadmap.md), P1 entry conditions).
+10. **SUCI:** the null scheme on the sim cards until P1 reaches its SUCI rows; then the user picks the Profile A/B key ids.
 
 ## 6. First steps of P0 (only after the user's go)
 

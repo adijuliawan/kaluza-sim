@@ -38,6 +38,11 @@
 - **gNB:** all-in-one (`ksim`), with F1 and E1 encoded over memory; the NGAP core set; GTP-U N3.
 - **UE side:** per-UE netns plus TUN; a first `ksim-ctl`; personas v0; IMEISV.
 
+**P1 entry conditions** (on kaluza-core's side, agreed 2026-10-14; [`lab.md`](lab.md) §8):
+- The V-UPF holds static neighbour entries for 172.30.30.30–.39 (a V-UPF roll in a window kaluza-core gives; [`lab.md`](lab.md) §4).
+- kaluza-sim's own Keycloak client exists, is exempt from key-entry step-up, and its credential is on the dev PC ([ADR 0008](adr/0008-subscriber-provisioning-api.md)).
+- A lab window is agreed with the core session.
+
 **P3 scope:**
 - **Radio:** `ksim-radio` and its replicas; TR 38.901 pathloss; measurements A1–A5; RLF and re-establishment; cell selection and reselection; PLMN selection; paging DRX.
 - **Handover:** Xn, N2 and intra-CU, with forwarding, End Marker, RAN status transfer and NH/NCC.
@@ -59,7 +64,7 @@
 | Effort: two stacks plus a card | No feature ahead of a kaluza-core consumer that can measure it; parity (P4) deferred until after v1 |
 | PDCP COUNT/HFN mistakes at handover | Spec-row tests, randomized loss/reorder properties, a decipher-sanity metric |
 | The ideal L2 hides MAC/RLC-dependent behaviour | `docs/abstraction-ledger.md`; the phase-2 seams are fixed in v1 |
-| Shared lab (the kaluza-uesim VM, W5 freezes, B220 sessions, the .11 address clash) | Own addresses (.30–.39, [`lab.md`](lab.md)); agreed windows; read-only on kaluza-core; an ID-collision check at start |
+| Shared lab (the kaluza-uesim VM, W5 freezes, B220 sessions, the V-UPF's static neighbours) | Own addresses (.30–.39, checked free by kaluza-core; [`lab.md`](lab.md)); neighbour entries before P1; agreed windows; read-only on kaluza-core except our own subscribers through its API; an ID-collision check at start |
 | O-RAN specs need registration to download | The user fetches them; they stay outside the repo; only phase 2 needs them |
 | The GSMA SAGE undertaking for SNOW 3G | Held as kaluza-core already holds it |
 | Both implementations read a clause the same wrong way | Independent oracles, Open5GS as a control, phone captures, separate sessions for sim and core |
