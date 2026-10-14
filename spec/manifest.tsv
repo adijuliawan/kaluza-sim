@@ -68,3 +68,6 @@ doc	version	origin	purpose
 102.221	18.04.00	etsi	UICC-terminal interface (ETSI TS 102 221 V18.4.0)
 rfc9048	-	ietf	EAP-AKA' revised (test vectors)
 sage-uea2uia2-doc3	-	sage	UEA2/UIA2 implementers' test data (SAGE Doc 3)
+sage-uea2uia2-doc1	-	sage	UEA2/UIA2 specification (SAGE Document 1: f8, f9 and their IVs)
+sage-snow3g-doc2	-	sage	SNOW 3G specification (SAGE Document 2)
+135.231	19.00.00	etsi	TUAK algorithm specification (ETSI TS 135 231 V19.0.0, the PDF of 3GPP TS 35.231 j00, whose 3GPP zip holds only a legacy .doc)

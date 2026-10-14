@@ -1,4 +1,4 @@
-# KATs extracted by spec/tools/kat_extract.py 1.0 from 35.208 j00 (35208-j00.zip, sha256 e919348d0fb04cf451f1ccf52db83c801a24474bed75e861c8ad970686bff2c8). Do not edit.
+# KATs extracted by spec/tools/kat_extract.py 1.1 from 35.208 j00 (35208-j00.zip, sha256 e919348d0fb04cf451f1ccf52db83c801a24474bed75e861c8ad970686bff2c8). Do not edit.
 set	field	hex	bits	text	clause
 1	Plaintext	ee36f7cf037d37d3692f7f0399e7949a	128		3.3.2
 1	Ciphertext	9e2980c59739da67b136355e3cede6a2	128		3.3.2

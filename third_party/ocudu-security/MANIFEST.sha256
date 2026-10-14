@@ -1,0 +1,3 @@
+076e24dd027d7f67076f49dd38b4ffedcb4c9f7ca3ae934f7d7607126de8d669  include/ocudu/security/s3g.h
+2aeccdd8e72ee369dcf66f6811dfbf9aabefc7fa068d8812c29633c585317a01  src/s3g.cpp
+7d94bca44c487f3b67bb64101dcad0810f447cf2272739d43d0bedccfebb44a2  src/s3g.h

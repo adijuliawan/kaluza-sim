@@ -49,6 +49,7 @@ ksim_asn1_generate()
 enable_testing()
 include(GoogleTest)
 
+add_subdirectory(third_party/ocudu-security)
 add_subdirectory(src)
 add_subdirectory(apps)
 add_subdirectory(tests)

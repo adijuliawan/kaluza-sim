@@ -6,6 +6,7 @@ target_link_libraries(unit_buildinfo PRIVATE ksim::buildinfo ksim::warnings GTes
 gtest_discover_tests(unit_buildinfo DISCOVERY_MODE PRE_TEST)
 
 add_subdirectory(platform)
+add_subdirectory(crypto)
 if(KSIM_ASN1)
     add_subdirectory(asn1)
 endif()

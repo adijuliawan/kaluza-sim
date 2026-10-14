@@ -1,4 +1,4 @@
-# KATs extracted by spec/tools/kat_extract.py 1.0 from 33.501 j70 (33501-j70.zip, sha256 a32dabb71841ce669d556819fd101dbc05648bf812d64090ea3ff1f06feb403c). Do not edit.
+# KATs extracted by spec/tools/kat_extract.py 1.1 from 33.501 j70 (33501-j70.zip, sha256 a32dabb71841ce669d556819fd101dbc05648bf812d64090ea3ff1f06feb403c). Do not edit.
 set	field	hex	bits	text	clause
 C.4.2.1	Scheme Input	00012080f6	40		C.4.2.1
 C.4.2.1	Scheme Output	00012080f6	40		C.4.2.1
@@ -27,9 +27,11 @@ C.4.3.2	Cipher-text vaue	8e358a1582adb15322c10e515141d2039a	136		C.4.3.2
 C.4.3.2	Eph. mac key	d87b69f4fe8cd6b211264ea5e69f682f151a82252684cdb15a047e6ef0595028	256		C.4.3.2
 C.4.3.2	MAC-tag value	12e1d7783a97f1ac	64		C.4.3.2
 C.4.3.2	Scheme Output			ecckey977D8B2FDAA7B64AA700D04227D5B440630EA4EC50F9082273A26BB678C92222.cip8E358A1582ADB15322C10E515141D2039A.mac12E1D7783A97F1AC	C.4.3.2
-C.4.4.1	if compressed	0272da71976234ce833a6907425867b82e074d44ef907dfb4b3e21c1c2256ebcd1	264		C.4.4.1
-C.4.4.1	If compressed	039aab8376597021e855679a9778ea0b67396e68c66df32c0f41e9acca2da9b9d1	264		C.4.4.1
-C.4.4.1	uncompressed	049aab8376597021e855679a9778ea0b67396e68c66df32c0f41e9acca2da9b9d1d1f44ea1c87aa7478b954537bde79951e748a43294a4f4cf86eaff1789c9c81f	520		C.4.4.1
+C.4.4.1	Home Network Public Key (uncompressed)	0472da71976234ce833a6907425867b82e074d44ef907dfb4b3e21c1c2256ebcd15a7ded52fcbb097a4ed250e036c7b9c8c7004c4eedc4f068cd7bf8d3f900e3b4	520		C.4.4.1
+C.4.4.1	Home Network Public Key (compressed)	0272da71976234ce833a6907425867b82e074d44ef907dfb4b3e21c1c2256ebcd1	264		C.4.4.1
+C.4.4.1	Home Network Private Key	f1ab1074477ebcc7f554ea1c5fc368b1616730155e0041ac447d6301975fecda	256		C.4.4.1
+C.4.4.1	Eph. Public Key (compressed)	039aab8376597021e855679a9778ea0b67396e68c66df32c0f41e9acca2da9b9d1	264		C.4.4.1
+C.4.4.1	Eph. Public Key (uncompressed)	049aab8376597021e855679a9778ea0b67396e68c66df32c0f41e9acca2da9b9d1d1f44ea1c87aa7478b954537bde79951e748a43294a4f4cf86eaff1789c9c81f	520		C.4.4.1
 C.4.4.1	Eph. Private Key	99798858a1dc6a2c68637149a4b1dbfd1fdff5addd62a2142f06699ed7602529	256		C.4.4.1
 C.4.4.1	Eph. Shared Key	6c7e6518980025b982fbb2ff746e3c2e85a196d252099a7ad23ea7b4c0959cae	256		C.4.4.1
 C.4.4.1	Eph. Enc. Key	8a65c3aed80295c12bd55087e965702a	128		C.4.4.1
@@ -38,8 +40,10 @@ C.4.4.1	Scheme-input corresponding to the plaintext-block	00012080f6	40		C.4.4.1
 C.4.4.1	Cipher-text vaue	46a33fc271	40		C.4.4.1
 C.4.4.1	MAC-tag value	6ac7dae96aa30a4d	64		C.4.4.1
 C.4.4.1	Scheme Output	039aab8376597021e855679a9778ea0b67396e68c66df32c0f41e9acca2da9b9d146a33fc2716ac7dae96aa30a4d	368		C.4.4.1
-C.4.4.2	if compressed	0272da71976234ce833a6907425867b82e074d44ef907dfb4b3e21c1c2256ebcd1	264		C.4.4.2
-C.4.4.2	compressed	03759bb22c563d9f4a6b3c1419e543fc2f39d6823f02a9d71162b39399218b244b	264		C.4.4.2
+C.4.4.2	Home Network Public Key (uncompressed)	0472da71976234ce833a6907425867b82e074d44ef907dfb4b3e21c1c2256ebcd15a7ded52fcbb097a4ed250e036c7b9c8c7004c4eedc4f068cd7bf8d3f900e3b4	520		C.4.4.2
+C.4.4.2	Home Network Public Key (compressed)	0272da71976234ce833a6907425867b82e074d44ef907dfb4b3e21c1c2256ebcd1	264		C.4.4.2
+C.4.4.2	Home Network Private Key	f1ab1074477ebcc7f554ea1c5fc368b1616730155e0041ac447d6301975fecda	256		C.4.4.2
+C.4.4.2	Eph. Public Key (compressed)	03759bb22c563d9f4a6b3c1419e543fc2f39d6823f02a9d71162b39399218b244b	264		C.4.4.2
 C.4.4.2	Eph. Private Key	90a5898bd29ffa3f261e00e980067c70a2b1b992a21f5b4fef6d4df69fe804ad	256		C.4.4.2
 C.4.4.2	Eph. Shared Key	bc3529ed79541cf8c007ce9806330f4a5ff15064d7cf4b16943ef8f007597872	256		C.4.4.2
 C.4.4.2	Eph. Enc. Key	84f9a78995d39e6968047547ecc12c4f	128		C.4.4.2

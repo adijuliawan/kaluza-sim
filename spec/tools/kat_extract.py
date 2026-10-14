@@ -38,7 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import docx_lib as dl  # noqa: E402
 
-TOOL_VERSION = "1.0"
+TOOL_VERSION = "1.1"
 ROOT = dl.ROOT
 HEX = set("0123456789abcdefABCDEF")
 TABLE_ROW = "\x00row\x00"   # marks a flattened table row: cells joined by tabs
@@ -56,7 +56,7 @@ class Vec:
 
 # Labels whose value may be text rather than hex (33.501 C.4: the network
 # specific identifier SUCI 'ecckey<..>.cip<..>.mac<..>').
-TEXT_LABELS = {"Scheme Output"}
+TEXT_LABELS = {"Scheme Output", "Network name"}
 
 
 @dataclass
@@ -218,6 +218,28 @@ def docx_lines_by_clause(doc: str, ver: str, clause_re: str):
     return out, row
 
 
+# Fields that carry a bit string of the set's Length (33.401 Annex C, SAGE Document 3).
+DATA_FIELDS = {"Plaintext", "Ciphertext", "Message", "MESSAGE"}
+
+
+def _length_problems(name: str, vecs: list[Vec]) -> list[str]:
+    """A data field shorter than its set's Length means the extraction lost text."""
+    out = []
+    by_set: dict[str, dict[str, Vec]] = {}
+    for v in vecs:
+        by_set.setdefault(v.set, {})[v.field] = v
+    for s, f in by_set.items():
+        ln = f.get("Length") or f.get("LENGTH")
+        if not ln:
+            continue
+        need = int(ln.hex, 16)
+        for d in DATA_FIELDS & f.keys():
+            have = len(f[d].hex) * 4
+            if have < need:
+                out.append(f"{name}: set {s} {d} has {have} bits, Length is {need}")
+    return out
+
+
 def _depth(num: str) -> int:
     return num.strip().count(".") + 1 if num.strip() else 99
 
@@ -236,11 +258,16 @@ def collect(lines: list[str], mode_markers: dict[str, str] | None = None) -> Col
 
 # ---- sources -----------------------------------------------------------------------
 
+# 35.208 and 35.233 print some sets twice, under these headings; both forms are
+# read and must agree.
+FORMAT_MARKERS = {"Binary Format": "bin", "Hexadecimal Format": "hex"}
+
+
 def src_milenage():
     sets, row = docx_lines_by_clause("35.208", "j00", r"^4\.3\.(\d+)$")
     out = []
     for clause, n, lines in sets:
-        c = collect(lines, {"Binary Format": "bin", "Hexadecimal Format": "hex"})
+        c = collect(lines, FORMAT_MARKERS)
         out += c.vectors(n, clause)
     return out, row, {"sets": 20, "fields": {"K", "RAND", "SQN", "AMF", "OP", "OPC", "f1", "f1*",
                                             "f2", "f5", "f3", "f4", "f5*"}}
@@ -264,7 +291,7 @@ def src_keccak():
     sets, row = docx_lines_by_clause("35.233", "j00", r"^5\.([3-9])$")
     out = []
     for clause, n, lines in sets:
-        out += collect(lines).vectors(str(int(n) - 2), clause)
+        out += collect(lines, FORMAT_MARKERS).vectors(str(int(n) - 2), clause)
     return out, row, {"sets": 6, "fields": {"IN", "OUT"}}
 
 
@@ -272,7 +299,7 @@ def src_tuak():
     sets, row = docx_lines_by_clause("35.233", "j00", r"^6\.([3-9])$")
     out = []
     for clause, n, lines in sets:
-        out += collect(lines).vectors(str(int(n) - 2), clause)
+        out += collect(lines, FORMAT_MARKERS).vectors(str(int(n) - 2), clause)
     return out, row, {"sets": 6, "fields": {"K", "RAND", "SQN", "AMF", "TOP", "TOPc", "f1", "f1*",
                                            "f2", "f3", "f4", "f5", "f5*"}}
 
@@ -296,11 +323,39 @@ def src_milenage256():
                 (tests[-1][2][-1][2] if tests[-1][2] else tests[-1][1]).append(ln)
         for _, inputs, cases in tests:
             for name, sizes, body in cases:
-                coll = collect(inputs + [""] + body)
+                coll = collect(inputs + [""] + _m256_labels(body))
                 for k, v in re.findall(r"(\w+_sz)\s*=\s*(\d+)", sizes):
                     coll.params[k] = int(v)
-                out += coll.vectors(name, clause)
-    return out, row, {"sets": 25, "fields": {"KEY", "RAND", "SQN", "AMF", "OP"}}
+                for v in coll.vectors(name, clause):
+                    v.field = v.field.replace("/", ":")
+                    out.append(v)
+    return out, row, {"sets": 25, "fields": {"KEY", "RAND", "SQN", "AMF", "OP", "OPc"} | M256_OUTPUTS}
+
+
+# 35.236 prints each output as "<function>:<name> = { .. }" (f1*:MAC_S, f5**:AK*).
+M256_OUTPUTS = {"f1*:MAC_S", "f1:MAC_A", "f2:RES", "f3:CK", "f4:IK", "f5:AK", "f5*:AK*", "f5**:AK*"}
+
+
+def _m256_labels(body: list[str]) -> list[str]:
+    """Make 35.236's labels unique for the collector: '<fn>:<name> =' becomes
+    '<fn>/<name> =' (a ':' would end the label), and the debug intermediates that
+    repeat under each 'Intermediates for the function index k:' get 'idx<k>.'."""
+    out, idx = [], None
+    for ln in body:
+        m = re.match(r"^\s*Intermediates for the function index (\d+):", ln)
+        if m:
+            idx = m.group(1)
+            continue
+        f = re.match(r"^(\s*)(f[0-9]\**):(\w+\**)\s*=(.*)$", ln)
+        if f:
+            out.append(f"{f.group(1)}{f.group(2)}/{f.group(3)} ={f.group(4)}")
+            continue
+        g = re.match(r"^(\s*)([A-Za-z_]\w*)\s*=(\s*\{.*)$", ln)
+        if g and idx is not None:
+            out.append(f"{g.group(1)}idx{idx}.{g.group(2)} ={g.group(3)}")
+            continue
+        out.append(ln)
+    return out
 
 
 def src_33401(sub: str, sets: int, fields: set[str]):
@@ -317,8 +372,43 @@ def src_ecies():
     found, row = docx_lines_by_clause("33.501", "j70", r"^(C\.4\.[234]\.\d)$")
     out = []
     for clause, n, lines in found:
-        out += collect(lines).vectors(clause, clause)
+        vecs = collect(_ecies_labels(lines)).vectors(clause, clause)
+        need = {"C.4.3": ECIES_A, "C.4.4": ECIES_B}.get(clause[:5], set())
+        missing = need - {v.field for v in vecs}
+        if missing:
+            raise dl.ExtractError(f"33.501 {clause}: missing {sorted(missing)}")
+        out += vecs
     return out, row, {"sets": 6, "fields": {"Scheme Output"}}
+
+
+ECIES_A = {"Home Network Private Key", "Home Network Public Key", "Eph. Private Key", "Eph. Public Key",
+           "Cipher-text vaue", "MAC-tag value"}
+ECIES_B = {"Home Network Private Key", "Home Network Public Key (compressed)", "Eph. Private Key",
+           "Eph. Public Key (compressed)", "Cipher-text vaue", "MAC-tag value"}
+
+
+def _ecies_labels(lines: list[str]) -> list[str]:
+    """33.501 C.4.4 gives each Profile B public key as 'uncompressed:' and
+    '(i|I)f compressed:' / 'compressed:' lines under a 'Home Network Public Key:'
+    or 'Eph. Public Key:' heading; name them after the heading. The private key's
+    label carries a parenthetical with a comma; drop it."""
+    out, head = [], None
+    for ln in lines:
+        st = ln.strip()
+        h = re.match(r"^(Home Network Public Key|Eph\. Public Key)\s*(?:\([^)]*\))?:\s*$", st)
+        if h:
+            head = h.group(1)
+            out.append(ln)
+            continue
+        m = re.match(r"^(uncompressed|[Ii]f compressed|compressed):\s*(.*?),?$", st)
+        if m and head:
+            form = "uncompressed" if m.group(1) == "uncompressed" else "compressed"
+            out.append(f"{head} ({form}): {m.group(2)}")
+            continue
+        if re.match(r"^[A-Z][^:']*:", st):        # any other label ends the group
+            head = None
+        out.append(re.sub(r"^(Home Network Private Key)\s*\([^)]*\)\s*:", r"\1:", st))
+    return out
 
 
 def src_rfc9048():
@@ -329,17 +419,39 @@ def src_rfc9048():
     for m in re.finditer(r"\n   Case (\d+)\n(.*?)(?=\n   Case \d+\n|\nAcknowledgments|\Z)", text, re.S):
         lines = [ln for ln in m.group(2).split("\n") if not re.match(r"^RFC 9048|^Arkko", ln)]
         c = collect(lines)
-        out += c.vectors(m.group(1), "Appendix D")
-    return out, row, {"sets": 4, "fields": {"CK'", "IK'", "K_encr", "K_aut", "K_re", "MSK", "EMSK"}}
+        for v in c.vectors(m.group(1), "Appendix D"):
+            if v.field == "Identity":            # a quoted string of digits, not hex
+                v.text, v.hex, v.bits = v.hex, "", None
+            out.append(v)
+    return out, row, {"sets": 4, "fields": {"Identity", "Network name", "CK'", "IK'", "K_encr", "K_aut", "K_re",
+                                            "MSK", "EMSK"}}
 
 
 def _sage_text() -> tuple[list[str], dict]:
     row = next(r for r in dl.read_tsv(ROOT / "spec" / "INDEX.tsv") if r["doc"] == "sage-uea2uia2-doc3")
     txt = subprocess.run(["pdftotext", "-layout", str(ROOT / row["file"]), "-"], capture_output=True,
                          text=True, check=True).stdout
-    lines = [ln for ln in txt.split("\n")
-             if "3GPP Confidentiality and Integrity Algorithms" not in ln and "Implementors" not in ln]
+    lines: list[str] = []
+    for ln in txt.split("\n"):
+        if "3GPP Confidentiality and Integrity Algorithms" in ln or "Implementors" in ln:
+            while lines and not lines[-1].strip():   # a value continues across the page break
+                lines.pop()
+            continue
+        lines.append(ln.lstrip("\f"))               # the next page's first line starts with \f
+    for old, fixed, why in SAGE_REPAIRS:
+        hits = [i for i, ln in enumerate(lines) if old in ln]
+        if len(hits) != 1:
+            raise dl.ExtractError(f"SAGE repair {old!r} matched {len(hits)} lines, expected 1 ({why})")
+        lines[hits[0]] = lines[hits[0]].replace(old, fixed)
     return lines, row
+
+
+# Recorded repairs of the SAGE Document 3 text (rows KS-SEC-S2). Each must apply once.
+SAGE_REPAIRS = [
+    ("2CCCBFC6 34E1B259 60876A0", "2CCCBFC6 34E1B259 060876A0",
+     "UEA2 set 5 plaintext: a group of 7 hex digits; Length 837 bits needs 210 digits, and the same "
+     "octets in TS 33.401 C.1 set 6 read 34e1b259 060876a0 fbb5a437"),
+]
 
 
 def _sage_sets(lines: list[str], section: str):
@@ -417,6 +529,7 @@ def run(name: str, out_dir: Path) -> list[str]:
     vecs, row, expect = SOURCES[name]()
     problems = []
     sets = sorted({v.set for v in vecs}, key=lambda s: (len(s), s))
+    problems += _length_problems(name, vecs)
     if expect["sets"] is not None and len(sets) != expect["sets"]:
         problems.append(f"{name}: {len(sets)} sets, expected {expect['sets']}: {sets}")
     for s in sets:

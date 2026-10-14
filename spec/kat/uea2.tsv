@@ -1,4 +1,4 @@
-# KATs extracted by spec/tools/kat_extract.py 1.0 from sage-uea2uia2-doc3 - (Doc3-UEA2-UIA2-Spec-Implementors-Test-Data.pdf, sha256 fdf3281aacb8098f7cee4461851910aeff84f8c6cbdaadca95ee9a5d63d1c677). Do not edit.
+# KATs extracted by spec/tools/kat_extract.py 1.1 from sage-uea2uia2-doc3 - (Doc3-UEA2-UIA2-Spec-Implementors-Test-Data.pdf, sha256 fdf3281aacb8098f7cee4461851910aeff84f8c6cbdaadca95ee9a5d63d1c677). Do not edit.
 set	field	hex	bits	text	clause
 1	Count-C	72a4f20f	32		SAGE Doc3 4.3
 1	Bearer	0c	8		SAGE Doc3 4.3
@@ -32,6 +32,6 @@ set	field	hex	bits	text	clause
 5	Bearer	09	8		SAGE Doc3 4.7
 5	Direction	0	4		SAGE Doc3 4.7
 5	CK	6090eae04c83706eecbf652be8e36566	128		SAGE Doc3 4.7
-5	Plaintext	40981ba6824c1bfb4286b299783daf442c099f7ab0f58d5c8e46b104f08f01b41ab485472029b71d36bd1a3d90dc3a41b46d51672ac4c9663a2be063da4bc8d2808ce33e2cccbfc634e1b25960876a0fbb5a437ebcc8d31c19e4454318745e3987645987a986f2cb0	836		SAGE Doc3 4.7
+5	Plaintext	40981ba6824c1bfb4286b299783daf442c099f7ab0f58d5c8e46b104f08f01b41ab485472029b71d36bd1a3d90dc3a41b46d51672ac4c9663a2be063da4bc8d2808ce33e2cccbfc634e1b259060876a0fbb5a437ebcc8d31c19e4454318745e3987645987a986f2cb0	840		SAGE Doc3 4.7
 5	Ciphertext	5892bba88bbbcaaeae769aa06b683d3a17cc04a369881697435e44fed5ff9af57b9e890d4d5c64709885d48ae40690ec043baae9705796e4a9ff5a4b8d8b36d7f3fe57cc6cfd6cd005cd3852a85e94ce6bcd90d0d07839ce09733544ca8e350843248550922ac12818	840		SAGE Doc3 4.7
 5	Length	345			SAGE Doc3 4.7

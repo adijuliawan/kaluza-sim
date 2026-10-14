@@ -13,3 +13,11 @@ third_party/asn1c/runtime/
     contributors. Licence text: third_party/asn1c/LICENSE.
     File hashes: third_party/asn1c/MANIFEST.sha256. Patches, if any:
     third_party/asn1c/patches/series.
+
+third_party/ocudu-security/
+    The SNOW 3G kernel (s3g.h, s3g.cpp, lib s3g.h), unmodified, from OCUDU
+    https://gitlab.com/ocudu/ocudu at 489ed15c5cd6b1d4f52cf16c2e4cc79c2bde1775.
+    BSD-3-Clause-Open-MPI. Copyright (C) 2021-2026 Software Radio Systems Limited.
+    Licence text: LICENSES/BSD-3-Clause-Open-MPI.txt. Hashes:
+    third_party/ocudu-security/MANIFEST.sha256. SNOW 3G is used under the GSMA
+    restricted usage undertaking held by the repository owner.

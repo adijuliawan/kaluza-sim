@@ -38,6 +38,14 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/130.0 Safari/537.36")
 ARCHIVE = "https://www.3gpp.org/ftp/Specs/archive"
 
+# The ETSI SAGE documents for UEA2/UIA2 (SNOW 3G), obtained from GSMA by the
+# repository owner under its restricted usage undertaking; copied from kaluza-core.
+SAGE_FILES = {
+    "sage-uea2uia2-doc3": "Doc3-UEA2-UIA2-Spec-Implementors-Test-Data.pdf",
+    "sage-uea2uia2-doc1": "uea2uia2d1v21.pdf",
+    "sage-snow3g-doc2": "snow3gspec.pdf",
+}
+
 INDEX_COLUMNS = ["doc", "version", "file", "sha256", "bytes", "origin", "source_url",
                  "fetched_utc", "derived"]
 
@@ -76,7 +84,7 @@ class Doc:
             return (Path("spec/ietf") / f"{self.doc}.txt",
                     f"https://www.rfc-editor.org/rfc/{self.doc}.txt")
         if self.origin == "sage":
-            name = "Doc3-UEA2-UIA2-Spec-Implementors-Test-Data.pdf"
+            name = SAGE_FILES[self.doc]
             return (Path("spec/3gpp/sage") / name, f"local-only:{CORE_SPECS / 'sage' / name}")
         raise ValueError(f"unknown origin {self.origin!r} for {self.doc}")
 
@@ -84,7 +92,7 @@ class Doc:
         if self.origin == "3gpp":
             p = CORE_SPECS / f"{self.series}-series" / f"{self.nodot}-{self.version}.zip"
         elif self.origin == "sage":
-            p = CORE_SPECS / "sage" / "Doc3-UEA2-UIA2-Spec-Implementors-Test-Data.pdf"
+            p = CORE_SPECS / "sage" / SAGE_FILES[self.doc]
         else:
             return None
         return p if p.is_file() else None
