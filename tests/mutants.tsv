@@ -6,3 +6,5 @@
 # misbehaviour it plants. tools/guards/check_mutants.py keeps this file and the code in step;
 # tools/mutants.sh (N16) runs each one against its row.
 name	row	description
+null_suci_full_imsi	ksim-p1.reg-null-suci	the null-scheme SUCI carries the whole IMSI instead of the MSIN (TS 33.501 6.12.2, TS 23.003 2.2B)
+kamf_input_sbi_spelling	amf-ueransim.012	K_AMF derived with the SUPI in its SBI form "imsi-..." instead of its digits (TS 33.501 A.7.0)

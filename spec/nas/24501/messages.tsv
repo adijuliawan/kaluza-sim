@@ -1,4 +1,4 @@
-# Extracted by spec/tools/docx_tables.py 1.1 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+# Extracted by spec/tools/docx_tables.py 1.2 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
 key	protocol	clause	title	table	message	significance	direction	message_type_hex
 8.2.1	5GMM	8.2.1	Authentication request	8.2.1.1.1	AUTHENTICATION REQUEST	dual	network to UE	56
 8.2.2	5GMM	8.2.2	Authentication response	8.2.2.1.1	AUTHENTICATION RESPONSE	dual	UE to network	57

@@ -28,7 +28,7 @@ amf-ueransim.008	kaluza-amf-ueransim	8	the UE context is in the state store	core
 amf-ueransim.009	kaluza-amf-ueransim	9	★ the AMF read the UE's am-data from the UDM (P-43)	core	core	-	no:core	-	-	-	-
 amf-ueransim.010	kaluza-amf-ueransim	10	★ the UDR holds this AMF's SDM subscription for the UE	core	core	-	no:core	-	-	-	-
 amf-ueransim.011	kaluza-amf-ueransim	11	amf_registered_ues counts the UE	core	core	-	no:core	-	-	-	-
-amf-ueransim.012	kaluza-amf-ueransim	12	the UE took the SECURITY MODE COMMAND	registration	sim	sim	yes	stub,open5gs,kaluza	N8	-	event nas.smc.complete
+amf-ueransim.012	kaluza-amf-ueransim	12	the UE took the SECURITY MODE COMMAND	registration	sim	sim	yes	stub,open5gs,kaluza	N8	kamf_input_sbi_spelling	event nas.smc.complete
 amf-ueransim.013	kaluza-amf-ueransim	13	amf_nas_security_algorithm records the negotiated pair	core	core	-	no:core	-	-	-	-
 amf-ueransim.014	kaluza-amf-ueransim	14	the UE has a uesimtun0 address from the pool	session	sim	sim	yes	stub,open5gs,kaluza	N11	-	ksim-ctl ue ifaces: pdu1 IPv4 in the accepted PDU address
 amf-ueransim.015	kaluza-amf-ueransim	15	the UE's tunnels hold no IPv6 address of the UE VM's own	session	sim	sim	yes	stub,open5gs,kaluza	N11	-	ksim-ctl ue ifaces: no IPv6 on the UE tunnels; netd noise counter 0 (L13)

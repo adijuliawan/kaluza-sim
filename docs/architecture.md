@@ -126,7 +126,7 @@ kaluza-sim/
     api/       openapi.yaml events.tsv http/ ndjson/
   apps/        ksim-ue ksim-du ksim-cucp ksim-cuup ksim-radio ksim ksim-ctl ksim-sim ksim-netd
   personas/ cards/ topologies/
-  tests/       unit/ procedure/ component/ fuzz/ vectors/ oracles/{tshark,pycrate,pysim}
+  tests/       unit/ corestub/ procedure/ component/ fuzz/ vectors/ oracles/{tshark,pycrate,pysim}
   gates/       lib/ksim.sh verification/*.sh rows/p1.tsv allow/open5gs.tsv cores/*.env   (POSIX sh, kaluza-core style)
   tools/       ci.sh guards/check_*.py persona_extract.py kair.lua crosswalk.py provenance.py p1_exit.py
   docs/        this documentation · adr/ · compliance/ (from P0) · findings/ · abstraction-ledger.md

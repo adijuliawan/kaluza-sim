@@ -32,6 +32,21 @@ constexpr bool kMutationsBuild =
 std::string_view active_mutant() noexcept;
 bool mutant_active(std::string_view name) noexcept;
 
+namespace testing {
+
+/// Switches one mutant on for a scope, so a procedure test can show the check
+/// that kills it (a mutant build's tests only; a normal build ignores it).
+/// Single-threaded tests only.
+class MutantScope {
+public:
+    explicit MutantScope(std::string_view name);
+    ~MutantScope();
+    MutantScope(const MutantScope&) = delete;
+    MutantScope& operator=(const MutantScope&) = delete;
+};
+
+} // namespace testing
+
 } // namespace ksim
 
 #if defined(KSIM_MUTATIONS) && KSIM_MUTATIONS

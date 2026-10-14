@@ -17,6 +17,8 @@ TS 24.501 outputs:
   causes_5gmm.tsv     Table 9.11.3.2.1
   causes_5gsm.tsv     Table 9.11.4.2.1
   clauses.tsv         clause number -> title for §9 (references resolve here)
+  mm_states_ue.tsv    the UE's 5GMM main states and substates (§5.1.3.2.1.2-4),
+                      which the 5GMM entity's state table is checked against
 
 Every run checks the extraction against the spec's own structure and fails
 on a mismatch (see check_24501): message counts equal Tables 9.7.1/9.7.2 with
@@ -34,7 +36,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import docx_lib as dl  # noqa: E402
 
-TOOL_VERSION = "1.1"
+TOOL_VERSION = "1.2"
 NBSP = " "
 
 
@@ -92,8 +94,11 @@ CAPTION_TYPOS = {
 NO_MESSAGE_TYPE = {"8.2.28"}
 
 
+_UE_STATE_HEAD = re.compile(r"^(5\.1\.3\.2\.1\.([234])\.\d+)\s+(5GMM-[A-Za-z0-9.-]+)$")
+
+
 def extract_24501(items) -> dict[str, list[dict]]:
-    messages, ies, clauses = [], [], []
+    messages, ies, clauses, ue_states = [], [], [], []
     meta: dict[str, str] = {}
     msg_clause, msg_title = "", ""
     for i, it in enumerate(items):
@@ -102,6 +107,12 @@ def extract_24501(items) -> dict[str, list[dict]]:
         text = it.text.replace(NBSP, " ")
         if it.style.startswith("Heading"):
             meta = {}
+            m = _UE_STATE_HEAD.match(norm(text))
+            if m:
+                kind = "main" if m.group(2) == "2" else "substate"
+                state = m.group(3)
+                parent = state.split(".", 1)[0] if kind == "substate" else ""
+                ue_states.append({"clause": m.group(1), "kind": kind, "state": state, "parent": parent})
             m = _CLAUSE_HEAD.match(text)
             if m:
                 clauses.append({"clause": m.group(1), "title": norm(m.group(2))})
@@ -173,7 +184,8 @@ def extract_24501(items) -> dict[str, list[dict]]:
             seen.add(c["clause"])
             uniq_clauses.append(c)
     return {"messages": messages, "message_ies": ies, "message_types": types,
-            "causes_5gmm": causes_mm, "causes_5gsm": causes_sm, "clauses": uniq_clauses}
+            "causes_5gmm": causes_mm, "causes_5gsm": causes_sm, "clauses": uniq_clauses,
+            "mm_states_ue": ue_states}
 
 
 _LEN = re.compile(r"^(1/2|\d+)")

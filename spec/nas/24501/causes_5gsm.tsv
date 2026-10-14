@@ -1,4 +1,4 @@
-# Extracted by spec/tools/docx_tables.py 1.1 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+# Extracted by spec/tools/docx_tables.py 1.2 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
 value	value_hex	name
 8	08	Operator determined barring
 26	1A	Insufficient resources

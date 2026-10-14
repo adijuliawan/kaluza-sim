@@ -1,4 +1,4 @@
-# Extracted by spec/tools/docx_tables.py 1.1 from 3GPP TS 24.011 j00 (24011-j00.zip, sha256 0044ff8108d36b3d76ec5372978626b2af705cd76ff2afd0182c24a8a8690a37). Do not edit.
+# Extracted by spec/tools/docx_tables.py 1.2 from 3GPP TS 24.011 j00 (24011-j00.zip, sha256 0044ff8108d36b3d76ec5372978626b2af705cd76ff2afd0182c24a8a8690a37). Do not edit.
 mti	direction	name
 0	ms -> n	RP-DATA
 1	n -> ms	RP-DATA

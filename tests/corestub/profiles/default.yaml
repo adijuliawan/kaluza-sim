@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The core stub's default behaviour (P1 N5): one valid challenge, NIA2/NEA2
+# with the IMEISV asked for, then an accept with a 5G-GUTI, one TA (TAC 1),
+# SST 1 allowed and T3512 one hour; de-registration accepted.
+challenges: [ok]
+ea: 2
+ia: 2
+imeisv_request: true
+registration: accept
+tmsi: 1
+tacs: [1]
+allowed_sst: [1]
+t3512_s: 3600
+deregistration: accept

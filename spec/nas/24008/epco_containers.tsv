@@ -1,4 +1,4 @@
-# Extracted by spec/tools/docx_tables.py 1.1 from 3GPP TS 24.008 j50 (24008-j50.zip, sha256 8f207733d33bd93111d00800ac76941fb2cabcd5850b3486e3e2e5467298cca0). Do not edit.
+# Extracted by spec/tools/docx_tables.py 1.2 from 3GPP TS 24.008 j50 (24008-j50.zip, sha256 8f207733d33bd93111d00800ac76941fb2cabcd5850b3486e3e2e5467298cca0). Do not edit.
 direction	id_hex	name	length_octets
 UE-to-network	0001	P-CSCF IPv6 Address Request	1
 UE-to-network	0002	IM CN Subsystem Signaling Flag	1

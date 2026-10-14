@@ -1,4 +1,4 @@
-# Extracted by spec/tools/docx_tables.py 1.1 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+# Extracted by spec/tools/docx_tables.py 1.2 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
 key	message	seq	iei	ie_name	type_name	reference	presence	format	length
 8.2.1	AUTHENTICATION REQUEST	1		Extended protocol discriminator	Extended protocol discriminator	9.2	M	V	1
 8.2.1	AUTHENTICATION REQUEST	2		Security header type	Security header type	9.3	M	V	1/2

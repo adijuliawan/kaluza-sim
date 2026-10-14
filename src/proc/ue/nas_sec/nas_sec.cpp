@@ -16,6 +16,9 @@ constexpr std::uint8_t kBearer3gpp = 0;   // the NAS connection identifier for 3
 constexpr std::uint8_t kUplink = 0;
 constexpr std::uint8_t kDownlink = 1;
 
+std::uint8_t send_dir(NasRole r) { return r == NasRole::ue ? kUplink : kDownlink; }
+std::uint8_t recv_dir(NasRole r) { return r == NasRole::ue ? kDownlink : kUplink; }
+
 std::optional<crypto::Nea> nea_of(std::uint8_t ea) {
     switch (ea) {
     case 0: return crypto::Nea::nea0;
@@ -52,7 +55,8 @@ const char* verdict_name(Verdict v) noexcept {
     return "?";
 }
 
-Result<NasSecurityContext> NasSecurityContext::derive(nas::ie::NgKsi ngksi, SecretBytes kamf, std::uint8_t ea, std::uint8_t ia) {
+Result<NasSecurityContext> NasSecurityContext::derive(nas::ie::NgKsi ngksi, SecretBytes kamf, std::uint8_t ea, std::uint8_t ia,
+                                                     NasRole role) {
     if (!nea_of(ea)) {
         return make_error(Errc::unsupported, ea, "nas security: 5G-EA3 is a declared gap (KS-SEC-G1)");
     }
@@ -76,6 +80,7 @@ Result<NasSecurityContext> NasSecurityContext::derive(nas::ie::NgKsi ngksi, Secr
     c.knas_enc_ = std::move(*kenc);
     c.ea_ = ea;
     c.ia_ = ia;
+    c.role_ = role;
     return c;
 }
 
@@ -105,7 +110,7 @@ Result<Bytes> NasSecurityContext::protect(ByteView plain, Sht sht) {
         if (!alg.has_value()) {
             return make_error(Errc::unsupported, ea_, "nas security: no ciphering algorithm");
         }
-        auto c = crypto::nea(alg.value(), knas_enc_, crypto::SecInput{count, kBearer3gpp, kUplink}, plain, plain.size() * 8);
+        auto c = crypto::nea(alg.value(), knas_enc_, crypto::SecInput{count, kBearer3gpp, send_dir(role_)}, plain, plain.size() * 8);
         if (!c) {
             return c.error();
         }
@@ -113,7 +118,7 @@ Result<Bytes> NasSecurityContext::protect(ByteView plain, Sht sht) {
     } else {
         body.insert(body.end(), plain.begin(), plain.end());
     }
-    auto mac = mac_of(count, kUplink, body);
+    auto mac = mac_of(count, send_dir(role_), body);
     if (!mac) {
         return mac.error();
     }
@@ -148,7 +153,7 @@ Inbound NasSecurityContext::unprotect(ByteView wire) {
     const std::uint32_t count = estimate(p->sequence_number);
     Bytes body{p->sequence_number};
     body.insert(body.end(), p->payload.begin(), p->payload.end());
-    auto mac = mac_of(count, kDownlink, body);
+    auto mac = mac_of(count, recv_dir(role_), body);
     if (!mac || mac_value(*mac) != p->mac) {
         in.verdict = Verdict::discard_mac;
         return in;
@@ -159,7 +164,7 @@ Inbound NasSecurityContext::unprotect(ByteView wire) {
             in.verdict = Verdict::discard_malformed;
             return in;
         }
-        auto d = crypto::nea(alg.value(), knas_enc_, crypto::SecInput{count, kBearer3gpp, kDownlink}, p->payload,
+        auto d = crypto::nea(alg.value(), knas_enc_, crypto::SecInput{count, kBearer3gpp, recv_dir(role_)}, p->payload,
                              p->payload.size() * 8);
         if (!d) {
             in.verdict = Verdict::discard_malformed;

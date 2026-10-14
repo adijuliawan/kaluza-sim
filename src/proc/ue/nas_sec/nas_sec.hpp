@@ -66,20 +66,29 @@ struct Inbound {
     std::uint32_t count = 0;  // the estimated COUNT it verified with
 };
 
+/// Which end of the NAS link a context protects for: the UE sends uplink
+/// (DIRECTION 0) and receives downlink; the network (the scripted core) the
+/// reverse. The same keys and COUNT rules serve both.
+enum class NasRole : std::uint8_t { ue, network };
+
 class NasSecurityContext {
 public:
     /// A context for K_AMF and the algorithms of a SECURITY MODE COMMAND, with
     /// both COUNTs at zero (a new K_AMF; §4.4.3.1). 5G-EA3 and 5G-IA3 are a
     /// declared gap (KS-SEC-G1); 5G-IA0 is refused outside emergency (TS 33.501
     /// §5.5.2), which P1 does not have.
-    static Result<NasSecurityContext> derive(nas::ie::NgKsi ngksi, SecretBytes kamf, std::uint8_t ea, std::uint8_t ia);
+    static Result<NasSecurityContext> derive(nas::ie::NgKsi ngksi, SecretBytes kamf, std::uint8_t ea, std::uint8_t ia,
+                                             NasRole role = NasRole::ue);
 
     const nas::ie::NgKsi& ngksi() const noexcept { return ngksi_; }
     const SecretBytes& kamf() const noexcept { return kamf_; }
     std::uint8_t ea() const noexcept { return ea_; }
     std::uint8_t ia() const noexcept { return ia_; }
+    NasRole role() const noexcept { return role_; }
+    /// The COUNT of the next message this end sends (for the UE, the uplink COUNT).
     std::uint32_t ul_count() const noexcept { return ul_count_; }
-    /// The largest downlink COUNT that verified; nullopt before the first.
+    /// The largest COUNT this end received that verified (for the UE, the
+    /// downlink COUNT); nullopt before the first.
     std::optional<std::uint32_t> dl_count() const noexcept { return dl_count_; }
     /// Restores the COUNTs of a stored context (EF.5GS3GPPNSC; Annex C).
     void restore_counts(std::uint32_t ul, std::optional<std::uint32_t> dl) noexcept;
@@ -106,7 +115,8 @@ private:
     SecretBytes knas_enc_;
     std::uint8_t ea_ = 0;
     std::uint8_t ia_ = 0;
-    std::uint32_t ul_count_ = 0;
+    NasRole role_ = NasRole::ue;
+    std::uint32_t ul_count_ = 0;   // the sending direction's next COUNT
     std::optional<std::uint32_t> dl_count_;
 };
 

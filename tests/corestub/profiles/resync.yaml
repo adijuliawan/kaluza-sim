@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# A stale SQN first (the UE answers #21 with AUTS, the home functions
+# re-synchronise), then a valid challenge (TS 24.501 5.4.1.3.7 f).
+challenges: [stale_sqn, ok]

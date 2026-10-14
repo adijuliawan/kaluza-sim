@@ -1,4 +1,4 @@
-# Extracted by spec/tools/docx_tables.py 1.1 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
+# Extracted by spec/tools/docx_tables.py 1.2 from 3GPP TS 24.501 j80 (24501-j80.zip, sha256 a5f89e78df7ee8c274a151c2181f799965cf9c32eff33c3cc64c08b46818942b). Do not edit.
 protocol	value_hex	value	name	message_clause
 5GMM	41	65	Registration request	8.2.6
 5GMM	42	66	Registration accept	8.2.7

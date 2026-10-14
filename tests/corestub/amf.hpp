@@ -1,0 +1,159 @@
+// SPDX-FileCopyrightText: 2026 Adi Juliawan
+// SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+//
+// The core stub's AMF, NAS side (P1 N5, ADR 0009 point f): it runs the
+// network half of registration, 5G AKA, security mode control and UE
+// de-registration for one UE at a time, as a profile tells it to, and checks
+// every uplink message against the spec: the mandatory IEs, the protection
+// it must carry, the uplink NAS COUNT, the MAC, and what each procedure
+// requires of its content. Each check is recorded with its clause as a
+// verdict; a procedure test passes only with no failed verdict.
+//
+// It judges procedures, not encodings: it uses kaluza-sim's own codecs and
+// crypto, so encodings are judged elsewhere (tshark and pycrate on every run
+// pcap, and the two real cores; row KS-NAS-B3).
+
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "codec/nas/ie/ie.hpp"
+#include "codec/nas/nas.hpp"
+#include "home.hpp"
+#include "platform/executor.hpp"
+#include "platform/yaml.hpp"
+#include "proc/ue/nas_sec/nas_sec.hpp"
+
+namespace ksim::corestub {
+
+/// What the stub does at each step. Built in code by the tests, or read from
+/// tests/corestub/profiles/*.yaml.
+struct Profile {
+    // none: no further challenge after a failure (the UE's T3520 then runs out)
+    enum class Challenge : std::uint8_t { ok, bad_mac, stale_sqn, non_5g, lose_response, reject, none };
+    std::vector<Challenge> challenges{Challenge::ok};   // one per challenge; the last repeats
+    std::uint8_t ea = 2;
+    std::uint8_t ia = 2;
+    bool imeisv_request = true;
+    bool rinmr = false;
+    bool tamper_replayed_capabilities = false;
+    enum class Registration : std::uint8_t { accept, reject, silent, accept_plain };
+    Registration registration = Registration::accept;
+    std::uint8_t reject_cause = 0;
+    std::uint32_t tmsi = 0x00000001;
+    std::uint8_t amf_region = 0xCA;
+    std::uint16_t amf_set = 1;
+    std::uint8_t amf_pointer = 1;
+    std::vector<std::uint32_t> tacs{1};
+    std::vector<std::uint8_t> allowed_sst{1};
+    std::optional<int> t3512_s = 3600;
+    std::optional<int> t3502_s;
+    enum class Deregistration : std::uint8_t { accept, silent };
+    Deregistration deregistration = Deregistration::accept;
+
+    /// Reads a profile; unknown keys are an error (YamlError with the path).
+    static Profile from_yaml(const Yaml& y);
+};
+
+struct Verdict {
+    std::string clause;
+    std::string what;
+    bool ok = false;
+    std::string detail;
+};
+
+class Amf {
+public:
+    struct Link {
+        std::function<void(Bytes)> to_ue;       // a downlink NAS PDU
+        std::function<void()> release;          // the network releases the N1 connection
+    };
+
+    Amf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p);
+    ~Amf();
+    Amf(const Amf&) = delete;
+    Amf& operator=(const Amf&) = delete;
+
+    void attach(Link link) { link_ = std::move(link); }
+    Profile& profile() noexcept { return p_; }
+
+    void on_uplink(ByteView wire, bool initial);
+    /// The UE released the N1 connection locally.
+    void on_ue_released();
+
+    /// Downlink as a test scripts it: a plain message as is, or protected with
+    /// the current context.
+    void send_plain(Bytes plain);
+    void send_protected(Bytes plain);
+
+    const std::vector<Verdict>& verdicts() const noexcept { return verdicts_; }
+    std::vector<Verdict> failures() const;
+    /// The uplink messages by name, in order ("REGISTRATION REQUEST", …).
+    const std::vector<std::string>& uplink() const noexcept { return uplink_; }
+    std::size_t count_uplink(std::string_view name) const;
+    int challenges() const noexcept { return challenges_; }
+    int resyncs() const noexcept { return resyncs_; }
+    bool registered() const noexcept { return state_ == State::registered; }
+    const std::string& supi() const noexcept { return supi_; }
+    std::optional<std::uint32_t> last_ul_count() const noexcept { return last_ul_; }
+    const proc::ue::NasSecurityContext* security() const noexcept { return ctx_ ? &*ctx_ : nullptr; }
+
+private:
+    enum class State : std::uint8_t { idle, authenticating, securing, accepting, registered, released };
+
+    void check(bool ok, const char* clause, const char* what, std::string detail = {});
+    void on_message(const nas::Message& m, proc::ue::Sht sht, bool initial);
+    void on_registration_request(const nas::Message& m, bool initial);
+    void start_challenge();
+    void on_authentication_response(const nas::Message& m);
+    void on_authentication_failure(const nas::Message& m);
+    void send_security_mode_command();
+    void on_security_mode_complete(const nas::Message& m, proc::ue::Sht sht);
+    void on_security_mode_reject(const nas::Message& m);
+    void send_registration_result();
+    void on_deregistration_request(const nas::Message& m);
+    Profile::Challenge challenge_kind() const;
+    void send(const nas::Message& m, bool protect);
+    void downlink(Bytes wire);
+    void release();
+    void start_t3560();
+    void stop_t3560();
+
+    Executor& ex_;
+    Home& home_;
+    nas::ie::Plmn plmn_;
+    Profile p_;
+    Link link_;
+    std::shared_ptr<bool> alive_;
+
+    State state_ = State::idle;
+    std::string supi_;
+    std::optional<nas::ie::MobileIdentity> guti_;   // the one assigned
+    std::string guti_supi_;                         // and whose it is
+    nas::Message initial_;                          // the REGISTRATION REQUEST as received
+    bool initial_had_context_ = false;
+    std::optional<nas::ie::UeSecurityCapability> ue_caps_;
+    std::uint8_t next_ngksi_ = 1;
+    nas::ie::NgKsi ngksi_;
+    std::optional<Av> av_;
+    std::optional<Profile::Challenge> av_kind_;
+    std::optional<proc::ue::NasSecurityContext> ctx_;
+    std::optional<std::uint32_t> last_ul_;
+    bool imeisv_asked_ = false;
+    Bytes pending_;            // the message T3560 retransmits
+    bool pending_plain_ = true;
+    int t3560_expiries_ = 0;
+    std::optional<TimerId> t3560_;
+    int challenges_ = 0;
+    int resyncs_ = 0;
+    bool lost_one_ = false;
+
+    std::vector<Verdict> verdicts_;
+    std::vector<std::string> uplink_;
+};
+
+} // namespace ksim::corestub

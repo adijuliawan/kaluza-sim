@@ -1,4 +1,4 @@
-# Extracted by spec/tools/docx_tables.py 1.1 from 3GPP TS 23.038 j00 (23038-j00.zip, sha256 edaa92479edf56ce02df3c097b7ed1bcffeaded1c95001d1f6394de71b06918b). Do not edit.
+# Extracted by spec/tools/docx_tables.py 1.2 from 3GPP TS 23.038 j00 (23038-j00.zip, sha256 edaa92479edf56ce02df3c097b7ed1bcffeaded1c95001d1f6394de71b06918b). Do not edit.
 table	code_hex	unicode	cell	note
 default	00	U+0040	@	
 default	10	U+0394	Δ	

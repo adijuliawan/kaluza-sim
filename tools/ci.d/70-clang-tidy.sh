@@ -23,7 +23,7 @@ fi
 mapfile -t files < <(python3 - "$DB" "$ROOT" <<'PY'
 import json, sys
 db, root = sys.argv[1], sys.argv[2].rstrip("/") + "/"
-keep = ("src/", "apps/", "tests/unit/", "tests/fuzz/", "tests/canary/")
+keep = ("src/", "apps/", "tests/unit/", "tests/fuzz/", "tests/canary/", "tests/corestub/", "tests/procedure/")
 for f in sorted({e["file"] for e in json.load(open(db))}):
     if f.startswith(root) and f.endswith(".cpp") and f[len(root):].startswith(keep):
         print(f)
