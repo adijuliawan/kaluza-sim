@@ -8,7 +8,7 @@ Research: [`research/packetrusher.md`](research/packetrusher.md), [`research/uer
 
 ## 1. Per-UE network namespace
 
-Each UE gets a netns `ksim-ue-<n>`. It is created by `unshare` in a helper thread (or by `ksim-netd`) and bind-mounted into `/run/netns`, so `ip netns exec` and `ksim-ctl ue <n> exec …` work.
+Each UE gets a netns `ksim-ue-<n>`. It is created by `ksim-netd`, the privileged helper of [ADR 0009](adr/0009-p1-runtime-shape.md) (unprivileged user namespaces are restricted by AppArmor), and bind-mounted into `/run/netns`, so `ip netns exec` and `ksim-ctl ue <n> exec …` work.
 
 - **One TUN per PDU session,** `pdu<psi>` (IFF_TUN | IFF_NO_PI), created inside the netns. The farm keeps one rtnetlink socket per netns.
 - **IPv6 sysctls are set before the interface exists.**

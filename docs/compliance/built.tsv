@@ -16,7 +16,7 @@ KS-UICC-010	built in P0: TUAK and MILENAGE-256 libraries (v1.x as card algorithm
 KS-SEC-001	built in P0: the key hierarchy library (33.501 Annex A: K_AUSF to K_AMF', NH, K_NG-RAN*)	U: tests/unit/crypto keys5g_test (33.501 C.4 vectors); U: tests/oracles/keychain.py (10,000 inputs)
 KS-SEC-003	built in P0: NEA/NIA 0-2 (SNOW 3G vendored from OCUDU); 128-NEA3/NIA3 not built (KS-SEC-G1)	U: tests/unit/crypto (33.401 Annex C, 35.217 vectors)
 KS-NGAP-012	built in P0: the codec's PER coverage, SEQUENCE OF at its bounds (the N-20 class) probed; the procedure with the entity (P1)	U: oracle probes and roundtrip (asn1c against pycrate and tshark); F: fuzz_asn1_ngap
-KS-GTPU-001	built in P0: GTPv1-U codec (header, extension chain, clause 8 IEs, every message type); the endpoint's behaviour (P2)	U: tests/unit/up, oracle m12roundtrip (pycrate, tshark); F: fuzz_codecs
+KS-GTPU-001	built in P0: GTPv1-U codec (header, extension chain, clause 8 IEs, every message type); the NG-U endpoint (Echo, Error Indication, the PDU Session Container) is P1 (N10), F1-U and Xn-U are P2 and P3	U: tests/unit/up, oracle m12roundtrip (pycrate, tshark); F: fuzz_codecs
 KS-GTPU-002	built in P0: PDU Session Container DL type 0 and UL type 1, padding, what follows the last field kept	U: tests/unit/up, oracle m12roundtrip (pycrate, tshark, OCUDU vectors); F: fuzz_codecs
 KS-GTPU-004	built in P0: NR-U DL USER DATA and DL DATA DELIVERY STATUS codec	U: tests/unit/up, oracle m12roundtrip (tshark nrup, OCUDU vectors); F: fuzz_codecs
 KS-CTL-004	built in P0: the pcapng writers and their framings (Exported-PDU, IPv4/UDP for GTP-U, GSMTAP-SIM with keys zeroed); per-interface capture with the nodes (P1+)	U: tests/unit/platform pcapng_test (tshark), tools/secret_canary.py

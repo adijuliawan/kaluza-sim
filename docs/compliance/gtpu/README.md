@@ -20,7 +20,7 @@ Row suffixes (requirements.md): -D defect in the sim, -B a choice the spec leave
 
 | Row | What | Clause | Verified by | Status |
 |---|---|---|---|---|
-| KS-GTPU-001 | GTPv1-U; Echo; Error Indication (sent for an unknown TEID, acted on when received); Supported Extension Headers Notification | 29.281 §5, §7.2, §7.3.1 | U: tests/unit/up, oracle m12roundtrip (pycrate, tshark); F: fuzz_codecs | built in P0: GTPv1-U codec (header, extension chain, clause 8 IEs, every message type); the endpoint's behaviour (P2) |
+| KS-GTPU-001 | GTPv1-U; Echo; Error Indication (sent for an unknown TEID, acted on when received); Supported Extension Headers Notification | 29.281 §5, §7.2, §7.3.1 | U: tests/unit/up, oracle m12roundtrip (pycrate, tshark); F: fuzz_codecs | built in P0: GTPv1-U codec (header, extension chain, clause 8 IEs, every message type); the NG-U endpoint (Echo, Error Indication, the PDU Session Container) is P1 (N10), F1-U and Xn-U are P2 and P3 |
 | KS-GTPU-002 | PDU Session Container: DL type 0 (QFI, RQI, PPP/PPI) and UL type 1; padding; unknown optional fields skipped | 38.415 §5.5.2, §5.5.3, §5.6 | U: tests/unit/up, oracle m12roundtrip (pycrate, tshark, OCUDU vectors); F: fuzz_codecs | built in P0: PDU Session Container DL type 0 and UL type 1, padding, what follows the last field kept |
 | KS-GTPU-004 | NR-U DL USER DATA and DL DATA DELIVERY STATUS | 38.425 j10 (T0) | U: tests/unit/up, oracle m12roundtrip (tshark nrup, OCUDU vectors); F: fuzz_codecs | built in P0: NR-U DL USER DATA and DL DATA DELIVERY STATUS codec |
 

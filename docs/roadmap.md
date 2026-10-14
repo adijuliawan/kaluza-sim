@@ -11,7 +11,7 @@
 | Phase | Scope | Exit criteria | Size |
 |---|---|---|---|
 | **P0** Spec intake, codecs, skeleton | See the P0 list below | Every v1 PDU type round-trips and matches tshark and pycrate; all KATs pass; no ASN.1 construct unhandled | M |
-| **P1** UE, soft UICC and NAS over an all-in-one gNB | See the P1 list below | Registration, session, idle, paging, deregistration and SMS scenarios pass against kaluza-core, **and the same scenarios run against the Open5GS fork core** on the rig VM (differences triaged against the spec; known Open5GS deviations on an allow-list). NULL AS security is allowed **only** in this milestone. First KF findings handed to kaluza-core | L |
+| **P1** UE, soft UICC and NAS over an all-in-one gNB | See the P1 list below | Registration, session, idle, paging, deregistration and SMS scenarios pass against kaluza-core, **and the same scenarios run against the Open5GS fork core** on the rig VM (differences triaged against the spec; known Open5GS deviations on an allow-list). AS security is real NIA2/NEA2 from P1 on ([ADR 0009](adr/0009-p1-runtime-shape.md); NULL only as a bisect switch, never in an exit run). Rows only a core-side change can trigger run on the stub and Open5GS in P1. First KF findings handed to kaluza-core | L |
 | **P2** O-RAN split and AS security | Separate `ksim-du`, `ksim-cucp` and `ksim-cuup` over real SCTP/UDP F1-C, F1-U and E1. PDCP with NEA/NIA 1–3; UP security policy. SDAP with reflective QoS. GBR flows. 100 UEs. PC/SC backend for real cards | OCUDU F1/E1 interop rows pass (our DU with OCUDU `ocucp`/`ocuup`); the performance targets of [`requirements.md`](requirements.md) §3.5 met on kaluza-uesim | L |
 | **P3** Mobility, radio model, idle → **v1 release** | See the P3 list below | **v1:** wave 40 steps 1–2 testable without radio; multi-hop handover keys proven (A→B→C→A); Xn handover against OCUDU's CU-CP; packet loss across handover measured | L |
 | **P3b** RRC_INACTIVE (**v1.x**) | Suspend and resume; RNA update; RAN paging; Retrieve UE Context (Xn); RRC Inactive Transition Report; CN assistance information; CN-paging fallback; T319; the resume keys of TS 33.501 §6.8.2 | Wave 40 step-4 rows, including failure paths | M |
@@ -37,6 +37,8 @@
 - **UE NAS:** 5GMM and 5GSM (IPv4); SMS over NAS.
 - **gNB:** all-in-one (`ksim`), with F1 and E1 encoded over memory; the NGAP core set; GTP-U N3.
 - **UE side:** per-UE netns plus TUN; a first `ksim-ctl`; personas v0; IMEISV.
+- **Runtime** ([ADR 0009](adr/0009-p1-runtime-shape.md)): KAIR v1 over memory; `ksim-netd` as the privilege boundary; virtual time for procedure tests against a scripted core; events, `wait` and one sim mutant per scenario row; the row set `gates/rows/p1.tsv` (kaluza-core's row text, verbatim).
+- **Control core** ([ADR 0010](adr/0010-open5gs-control-core.md)): the Open5GS fork as a full 001/01 core on the rig VM, over vmnet8, with an allow-list.
 
 **P1 entry conditions** (on kaluza-core's side, agreed 2026-10-14; [`lab.md`](lab.md) §8):
 - The V-UPF holds static neighbour entries for 172.30.30.30–.39. **Done** 2026-10-14 ([`lab.md`](lab.md) §4).
@@ -45,10 +47,10 @@
 - A lab window is agreed with the core session.
 
 **P3 scope:**
-- **Radio:** `ksim-radio` and its replicas; TR 38.901 pathloss; measurements A1–A5; RLF and re-establishment; cell selection and reselection; PLMN selection; paging DRX.
+- **Radio:** `ksim-radio` and its replicas; TR 38.901 pathloss; measurements A1–A5; RLF and re-establishment; cell selection and reselection; PLMN selection; paging DRX (P1 stamps PF/PO without enforcing them, ledger A-11).
 - **Handover:** Xn, N2 and intra-CU, with forwarding, End Marker, RAN status transfer and NH/NCC.
 - **Mobility:** mobility registration; several AMFs and NNSF.
-- **Tooling:** fault injection, events and metrics.
+- **Tooling:** fault injection and metrics (events and `wait` came in P1, ADR 0009).
 
 ## Fit with kaluza-core's phase 3
 

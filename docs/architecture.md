@@ -113,9 +113,10 @@ kaluza-sim/
   cmake/           asn1c.cmake (codegen + stamps) · layers.cmake · sanitizers.cmake · fuzz.cmake
   src/
     platform/  reactor shard mpsc timer_wheel clock rng log config metrics pcap(pcapng, exported-pdu, gsmtap) buf secret slotclock
-    net/       sctp (kernel UAPI) udp (mmsg) tun netns netlink
+               executor sim_loop coro event mutation transport memlink   (P1, ADR 0009)
+    net/       sctp (kernel UAPI) udp (mmsg) tcp tun netns netlink netd
     crypto/    milenage tuak milenage256 kdf keys5g nea nia ecies eap_aka_prime
-    codec/     asn1/<proto> (C++ wrappers) nas/ sms/ eap/ epco/ gtpu/ nru/ psc38415/ pdcp/ sdap/ apdu/ air/
+    codec/     asn1/ (wrappers; msg/ typed builders) nas/ (+ sms, ie/) uicc/ (apdu, fcp) up/ (gtpu, PSC and NR-U frames) pdcp/ sdap/ air/
     entity/    pdcp/ sdap/ gtpu/ nru/ rlc/{iface,ideal} mac/{iface,ideal}
     uicc/      os/ fs/ usim/ isim(Ph2)/ image/ terminal/ transport/{inproc,vpcd,pcsc} trace/ secrets/
     radio/     scene/ mobility/ pathloss38901/ shadowing/ measure/ rlm/ capacity/ replica/
@@ -126,8 +127,8 @@ kaluza-sim/
   apps/        ksim-ue ksim-du ksim-cucp ksim-cuup ksim-radio ksim ksim-ctl ksim-sim ksim-netd
   personas/ cards/ topologies/
   tests/       unit/ procedure/ component/ fuzz/ vectors/ oracles/{tshark,pycrate,pysim}
-  gates/       lib/ksim.sh verification/*.sh   (POSIX sh, kaluza-core style)
-  tools/       persona_extract.py kair.lua check_layers.py crosswalk.py provenance_scan.py
+  gates/       lib/ksim.sh verification/*.sh rows/p1.tsv allow/open5gs.tsv cores/*.env   (POSIX sh, kaluza-core style)
+  tools/       ci.sh guards/check_*.py persona_extract.py kair.lua crosswalk.py provenance.py p1_exit.py
   docs/        this documentation · adr/ · compliance/ (from P0) · findings/ · abstraction-ledger.md
 ```
 
@@ -141,7 +142,11 @@ kaluza-sim/
 - **R7:** only `net` and `node` call socket, epoll, ioctl or setns. The one exception is the epoll calls inside `platform`'s reactor, which is the event loop they all run on.
 - **R8:** `radio` is pure.
 
-The rules are enforced by PRIVATE CMake link graphs plus `tools/check_layers.py`, the counterpart of kaluza-core's Maven enforcer.
+The rules are enforced by PRIVATE CMake link graphs plus `tools/guards/check_layers.py`, the counterpart of kaluza-core's Maven enforcer.
+
+**As built** (P0 put the codecs under four directories, not one per protocol): `codec/asn1`, `codec/nas` (5GMM, 5GSM, SMS), `codec/uicc` (APDU, AUTHENTICATE, BER-TLV, FCP) and `codec/up` (GTP-U, PSC, NR-U). Two consequences of the rules for P1:
+- the vpcd transport splits in two: its framing is `uicc/transport/vpcd`, and its TCP socket is `net/tcp`, wired together in `apps/ksim-sim` (R7);
+- `codec` cannot hold `SecretBytes`, so the layouts of EF 4F03 and 4F05, which carry keys, are coded in `proc/ue/nas_sec/persist`.
 
 ## 4. Codec pipelines
 

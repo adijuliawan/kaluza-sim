@@ -1,0 +1,270 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The P1 row set (plan N0, frozen 2026-10-15). Source: the row names of kaluza-core's gates
+# kaluza-amf-ueransim, kaluza-smf-ueransim and kaluza-smsf as scored in phase-2-final
+# (kaluza-core docs/compliance/smf/phase-2/rows-k3s-963130e1-native-eupf-75d3202.tsv). The text is
+# kept verbatim: it is the UE_IMPL parity contract. Only the names are taken; no gate code.
+# Rows named ksim-p1.* are kaluza-sim's own (sim behaviour the reference gates cannot see).
+#
+#   observable  sim: kaluza-sim's own evidence (events, ksim-ctl output, its pcaps) decides the row;
+#               core: only the core's state, logs or metrics can (not a kaluza-sim row; P4 parity)
+#   trigger     sim | dn (a ping from the DN host) | subscription (a provisioned sub-block) |
+#               oam (a core-side change) | core-restart | operator-api | fault | roaming | ims
+#   p1          yes | no:<why> | later:<why>
+#   cores       where a P1 row runs: stub, open5gs, kaluza; open5gs=allow marks rows the Open5GS
+#               control cannot serve (no SMS over NAS, decision D3), listed in gates/allow/open5gs.tsv
+#   milestone   where the row is first scored; mutant: the KSIM_MUTATIONS switch that must fail it
+#               ('-' until N16 assigns one); evidence: what the sim reads
+id	gate	n	text	family	observable	trigger	p1	cores	milestone	mutant	evidence
+amf-ueransim.001	kaluza-amf-ueransim	1	the gNB completed NG Setup	ran	sim	sim	yes	stub,open5gs,kaluza	N8	-	ngap NGSetupResponse; event ran.ng.setup
+amf-ueransim.002	kaluza-amf-ueransim	2	amf_ran_nodes counts the associated gNB	core	core	-	no:core	-	-	-	-
+amf-ueransim.003	kaluza-amf-ueransim	3	amf_n2_messages counts an accepted nGSetup	core	core	-	no:core	-	-	-	-
+amf-ueransim.004	kaluza-amf-ueransim	4	the AMF reports itself ready	core	core	-	no:core	-	-	-	-
+amf-ueransim.005	kaluza-amf-ueransim	5	and ngap readiness names a listening socket	core	core	-	no:core	-	-	-	-
+amf-ueransim.006	kaluza-amf-ueransim	6	the UE completed Initial Registration	registration	sim	sim	yes	stub,open5gs,kaluza	N8	null_suci_full_imsi	event nas.reg.complete; nas pcap
+amf-ueransim.007	kaluza-amf-ueransim	7	the AUSF ran exactly one authentication	core	core	-	no:core	-	-	-	-
+amf-ueransim.008	kaluza-amf-ueransim	8	the UE context is in the state store	core	core	-	no:core	-	-	-	-
+amf-ueransim.009	kaluza-amf-ueransim	9	★ the AMF read the UE's am-data from the UDM (P-43)	core	core	-	no:core	-	-	-	-
+amf-ueransim.010	kaluza-amf-ueransim	10	★ the UDR holds this AMF's SDM subscription for the UE	core	core	-	no:core	-	-	-	-
+amf-ueransim.011	kaluza-amf-ueransim	11	amf_registered_ues counts the UE	core	core	-	no:core	-	-	-	-
+amf-ueransim.012	kaluza-amf-ueransim	12	the UE took the SECURITY MODE COMMAND	registration	sim	sim	yes	stub,open5gs,kaluza	N8	-	event nas.smc.complete
+amf-ueransim.013	kaluza-amf-ueransim	13	amf_nas_security_algorithm records the negotiated pair	core	core	-	no:core	-	-	-	-
+amf-ueransim.014	kaluza-amf-ueransim	14	the UE has a uesimtun0 address from the pool	session	sim	sim	yes	stub,open5gs,kaluza	N11	-	ksim-ctl ue ifaces: pdu1 IPv4 in the accepted PDU address
+amf-ueransim.015	kaluza-amf-ueransim	15	the UE's tunnels hold no IPv6 address of the UE VM's own	session	sim	sim	yes	stub,open5gs,kaluza	N11	-	ksim-ctl ue ifaces: no IPv6 on the UE tunnels; netd noise counter 0 (L13)
+amf-ueransim.016	kaluza-amf-ueransim	16	the UE reports the session established	session	sim	sim	yes	stub,open5gs,kaluza	N10	-	event nas.sm.est.accept
+amf-ueransim.017	kaluza-amf-ueransim	17	eUPF holds a session for the leased address	core	core	-	no:core	-	-	-	-
+amf-ueransim.018	kaluza-amf-ueransim	18	a ping over the tunnel reaches the DN	session	sim	sim	yes	stub,open5gs,kaluza	N11	-	ksim-ctl ue ping to the core profile DN_ADDR
+amf-ueransim.019	kaluza-amf-ueransim	19	the AMF reached the AUSF as <uri>	core	core	-	no:core	-	-	-	-
+amf-ueransim.020	kaluza-amf-ueransim	20	the AUSF reached the UDM as <uri>	core	core	-	no:core	-	-	-	-
+amf-ueransim.021	kaluza-amf-ueransim	21	the UDM reached the UDR as <uri>	core	core	-	no:core	-	-	-	-
+amf-ueransim.022	kaluza-amf-ueransim	22	the SMF it reached advertises its FQDN and no address	core	core	-	no:core	-	-	-	-
+amf-ueransim.023	kaluza-amf-ueransim	23	the RAN release put the UE in CM-IDLE	idle	sim	sim	yes	stub,open5gs,kaluza	N12	-	event nas.mm.cm_idle after ksim-ctl gnb ue-release
+amf-ueransim.024	kaluza-amf-ueransim	24	★ the UE runs T3512 at the subscription's <n> s	registration	sim	subscription	yes	stub,open5gs,kaluza	N12	-	event nas.mm.t3512 value = the sub-block subsRegTimer
+amf-ueransim.025	kaluza-amf-ueransim	25	an uplink ping from idle is reactivated	idle	sim	sim	yes	stub,open5gs,kaluza	N12	-	event nas.sr.accept with uplink data pending
+amf-ueransim.026	kaluza-amf-ueransim	26	the AMF matched the returning UE by 5G-S-TMSI	core	core	-	no:core	-	-	-	-
+amf-ueransim.027	kaluza-amf-ueransim	27	a downlink ping to the idle UE is answered	paging	sim	dn	yes	stub,open5gs,kaluza	N12	paging_ignore	ping from the DN host answered while CM-IDLE
+amf-ueransim.028	kaluza-amf-ueransim	28	and not every packet was lost	paging	sim	dn	yes	stub,open5gs,kaluza	N12	-	ping loss below 100 %
+amf-ueransim.029	kaluza-amf-ueransim	29	the AMF sent a PAGING	paging	sim	dn	yes	stub,open5gs,kaluza	N12	-	ngap Paging received by the gNB (event ran.ngap.paging)
+amf-ueransim.030	kaluza-amf-ueransim	30	★ the AMF holds the UE CM-IDLE once its association is gone	core	core	-	no:core	-	-	-	-
+amf-ueransim.031	kaluza-amf-ueransim	31	★ and the SMF deactivated its user plane (eUPF buffers)	core	core	-	no:core	-	-	-	-
+amf-ueransim.032	kaluza-amf-ueransim	32	the gNB set up again	ran	sim	sim	yes	stub,open5gs,kaluza	N12	-	event ran.ng.setup after a gNB restart (ksim-ctl gnb restart)
+amf-ueransim.033	kaluza-amf-ueransim	33	★ a downlink ping after the gNB came back is answered	paging	sim	dn	yes	stub,open5gs,kaluza	N12	-	DN ping answered after the gNB restart
+amf-ueransim.034	kaluza-amf-ueransim	34	through a PAGING	paging	sim	dn	yes	stub,open5gs,kaluza	N12	-	ngap Paging received after the gNB restart
+amf-ueransim.035	kaluza-amf-ueransim	35	★ the UDM told the AMF am-data changed	core	core	-	no:core	-	-	-	-
+amf-ueransim.036	kaluza-amf-ueransim	36	★ the next accept gave T3512 the new <n> s	registration	sim	oam	yes	stub,open5gs	N12	-	event nas.mm.t3512 new value after a subscription change; kaluza-core parity under the gate contract later (no trigger grant in P1, user via kaluza-core-1e 2026-10-15)
+amf-ueransim.037	kaluza-amf-ueransim	37	★ the UE's periodic registration was accepted	registration	sim	subscription	yes	stub,open5gs,kaluza	N12	-	event nas.reg.accept type periodic
+amf-ueransim.038	kaluza-amf-ueransim	38	★ with no new authentication	registration	sim	subscription	yes	stub,open5gs,kaluza	N12	-	no AUTHENTICATION REQUEST between the periodic request and accept
+amf-ueransim.039	kaluza-amf-ueransim	39	and the session still carries a ping	session	sim	sim	yes	stub,open5gs,kaluza	N12	-	ping after the periodic registration
+amf-ueransim.040	kaluza-amf-ueransim	40	★ paging gave up, and the SMF was told	core	core	-	no:core	-	-	-	-
+amf-ueransim.041	kaluza-amf-ueransim	41	★ the AMF implicitly de-registered it	core	core	-	no:core	-	-	-	-
+amf-ueransim.042	kaluza-amf-ueransim	42	★ its session is gone from eUPF	core	core	-	no:core	-	-	-	-
+amf-ueransim.043	kaluza-amf-ueransim	43	★ its context is gone from the state store	core	core	-	no:core	-	-	-	-
+amf-ueransim.044	kaluza-amf-ueransim	44	the UE holds a second session	session	sim	sim	yes	stub,open5gs,kaluza	N10	-	ksim-ctl ue ps-list: two sessions (internet, ims)
+amf-ueransim.045	kaluza-amf-ueransim	45	★ both sessions it left were released at its initial registration	core	core	-	no:core	-	-	-	-
+amf-ueransim.046	kaluza-amf-ueransim	46	★ the second is gone from eUPF	core	core	-	no:core	-	-	-	-
+amf-ueransim.047	kaluza-amf-ueransim	47	★★ PSI 1 asked for again before the AMF heard of its release: released as a duplicate, established anew	session	sim	sim	yes	stub,open5gs,kaluza	N12	-	after a power cycle without deregistration, PSI 1 established anew
+amf-ueransim.048	kaluza-amf-ueransim	48	★ ... the old session gone first: the SMF's RELEASED waited for, or its 404	core	core	-	no:core	-	-	-	-
+amf-ueransim.049	kaluza-amf-ueransim	49	★★ ... the UE has its ims session within <n> s, not after T3580's <n> s	session	sim	sim	yes	stub,open5gs,kaluza	N12	-	ims session accepted within the row bound, not after T3580
+amf-ueransim.050	kaluza-amf-ueransim	50	... and nothing was ignored as a T3580 retransmission	core	core	-	no:core	-	-	-	-
+amf-ueransim.051	kaluza-amf-ueransim	51	★ GET amf-3gpp-access names this AMF	core	core	-	no:core	-	-	-	-
+amf-ueransim.052	kaluza-amf-ueransim	52	★ GET amf-3gpp-access of a UE never registered is 404	core	core	-	no:core	-	-	-	-
+amf-ueransim.053	kaluza-amf-ueransim	53	a stand-in AMF registers for the UE	core	core	-	no:core	-	-	-	-
+amf-ueransim.054	kaluza-amf-ueransim	54	★ the UDM told this AMF, which de-registered the UE locally	core	core	-	no:core	-	-	-	-
+amf-ueransim.055	kaluza-amf-ueransim	55	★ and its session is released	core	core	-	no:core	-	-	-	-
+amf-ueransim.056	kaluza-amf-ueransim	56	★ a re-registration by this same AMF notifies nobody	core	core	-	no:core	-	-	-	-
+amf-ueransim.057	kaluza-amf-ueransim	57	★ dereg-amf is 204	core	core	-	no:core	-	-	-	-
+amf-ueransim.058	kaluza-amf-ueransim	58	★ the AMF de-registered the UE on it	core	core	-	no:core	-	-	-	-
+amf-ueransim.059	kaluza-amf-ueransim	59	★ and the UDM stored the purgeFlag	core	core	-	no:core	-	-	-	-
+amf-ueransim.060	kaluza-amf-ueransim	60	the UE received a PDU SESSION RELEASE COMMAND	session	sim	sim	yes	stub,open5gs,kaluza	N10	-	event nas.sm.rel.command
+amf-ueransim.061	kaluza-amf-ueransim	61	the UE de-registered	dereg	sim	sim	yes	stub,open5gs,kaluza	N8	-	event nas.dereg.accept
+amf-ueransim.062	kaluza-amf-ueransim	62	its context is gone from the state store	core	core	-	no:core	-	-	-	-
+amf-ueransim.063	kaluza-amf-ueransim	63	★ the draining AMF sent the gNB an AMF STATUS INDICATION	ran	sim	core-restart	yes	stub	N12	-	ngap AMFStatusIndication received
+amf-ueransim.064	kaluza-amf-ueransim	64	the gNB re-associated after the restart	ran	sim	core-restart	yes	stub,open5gs	N12	-	SCTP re-association and NG Setup after the AMF restart (L11)
+amf-ueransim.065	kaluza-amf-ueransim	65	the UE is registered without re-registering	registration	sim	core-restart	yes	stub,open5gs	N12	-	UE still registered, no new REGISTRATION REQUEST
+amf-ueransim.066	kaluza-amf-ueransim	66	no NEW authentication was needed	registration	sim	core-restart	yes	stub,open5gs	N12	-	no AUTHENTICATION REQUEST after the restart
+amf-ueransim.067	kaluza-amf-ueransim	67	the AUSF was the same instance throughout	core	core	-	no:core	-	-	-	-
+amf-ueransim.068	kaluza-amf-ueransim	68	the AMF came back as a new pod	core	core	-	no:core	-	-	-	-
+amf-ueransim.069	kaluza-amf-ueransim	69	the session works again after the restart	session	sim	core-restart	yes	stub,open5gs	N12	-	ping after the AMF restart
+amf-ueransim.070	kaluza-amf-ueransim	70	the NRF still holds the rig's NFs	core	core	-	no:core	-	-	-	-
+amf-ueransim.071	kaluza-amf-ueransim	71	the registered AMF is the KaluzaCore instance	core	core	-	no:core	-	-	-	-
+amf-ueransim.072	kaluza-amf-ueransim	72	the SMF is still up	core	core	-	no:core	-	-	-	-
+smf-ueransim.001	kaluza-smf-ueransim	1	the AMF discovers an SMF on <host>	core	core	-	no:core	-	-	-	-
+smf-ueransim.002	kaluza-smf-ueransim	2	its smfInfo names the internet DNN	core	core	-	no:core	-	-	-	-
+smf-ueransim.003	kaluza-smf-ueransim	3	nsmf-pdusession is the advertised service	core	core	-	no:core	-	-	-	-
+smf-ueransim.004	kaluza-smf-ueransim	4	its endpoint is the port the SMF listens on (<port>)	core	core	-	no:core	-	-	-	-
+smf-ueransim.005	kaluza-smf-ueransim	5	the discovered SMF is the KaluzaCore instance	core	core	-	no:core	-	-	-	-
+smf-ueransim.006	kaluza-smf-ueransim	6	eUPF holds an association from <host>	core	core	-	no:core	-	-	-	-
+smf-ueransim.007	kaluza-smf-ueransim	7	heartbeats are flowing (eUPF's sequence advanced)	core	core	-	no:core	-	-	-	-
+smf-ueransim.008	kaluza-smf-ueransim	8	eUPF recorded ARDR in our CP Function Features	core	core	-	no:core	-	-	-	-
+smf-ueransim.009	kaluza-smf-ueransim	9	the UP features decoded from the association, as the UPF advertises them	core	core	-	no:core	-	-	-	-
+smf-ueransim.010	kaluza-smf-ueransim	10	the UE has a uesimtun0 address from the pool	session	sim	sim	yes	stub,open5gs,kaluza	N11	-	ksim-ctl ue ifaces: pdu1 IPv4
+smf-ueransim.011	kaluza-smf-ueransim	11	eUPF holds a session for the address we leased	core	core	-	no:core	-	-	-	-
+smf-ueransim.012	kaluza-smf-ueransim	12	2 PDRs, 2 FARs, 2 QERs, 1 URR (the default rating group's aside)	core	core	-	no:core	-	-	-	-
+smf-ueransim.013	kaluza-smf-ueransim	13	the default rating group's URR 1000 exactly when the session is charged	core	core	-	no:core	-	-	-	-
+smf-ueransim.014	kaluza-smf-ueransim	14	the downlink FAR forwards rather than buffers	core	core	-	no:core	-	-	-	-
+smf-ueransim.015	kaluza-smf-ueransim	15	and forwards to a non-zero gNB TEID	core	core	-	no:core	-	-	-	-
+smf-ueransim.016	kaluza-smf-ueransim	16	the AMF accepted our N1N2MessageTransfer	core	core	-	no:core	-	-	-	-
+smf-ueransim.017	kaluza-smf-ueransim	17	the QFI the UE decoded is the QFI eUPF marks with	session	sim	sim	yes	stub,open5gs,kaluza	N11	-	the QoS rule QFI equals the QFI in the DL PDU Session Container at the gNB
+smf-ueransim.018	kaluza-smf-ueransim	18	the Session-AMBR the UE decoded is the one eUPF holds	core	core	-	no:core	-	-	-	-
+smf-ueransim.019	kaluza-smf-ueransim	19	uplink GTP-U reached eUPF and was decapsulated	core	core	-	no:core	-	-	-	-
+smf-ueransim.020	kaluza-smf-ueransim	20	★ replies return over the tunnel (eUPF U-12)	session	sim	sim	yes	stub,open5gs,kaluza	N11	-	ping replies arrive over the tunnel
+smf-ueransim.021	kaluza-smf-ueransim	21	UL-1 ★★ the UE's own source reaches the DN (3 echoes, marker 0x4b61)	core	core	-	no:core	-	-	-	-
+smf-ueransim.022	kaluza-smf-ueransim	22	UL-1 ★★★ a forged source (<host>) never reaches the DN	core	core	-	no:core	-	-	-	-
+smf-ueransim.023	kaluza-smf-ueransim	23	the UE received a PDU SESSION RELEASE COMMAND	session	sim	sim	yes	stub,open5gs,kaluza	N10	-	event nas.sm.rel.command
+smf-ueransim.024	kaluza-smf-ueransim	24	the released session is gone from eUPF	core	core	-	no:core	-	-	-	-
+smf-ueransim.025	kaluza-smf-ueransim	25	eUPF re-associated with the SMF after its restart	core	core	-	no:core	-	-	-	-
+smf-ueransim.026	kaluza-smf-ueransim	26	the session was replayed rather than lost	core	core	-	no:core	-	-	-	-
+smf-ueransim.027	kaluza-smf-ueransim	27	eUPF accepted the explicit UE IP we re-offered	core	core	-	no:core	-	-	-	-
+smf-ueransim.028	kaluza-smf-ueransim	28	eUPF kept the F-TEID we re-offered on the RESTI request	core	core	-	no:core	-	-	-	-
+smf-ueransim.029	kaluza-smf-ueransim	29	...and eUPF records that the replayed one is not its own choice	core	core	-	no:core	-	-	-	-
+smf-ueransim.030	kaluza-smf-ueransim	30	the replay carried RESTI	core	core	-	no:core	-	-	-	-
+smf-ueransim.031	kaluza-smf-ueransim	31	a new session is not handed a restored session's TEID	core	core	-	no:core	-	-	-	-
+smf-ueransim.032	kaluza-smf-ueransim	32	the UE holds a session to release	session	sim	sim	yes	stub,open5gs,kaluza	N10	-	ksim-ctl ue ps-list: one session
+smf-ueransim.033	kaluza-smf-ueransim	33	the SMF accepted the PCF's termination request	core	core	-	no:core	-	-	-	-
+smf-ueransim.034	kaluza-smf-ueransim	34	the UE received the network's RELEASE COMMAND	session	sim	oam	yes	stub,open5gs	N10	-	event nas.sm.rel.command, network-requested; kaluza-core parity under the gate contract later (no trigger grant in P1, user via kaluza-core-1e 2026-10-15)
+smf-ueransim.035	kaluza-smf-ueransim	35	the SMF commanded it with the user plane up	core	core	-	no:core	-	-	-	-
+smf-ueransim.036	kaluza-smf-ueransim	36	the RAN and the UE both answered	session	sim	oam	yes	stub,open5gs	N10	-	RRC and NAS answers to a network release; kaluza-core parity under the gate contract later (no trigger grant in P1, user via kaluza-core-1e 2026-10-15)
+smf-ueransim.037	kaluza-smf-ueransim	37	T3592 did not expire	core	core	-	no:core	-	-	-	-
+smf-ueransim.038	kaluza-smf-ueransim	38	the AMF was told the session was released	core	core	-	no:core	-	-	-	-
+smf-ueransim.039	kaluza-smf-ueransim	39	the released session is gone from eUPF	core	core	-	no:core	-	-	-	-
+smf-ueransim.040	kaluza-smf-ueransim	40	a fresh UE holds a session	session	sim	sim	yes	stub,open5gs,kaluza	N10	-	ksim-ctl ue ps-list on a fresh UE
+smf-ueransim.041	kaluza-smf-ueransim	41	the RAN release put the UE in CM-IDLE	idle	sim	sim	yes	stub,open5gs,kaluza	N12	-	event nas.mm.cm_idle after ksim-ctl gnb ue-release
+smf-ueransim.042	kaluza-smf-ueransim	42	the SMF accepted the PCF's termination request	core	core	-	no:core	-	-	-	-
+smf-ueransim.043	kaluza-smf-ueransim	43	★ the SMF commanded it alone, with skipInd	core	core	-	no:core	-	-	-	-
+smf-ueransim.044	kaluza-smf-ueransim	44	★ the AMF did not transfer it, and the SMF released at once	core	core	-	no:core	-	-	-	-
+smf-ueransim.045	kaluza-smf-ueransim	45	★ T3592 did not expire	core	core	-	no:core	-	-	-	-
+smf-ueransim.046	kaluza-smf-ueransim	46	★ the AMF paged nobody for it	core	core	-	no:core	-	-	-	-
+smf-ueransim.047	kaluza-smf-ueransim	47	★ the released session is gone from eUPF	core	core	-	no:core	-	-	-	-
+smf-ueransim.048	kaluza-smf-ueransim	48	the NRF still holds the rig's NFs	core	core	-	no:core	-	-	-	-
+smf-ueransim.049	kaluza-smf-ueransim	49	the AMF, PCF and UDM are all still registered	core	core	-	no:core	-	-	-	-
+smsf.001	kaluza-smsf	1	soft UE 1: SMS subscribed, MO and MT, no barring (through the OAM)	core	core	-	no:setup through the core OAM	-	-	-	-
+smsf.002	kaluza-smsf	2	soft UE 2: SMS subscribed, MO and MT, no barring (through the OAM)	core	core	-	no:setup through the core OAM	-	-	-	-
+smsf.003	kaluza-smsf	3	soft UE 3: SMS not subscribed (smsSubscribed false)	core	core	-	no:setup through the core OAM	-	-	-	-
+smsf.004	kaluza-smsf	4	no SMSF context left by an earlier run (Deactivate as the AMF: 204 or 404)	core	core	-	no:setup through the core OAM	-	-	-	-
+smsf.005	kaluza-smsf	5	no SMSF context left for H1 or H2 by an earlier run (204 or 404)	core	core	-	no:setup through the core OAM	-	-	-	-
+smsf.006	kaluza-smsf	6	no message left waiting for H1 or H2 in the home SC by an earlier run (deleted, counted)	core	core	-	no:setup through the core OAM	-	-	-	-
+smsf.007	kaluza-smsf	7	no ip-sm-gw registration left for UE 1 or 2 by an earlier run (deleted at the UDM: 204 or 404)	core	core	-	no:setup through the core OAM	-	-	-	-
+smsf.008	kaluza-smsf	8	no message left waiting for UE 1 or 2 by an earlier run (deleted: 0)	core	core	-	no:setup through the core OAM	-	-	-	-
+smsf.009	kaluza-smsf	9	gNB: NG Setup successful	ran	sim	sim	yes	stub,open5gs,kaluza	N8	-	ngap NGSetupResponse
+smsf.010	kaluza-smsf	10	UE 1: registered	registration	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	UE 1 registered with SMS requested
+smsf.011	kaluza-smsf	11	UE 2: registered	registration	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	UE 2 registered with SMS requested
+smsf.012	kaluza-smsf	12	UE 3: registered	registration	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	UE 3 (not SMS-subscribed sub-block) registered
+smsf.013	kaluza-smsf	13	★★ the three UEs asked for SMS (5GS update type, SMS requested = 1, on the wire)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	nas pcap: 5GS update type SMS requested = 1 from all three
+smsf.014	kaluza-smsf	14	★★ ...and the REGISTRATION ACCEPTs say SMS over NAS allowed to UE 1 and 2, not to UE 3 (on the wire)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	nas pcap: SMS over NAS allowed to UE 1 and 2, not UE 3
+smsf.015	kaluza-smsf	15	★ UE 1 read it: SMS over NAS allowed	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	event nas.reg.accept sms_allowed=1
+smsf.016	kaluza-smsf	16	★ ...the SMSF activated it and registered with the UDM	core	core	-	no:core	-	-	-	-
+smsf.017	kaluza-smsf	17	★★ the UDR holds UE 1's smsf-3gpp-access (smsfInstanceId, plmnId, SBI support)	core	core	-	no:core	-	-	-	-
+smsf.018	kaluza-smsf	18	★ the SMSF registered after the AMF (TS 23.502 4.13.3.1: step 14a, then 7a)	core	core	-	no:core	-	-	-	-
+smsf.019	kaluza-smsf	19	★★ UE 3 (not subscribed): SMS over NAS not allowed, and registered all the same	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	UE 3 registered, sms_allowed=0
+smsf.020	kaluza-smsf	20	★ ...and no SMSF holds it	core	core	-	no:core	-	-	-	-
+smsf.021	kaluza-smsf	21	★ SMS requested = 0 on an update: not allowed, the SMSF deactivated, the UDR document gone	core	core	-	no:core	-	-	-	-
+smsf.022	kaluza-smsf	22	...and requested again: activated, allowed	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	registration update with SMS requested again: sms_allowed=1
+smsf.023	kaluza-smsf	23	UE 1: the submit went (sms-send)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	ksim-ctl ue sms-send exit 0
+smsf.024	kaluza-smsf	24	★★ UE 1: RP-ACK for its submit (the SMSC took it)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	sms_rp_da_empty	event sms.rp.ack for the MO
+smsf.025	kaluza-smsf	25	★★ UE 2: delivered once, the same text	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	UE 2 sms-list: one DELIVER, same text
+smsf.026	kaluza-smsf	26	★ the TP-UD arrived byte-identical (TS 23.040: the SC relays it)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	TP-UD byte-identical at UE 2
+smsf.027	kaluza-smsf	27	★ the SMS-IWMSC accepted UE 1's MO for UE 2, the SMS-GMSC delivered it	core	core	-	no:core	-	-	-	-
+smsf.028	kaluza-smsf	28	★★ on the wire: CP-DATA and CP-ACK, four each (gsm_a.dtap)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	uu/nas pcap: CP-DATA and CP-ACK four each (gsm_a.dtap)
+smsf.029	kaluza-smsf	29	★★ ...RP-DATA ms->n, n->ms, RP-ACK ms->n, n->ms: one each (gsm_a.rp)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	pcap: RP-DATA and RP-ACK one each per direction (gsm_a.rp)
+smsf.030	kaluza-smsf	30	★ ...an SMS-SUBMIT and an SMS-DELIVER (gsm_sms), the text as sent	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	pcap: one SMS-SUBMIT and one SMS-DELIVER (gsm_sms)
+smsf.031	kaluza-smsf	31	...nothing malformed	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	pcap: no malformed frame
+smsf.032	kaluza-smsf	32	★ UCS2 (Korean): delivered once, the same text	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	UCS2 text delivered once
+smsf.033	kaluza-smsf	33	★ the operator API: a 330-character text is three parts	sms	sim	operator-api	no:D7 no operator-API grant	-	-	-	-
+smsf.034	kaluza-smsf	34	★ ...UE 2 received three SMS-DELIVERs with a concatenation header	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	UE 2 received three DELIVERs with a concatenation UDH (MO concatenated, D7)
+smsf.035	kaluza-smsf	35	★★ MT to an idle UE: NGAP Paging	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	ngap Paging for MT to an idle UE
+smsf.036	kaluza-smsf	36	★ ...a service request, then the DL CP-DATA, delivered once	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	service request, then DL CP-DATA, delivered once
+smsf.037	kaluza-smsf	37	★ MO from idle: a service request first, then the submit, delivered once	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	MO from idle: service request first, then the submit
+smsf.038	kaluza-smsf	38	★★ moSmsBarringAll: RP-ERROR #10 Call barred	sms	sim	sim	later:smsf band 3 rules (barring)	-	-	-	-
+smsf.039	kaluza-smsf	39	...and nothing delivered	sms	sim	sim	later:smsf band 3 rules (barring)	-	-	-	-
+smsf.040	kaluza-smsf	40	★ mtSmsBarringAll: the SMSC fails it at routing (SRI-SM 403), nothing to the UE	sms	sim	sim	later:smsf band 3 rules (barring)	-	-	-	-
+smsf.041	kaluza-smsf	41	★★ SMS from a UE not allowed: aborted, no #90 (TS 24.501 5.4.5.2.5 b), SMS-D1)	sms	sim	fault	later:needs a UE that sends while not allowed (fault injection, P3); ksim row ksim-p1.sms-not-allowed covers the compliant UE	-	-	-	-
+smsf.042	kaluza-smsf	42	...and the UE saw no CP-ACK	sms	sim	fault	later:needs a UE that sends while not allowed (fault injection, P3); ksim row ksim-p1.sms-not-allowed covers the compliant UE	-	-	-	-
+smsf.043	kaluza-smsf	43	★ the UDM registers an SMSF for non-3GPP access (contract)	core	core	-	no:core	-	-	-	-
+smsf.044	kaluza-smsf	44	★ ...and send-routing-info-sm names it as smsfNon3Gpp	core	core	-	no:core	-	-	-	-
+smsf.045	kaluza-smsf	45	★ ...and deregisters it	core	core	-	no:core	-	-	-	-
+smsf.046	kaluza-smsf	46	★★ the same CP-DATA again (same TI): CP-ACK again, not relayed	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.047	kaluza-smsf	47	★ the same RP-DATA on a new TI: the stored RP-ACK, not relayed	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.048	kaluza-smsf	48	★ the same SMS-SUBMIT on a new RP-MR, TP-RD 0: the original's report, no second message (D5, SMS-V1)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.049	kaluza-smsf	49	★ ...and with TP-RD 1 (TS 23.040 9.2.3.25: an identical duplicate acknowledged)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.050	kaluza-smsf	50	★★ ...and UE 2 has it once	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.051	kaluza-smsf	51	MT to a UE gone without deregistering: paging fails, WAITING (UE_NOT_REACHABLE)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.052	kaluza-smsf	52	★★ two retries at once, one delivery (the lane lease, the SMSF's MT cache)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.053	kaluza-smsf	53	...and the SMSC holds it DELIVERED	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.054	kaluza-smsf	54	★ an absent subscriber: the SMS-GMSC subscribes (UE_REACHABILITY_FOR_SMS), then reports it (RSDS)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.055	kaluza-smsf	55	★ ...and the UDM holds the MWD (no SMSF or AMF to watch: URRP-AMF not set)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.056	kaluza-smsf	56	★★ ...in the UDR (context-data mwd)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.057	kaluza-smsf	57	★★ UE 2 registers: the SMSF's registration alerts the SC (TS 23.540 5.1.8)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.058	kaluza-smsf	58	★★ ...and the waiting message is delivered once, by the alert alone	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.059	kaluza-smsf	59	★ ...the SC reports the successful transfer, the UDM clears the MWD, the UDR holds none	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.060	kaluza-smsf	60	★ a UE gone without deregistering: paging fails, WAITING (UE_NOT_REACHABLE), reported	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.061	kaluza-smsf	61	★★ ...URRP-AMF set: the UDM subscribes the AMF's REACHABILITY_REPORT (UE_REACHABLE_DL_TRAFFIC)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.062	kaluza-smsf	62	★★ UE 2 back: the AMF reports it REACHABLE, the UDM alerts the SC	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.063	kaluza-smsf	63	★★ ...and the waiting message is delivered once	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.064	kaluza-smsf	64	★ TP-SRR: delivered once, and the SC queues a status report for UE 1 (TP-ST 0x00)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.065	kaluza-smsf	65	★★ ...UE 1 receives the SMS-STATUS-REPORT: received (st=00), naming UE 2	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.066	kaluza-smsf	66	★★ validity <n> s, the recipient absent: EXPIRED, and a status report queued for UE 1 (TP-ST 0x46)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.067	kaluza-smsf	67	★ ...UE 1 receives it: validity period expired (st=46)	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.068	kaluza-smsf	68	★ ...and UE 2, back, never receives the expired message	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.069	kaluza-smsf	69	★★ F1, the submit report lost and MoForwardSm sent again: one message, the second answered by its receipt	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.070	kaluza-smsf	70	★ ...UE 1 has one RP-ACK, UE 2 the message once	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.071	kaluza-smsf	71	★★ F2, the delivery report lost and MtForwardSm sent again: the SMSF answers it from its MT cache	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.072	kaluza-smsf	72	★★ ...and UE 2 has the message once	sms	sim	sim	later:smsf bands 4, 6, 7 (exactly-once, message waiting, faults, reports)	-	-	-	-
+smsf.073	kaluza-smsf	73	the home UDR holds H1 and H2, SMS subscribed (misc/smsf/seed-roamers.py, then the home UDR's roll)	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.074	kaluza-smsf	74	the home PLMN runs its SMS-GMSC and SMS-IWMSC	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.075	kaluza-smsf	75	the roamers' configs, made on the UE host from R4's fixture (SUPI, no session, SMS)	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.076	kaluza-smsf	76	H1 and H2 registered in 001-01, roaming, and told SMS over NAS allowed	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.077	kaluza-smsf	77	★ the visited SMSF activated both	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.078	kaluza-smsf	78	★★ ...and registered with the HOME UDM over N32 (the visited SEPP's egress: UECM smsf-3gpp-access)	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.079	kaluza-smsf	79	★★ the HOME UDR holds H1's smsf-3gpp-access: the visited SMSF, plmnId 001-01, SBI support, written by this run	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.080	kaluza-smsf	80	★ ...and the visited UDR holds none (the visited UDM never asked: SubscriberPlmns)	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.081	kaluza-smsf	81	H1: the submit went (sms-send)	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.082	kaluza-smsf	82	★★ H1: RP-ACK for its submit (its home SC took it)	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.083	kaluza-smsf	83	★★ H2: delivered once, the same text	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.084	kaluza-smsf	84	★ the TP-UD arrived byte-identical, through two SEPPs and two RIs	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.085	kaluza-smsf	85	★★ MoForwardSm crossed N32 to the home PLMN, PRINS (the visited SEPP's egress)	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.086	kaluza-smsf	86	★★ ...the home SEPP delivered it to the home SMS-IWMSC as 001-01	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.087	kaluza-smsf	87	★ ...which accepted H1's MO for H2 (its log; the originator's MSISDN from the home UDM)	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.088	kaluza-smsf	88	★★ the home kaluza_smsc holds it, MO and DELIVERED	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.089	kaluza-smsf	89	★★ ...routed by the home UDM to the visited SMSF (send-routing-info-sm: smsf3Gpp, 001-01), answered 200	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.090	kaluza-smsf	90	★★ MtForwardSm crossed N32 home -> visited, PRINS (the home SEPP's egress)	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.091	kaluza-smsf	91	★★ ...the visited SEPP delivered it to the visited SMSF as 999-70	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.092	kaluza-smsf	92	★ ...whose MT reached H2 and came back RP-ACK; the home SMS-GMSC's line DELIVERED via that SMSF	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.093	kaluza-smsf	93	★ and back, H2 -> H1: delivered once	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.094	kaluza-smsf	94	★ H1 deregistered: the visited SMSF deactivated, the HOME UDR document gone	sms	-	roaming	no:roaming (999/70 seed) is not P1	-	-	-	-
+smsf.095	kaluza-smsf	95	UE 2: SMS over NAS and an ims session (the P-CSCF in its ePCO)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.096	kaluza-smsf	96	★ UE 2 registers to IMS with +g.3gpp.smsip (IMS AKA, sipp SMSIP=1)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.097	kaluza-smsf	97	★★ the third-party REGISTER, then the reg event: the IP-SM-GW registered UE 2 with the UDM	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.098	kaluza-smsf	98	★★ ...the UDR holds UE 2's ip-sm-gw registration, naming this IP-SM-GW (TS 29.503 IpSmGwRegistration)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.099	kaluza-smsf	99	★★ MO over IP: the IP-SM-GW answers 202 (TS 24.341 5.3.3.4.1)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.100	kaluza-smsf	100	★★ ...the submit report in a MESSAGE of its own, In-Reply-To the submit, an RP-ACK (5.3.3.4.3)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.101	kaluza-smsf	101	★ ...the IP-SM-GW relayed it to the SMS-IWMSC (Niwmsc MoForwardSm), RP-DA recorded	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.102	kaluza-smsf	102	★ ...the SMS-IWMSC accepted UE 2's MO for UE 1	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.103	kaluza-smsf	103	★★ UE 1 (SMS over NAS) has it once: across domains	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.104	kaluza-smsf	104	★ ...the TP-UD byte-identical	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.105	kaluza-smsf	105	★★ the same submit then over NAS: one message (the receipt or D5), UE 1 still has it once	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.106	kaluza-smsf	106	★ MO over IP, the SC address as a sip: URI: 202, the report, delivered once	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.107	kaluza-smsf	107	★★ MT over IP: UE 2's IMS contact gets a MESSAGE with the SMS-DELIVER, the text as sent	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.108	kaluza-smsf	108	★ ...Accept-Contact +g.3gpp.smsip require explicit, from the IP-SM-GW (5.3.3.4.2)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.109	kaluza-smsf	109	★★ ...its report (In-Reply-To) is answered 202, and the SC holds it DELIVERED via the IP-SM-GW	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.110	kaluza-smsf	110	★★ ...and nothing over NAS (UE 2's UERANSIM has no DELIVER of it)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.111	kaluza-smsf	111	★★ MT, IMS answers 480: one MESSAGE, then NAS once -- delivered once over NAS	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.112	kaluza-smsf	112	★★ MT, 200 then the report <n> s late: one MESSAGE, nothing over NAS, DELIVERED via the IP-SM-GW	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.113	kaluza-smsf	113	★★ F3, the IP-SM-GW's report lost and MtForwardSm sent again: one MESSAGE, the cache answers	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.114	kaluza-smsf	114	UE 2 deregisters from IMS (sipp)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.115	kaluza-smsf	115	★★ ...the IP-SM-GW deleted UE 2's ip-sm-gw registration, the UDR holds none	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.116	kaluza-smsf	116	★★ ...and the next MT goes over NAS, through the SMSF	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.117	kaluza-smsf	117	★ an IMS-only recipient, not registered to IMS yet: WAITING (ABSENT_SUBSCRIBER), the MWD in the UDR	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.118	kaluza-smsf	118	UE 2 registers to IMS (smsip)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.119	kaluza-smsf	119	★★ ...its IP-SM-GW registration alerts the SC, and the message arrives over IMS, once	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.120	kaluza-smsf	120	UE 2 deregisters from IMS at the band's end (no registration left for the next run)	sms	-	ims	no:SMS over IP is phase 2	-	-	-	-
+smsf.121	kaluza-smsf	121	★ UE 1 deregistered: the SMSF deactivated, the UDR document gone	core	core	-	no:core	-	-	-	-
+ksim-p1.reg-null-suci	kaluza-sim	-	the REGISTRATION REQUEST carries a null-scheme SUCI whose output is the MSIN	registration	sim	sim	yes	stub,open5gs,kaluza	N8	null_suci_full_imsi	nas pcap: SUCI protection scheme 0, scheme output = MSIN digits
+ksim-p1.as-smc-nia2	kaluza-sim	-	the AS SECURITY MODE COMMAND selected NIA2 and NEA2, and SRB1 verifies after it	registration	sim	sim	yes	stub,open5gs,kaluza	N8	kgnb_wrong_ul_count	event rrc.smc.complete alg=nia2/nea2; no PDCP integrity failure
+ksim-p1.imeisv	kaluza-sim	-	the UE returned its IMEISV in SECURITY MODE COMPLETE when the AMF asked	registration	sim	sim	yes	stub,open5gs,kaluza	N8	-	nas pcap: IMEISV in SECURITY MODE COMPLETE iff requested
+ksim-p1.switch-off	kaluza-sim	-	a switch-off deregistration leaves the UE deregistered with no accept awaited	dereg	sim	sim	yes	stub,open5gs,kaluza	N8	-	event nas.dereg.sent switch_off=1; ngap UE context released
+ksim-p1.reregistration-required	kaluza-sim	-	after a network deregistration with re-registration required the UE registers again	dereg	sim	oam	yes	stub,open5gs	N12	dereg_no_reregistration	event nas.reg.complete after nas.dereg.network; kaluza-core has no trigger open to the sim (kaluza-core-1e, 2026-10-15); kaluza-core parity under the gate contract later (no trigger grant in P1, user via kaluza-core-1e 2026-10-15)
+ksim-p1.radio-loss-release	kaluza-sim	-	an abrupt power-off leads the gNB to ask for a release with radio connection with UE lost	idle	sim	sim	yes	stub,open5gs,kaluza	N12	no_release_on_radio_loss	ngap UEContextReleaseRequest cause radio-connection-with-ue-lost
+ksim-p1.guti-after-power-cycle	kaluza-sim	-	after a graceful power cycle the UE registers with its 5G-GUTI and a protected initial message	registration	sim	sim	yes	stub,open5gs,kaluza	N12	guti_not_persisted	nas pcap: 5G-GUTI identity; initial message integrity-protected (EF 4F01, 4F03)
+ksim-p1.sms-not-allowed	kaluza-sim	-	the UE sends no SMS while SMS over NAS is not allowed	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	ksim-ctl ue sms-send exit 6; no CP-DATA in the pcap
+ksim-p1.backoff	kaluza-sim	-	after a #29 rejection with a back-off timer the UE waits it out before asking again	session	sim	sim	yes	stub,open5gs,kaluza	N10	ignore_backoff	event nas.sm.backoff; no request before expiry

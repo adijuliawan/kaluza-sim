@@ -22,5 +22,7 @@ Registers point here with `-G` rows.
 | A-08 | **SI simplified:** MIB/SIB1 sent on a schedule; SIB2–4 as needed for reselection; SI windows not modelled slot by slot | SI windows, periodicity, on-demand SI | SI-change timing only | Ph2 |
 | A-09 | **Time:** the simulated SFN comes from a CLOCK_REALTIME epoch across processes; no PPS/GPS timing | GNSS/PTP-synchronised cells | None for v1 procedures (TDOA accuracy is Ph2, from geometry) | — |
 | A-10 | **No ROHC;** no PDCP duplication | ROHC profiles; duplication for URLLC | Header size; reliability | not planned |
+| A-11 | **Paging occasions stamped, not enforced (P1):** the DU stamps each PCCH frame with its PF and i_s, and the UE reads every PCCH frame for its cell | DRX-gated reception of paging (TS 38.304 §7.1) | Paging latency; a UE that would miss a PO in DRX still answers | P3 (paging DRX) |
+| A-12 | **Fixed camping (P1):** a UE camps on the cell its topology names; MIB/SIB1 are read and the PLMN and TAC checked, with no cell or PLMN selection | Cell selection and reselection, PLMN selection (TS 38.304, TS 23.122) | None for P1's procedures; selection rows wait | P3 (radio model) |
 
 Every addition to this ledger needs an ADR or a register row explaining why it is safe for the rows that depend on it.

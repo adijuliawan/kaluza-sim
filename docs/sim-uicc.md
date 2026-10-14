@@ -53,7 +53,7 @@ Realistic SIM behaviour also buys protocol coverage the core cares about:
 | DF.5GS 5FC0 | EF.5GS3GPPLOCI 4F01 (service 122), EF.5GS3GPPNSC 4F03 (122), EF.5GAUTHKEYS 4F05 (123), EF.UAC_AIC 4F06 (126), EF.SUCI_Calc_Info 4F07 (124), EF.OPL5G 4F08 (129), EF.SUPI_NAI 4F09 (130), EF.Routing_Indicator 4F0A (124). Phase 2 or later: 4F02/4F04 (non-3GPP LOCI and NSC), EF.URSP 4F0B, EF.TN3GPPSNN, EF.CAG, EF.SOR-CMCI, EF.KAUSF_DERIVATION (145) |
 | Key files (write-only, ADM1) | Encoded like sysmoISIM's **EF.USIM_AUTH_KEY (AF20)**: an algorithm byte (Milenage or TUAK), K, OP/OPc. Plus **EF.USIM_SQN (AF30)**. One burn path then serves soft and real cards. Layout reference: `/home/amadeus/Development/ran/usim/pysim-src/pySim/sysmocom_sja2.py` |
 
-The FIDs and service numbers above follow pySim's TS 31.102 model (`pySim/ts_31_102.py`). P0 re-checks them against TS 31.102 j60 (an `-T` row).
+The FIDs and service numbers above were re-checked against TS 31.102 j60 and ETSI TS 102 221 V18.4.0 in P1 (KS-UICC-T3): all match. TS 31.102 §4.2.8 also requires service 133 (5G Security Parameters extended) whenever service 123 is available, so a card with EF.5GAUTHKEYS sets both. Services 136 (several NAS security context records) and 146 (NID) are optional and unset in P1.
 
 An opt-in `personality: sysmoISIM-SJA5` also presents that card's ATR, so stock pySim applies its card model.
 

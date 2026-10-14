@@ -41,7 +41,7 @@ They never come from kaluza-core ([ADR 0005](adr/0005-independence-from-kaluza-c
 | Sim side | Peer | What it shows | From |
 |---|---|---|---|
 | UE + RAN | kaluza-core (lab, k3s) | The target | P1 |
-| UE + RAN | **Open5GS fork core** (the rig VM; the gates' existing control) | A second core. It tells sim bugs from core bugs and stops the sim being tuned to kaluza-core. Differences are triaged against the spec; Open5GS's known deviations go on an allow-list | P1 exit |
+| UE + RAN | **Open5GS fork core** (a full 001/01 core on the rig VM `amadeus-open5gs`, driven from the dev PC over vmnet8; [ADR 0010](adr/0010-open5gs-control-core.md)) | A second core. It tells sim bugs from core bugs and stops the sim being tuned to kaluza-core. Differences are triaged against the spec; Open5GS's known deviations go on an allow-list | P1 exit |
 | UE + RAN | free5gc (`/home/amadeus/Development/free5gc`) | A third opinion where the first two disagree | optional |
 | DU with sim UEs | OCUDU `ocucp` + `ocuup` (fork `d9d2263f4d` or later) | F1-C/F1-U interop. OCUDU's production CU-CP then talks NGAP to kaluza-core for up to 100 soft UEs | P2 |
 | CU-CP ↔ CU-UP | OCUDU CU-UP or CU-CP | E1 interop | P2 |
@@ -50,6 +50,18 @@ They never come from kaluza-core ([ADR 0005](adr/0005-independence-from-kaluza-c
 | E2 agents (Ph2) | OSC RIC (`/home/amadeus/Development/ran/oran-sc-ric`), FlexRIC (`/home/amadeus/Development/ran/flexric-build`) | KPM/RC, with E2SM versions pinned | Ph2 |
 
 Peers are pinned per row: the OCUDU commit, the Open5GS fork commit, the kaluza-core tag. The pins go in the run manifest.
+
+### 3.1 P1's exit accounting
+
+P1's rows are `gates/rows/p1.tsv` ([ADR 0009](adr/0009-p1-runtime-shape.md)): kaluza-core's row text for the gates `kaluza-amf-ueransim`, `kaluza-smf-ueransim` and `kaluza-smsf`, verbatim, plus kaluza-sim's own `ksim-p1.*` rows. A row is in P1 when the sim's own evidence decides it (events, `ksim-ctl` output, the run's pcaps); rows only the core's state can decide wait for gate parity (P4). Each row names the cores it runs on. `tools/p1_exit.py` reads the newest `rows.tsv` of each core and requires:
+
+| Core | Requirement |
+|---|---|
+| The scripted stub | every row PASS |
+| Open5GS | every row PASS, or ALLOWED by an entry of `gates/allow/open5gs.tsv` (the SMS rows: the fork has no SMS over NAS); nothing unaccounted |
+| kaluza-core | every row PASS, or accounted for by a KF finding acknowledged by the core session |
+
+It also requires every mutant killed (exactly one row failing per mutant), every readable EF read by pySim-shell, no malformed frame in the run pcaps, no canary hit, and at least one KF handed over or the user's explicit acceptance of none. Rows only a core-side change can trigger (network-requested release or modification, configuration update, network deregistration) run on the stub and Open5GS: kaluza-sim has no trigger on kaluza-core in P1 (the user, 2026-10-15).
 
 ## 4. Parity crosswalk (P4)
 

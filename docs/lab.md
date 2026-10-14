@@ -12,6 +12,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 |---|---|---|
 | **Dev PC** (24 threads, 61 GiB, Ubuntu 26.04, Linux 7.0.0-34) | Build. Tier-1 tests: unit, KAT, fuzz, virtual-time procedure tests, and all-in-one against a scripted core stub, with **no lab traffic**. Loopback interop with OCUDU's CU-CP and CU-UP. **The card bridge** | Compilers, asn1c, the oracles (tshark, pycrate, pySim), `ksim-sim serve --pcsc` with the OmniKey 3x21 |
 | **kaluza-uesim** (VM 105) | Every run against kaluza-core: lab scenarios (T3) and gate parity (T4). OCUDU interop that involves the core | kaluza-sim binaries, a netns per RAN node, a netns per UE |
+| **amadeus-open5gs** (the rig VM: VMware on the dev PC, vmnet8 192.168.134.128) | The Open5GS fork as P1's control core ([ADR 0010](adr/0010-open5gs-control-core.md)), driven from the dev PC over vmnet8 only | A full 001/01 fork core from kaluza-sim's own config copy, started for a control run and stopped after it (every NF, plus `ogstun`); never while a kaluza-core gate set runs, since the gates start fork peers from the same install |
 | Neither | The B220 / OCUDU cell on the dev PC | kaluza-sim never transmits. Heavy sim load stays off the dev PC while its cell runs (kaluza-core's "no big reads during the cell" rule) |
 
 ## 2. kaluza-uesim (read 2026-10-14, read-only)
@@ -109,6 +110,9 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
   - kaluza-sim uses its own IMSI range (`001010000300000…`), addresses and gNB IDs, so a crossed run can't corrupt the other's subscribers.
   - A gate that counts NG associations or RAN UEs would still see both.
 - **Windows.** Runs happen in windows agreed with the kaluza-core session: never during another session's set, never during a UPF-VPP W5 scoring freeze.
+  - Since kaluza-core-e9 ended there is no standing coordinator: kaluza-sim agrees each window with whichever kaluza-core session is active, and asks the user when none is (P1 working agreement, 2026-10-15).
+  - P1's windows: **W0** (N9) imports imsi-001010000300000..099 through the provisioning API, then NG Setup, registration of 1–3 UEs, AS SMC and deregistration; **W1** (N11) sessions, a ping to the DN, an MTU probe, two sessions; **W2/W3** (N18) the full P1 row set. The sub-blocks of that import: 000–049 default, 050–059 SMS (`smsSubscribed` true), 060–069 `subsRegTimer` 120 s (each re-registers every 2 min while registered, so they stay out of rows that count AMF log lines), 070–079 EAP-AKA′, 080–099 spare.
+- **The dev-PC guard.** The real AMF listens on the dev PC itself (172.30.30.1:38412), so `ksim` refuses any peer in 172.30.0.0/16 unless it runs with `--lab` on `kaluza-uesim`, and the scripted core binds 127.0.0.x only ([ADR 0009](adr/0009-p1-runtime-shape.md), point 11). vmnet8 (192.168.134.0/24, host-only) is allowed for the Open5GS control.
 - **CPU.** The 4 vCPUs are shared with UERANSIM and n3iwue when those run, and with whatever else the Proxmox host is doing.
   - kaluza-sim needs no real-time pinning, since its L2 is ideal.
   - Its loop-lag watchdog makes a run ABORT, not FAIL, under contention.

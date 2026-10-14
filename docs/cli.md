@@ -94,7 +94,7 @@ EVENT_SEQ=48211
 | | `ping <dst> [--psi N] [-c N]` | Convenience wrapper; prints `SENT=`, `RECEIVED=`, `RTT_AVG_MS=` | v1 |
 | | `ifaces` | TUN devices, addresses, MTU, DNS, routes | v1 |
 | Events | `events [--follow] [--filter nas.*] [--since <seq>]` | NDJSON event stream for this UE | v1 |
-| | `wait <event> [--timeout 30s] [--where key=val]` | Block until an event arrives, e.g. `wait nas.reg.accept`, `wait rrc.ho.complete`. On success it prints the event's evidence as KEY=value lines: registration or PDU session state, the assigned IP, the TEID. That is the evidence the log-grep gate rows need ([`verification.md`](verification.md) §6) | v1 |
+| | `wait <event> [--timeout 30s] [--where key=val] [--since <seq>\|--new]` | Block until an event arrives, e.g. `wait nas.reg.accept`, `wait rrc.ho.complete`. It is a long poll over the run's event sequence: by default it also matches events already recorded (`--since 0`, like grepping a log); `--new` matches only events after the call. A procedure verb given `--wait` registers its waiter before it starts, so it cannot miss its own event. On success it prints the event's evidence as KEY=value lines: registration or PDU session state, the assigned IP, the TEID. That is the evidence the log-grep gate rows need ([`verification.md`](verification.md) §6) | v1 |
 | Later | `inactive-status` (v1.x) · `loc` (LPP, Ph2) · `ims register\|call\|hangup` (Ph2) | — | — |
 
 ## 4. RAN commands
