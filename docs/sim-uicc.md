@@ -137,8 +137,8 @@ Unredacted traces need an explicit test-only flag and land in a 0600 file.
 | | 001/01 range | 999/70 range (roamers into 001/01) |
 |---|---|---|
 | S-NSSAI | 1/000001 (the default) | sst 1, no SD |
-| DNNs | `internet` (5QI 9, IPv4v6) and `ims` (5QI 5, IPv4) | `internet`, IPv4, with `lboRoamingAllowed`. am-data scoped by `servingPlmn` |
-| Home-routed | — | One sub-block (initially `9997000003001xx`) also gets `home` with `lboRoamingAllowed` false, so one UE holds both an LBO and a home-routed session. The `home` sm-data goes into the 999/70 UDR too |
+| DNNs | `internet` (5QI 9, IPv4v6) and `ims` (5QI 5, IPv4) | `internet`, IPv4, with `lboRoamingAllowed`. am-data twice: unscoped, and with `servingPlmn` `00101`, which is what the visited AMF reads |
+| Home-routed | — | One sub-block (initially `9997000003001xx`) also gets `home` with `lboRoamingAllowed` false, so one UE holds both an LBO and a home-routed session. The `home` sm-data goes into the 999/70 UDR too. Pattern: the core seed's own roamers `999700000000001` (LBO) and `999700000000007` (LBO + HR) |
 | AMBR | UE-AMBR and Session-AMBR 1 Gbps | 1 Gbps as well. kaluza-core named no separate value |
 | Other | `subsRegTimer` 3600; a GPSI (msisdn) per UE, collision-checked like the IMSIs | No IMS voice (IMS-VoPS 0) |
 | SUCI | Null scheme, routing indicator **0000** | Null scheme, routing indicator **0000**; a few cards carry the default **0** to cover that path |
@@ -155,18 +155,34 @@ Unredacted traces need an explicit test-only flag and land in a 0600 file.
 **Keys from one master secret:**
 - The master secret lives in a 0600 file **outside both repos**, e.g. `~/.kaluza-sim/secrets/range-master.key`.
 - Per IMSI, K = first 128 bits of HMAC-SHA-256(master, "K" ‖ IMSI). OPc is derived the same way under its own label (or computed from a per-range OP). TUAK and 256-bit blocks take wider outputs.
-- The soft cards' sealed secrets and the core's subscriptions (provisioning bundles, or the fallback seed fragment) therefore come from one source. **A clear list of keys never exists**, and nothing prints a key.
+- The soft cards' sealed secrets and the core's subscriptions (API bundles for 001/01, the seed file for 999/70) therefore come from one source. **A clear list of keys never exists**, and nothing prints a key.
 
 **The provisioning flow** ([ADR 0008](adr/0008-subscriber-provisioning-api.md)):
 1. `ksim-sim range derive --block 001010000300000/100` writes sealed card secrets for the block. It prints only the IMSIs and a fingerprint `K_FPR` (HMAC of a batch salt and K, truncated).
-2. `ksim-sim range provision --block …` puts the block into the home PLMN's UDR through kaluza-core's provisioning API. `ksim-sim range deprovision --block …` removes it.
-   - **Calls.** One `PUT …/provisioning/v1/subscribers/imsi-<IMSI>` per subscriber, or `DELETE` to remove one. They go to the UDR's provisioning listener on `:7779`, in namespace `kaluza` for 001/01 and `kaluza-h99970` for 999/70.
-   - **From the dev PC only.** The UDR's NetworkPolicy admits only the OAM and the node. No pod restarts.
-   - **Identity.** kaluza-sim's own Keycloak client (named by kaluza-core), which is exempt from key-entry step-up. Its credential is a 0600 file on the dev PC, e.g. under `~/.kaluza-sim/secrets/`, and is never printed.
+2. **001/01: `ksim-sim range provision --block …`** puts the block into the 001/01 UDR through kaluza-core's provisioning API. `ksim-sim range deprovision --block …` removes it.
+   - **Calls.** One `PUT …/provisioning/v1/subscribers/imsi-<IMSI>` per subscriber, or `DELETE` to remove one. They go to the UDR's provisioning listener on `:7779` in namespace `kaluza`. Only 001/01 has one ([step 3](#the-999-70-range)).
+   - **From the dev PC only.** The UDR's NetworkPolicy admits only the OAM and the node. No pod restarts. The UDR's pod IP changes when it restarts, so every run reads it again.
+   - **Identity.** The Keycloak client `kaluza-sim-key-entry` in realm `kaluza`, created by kaluza-core on 2026-10-14 (16:11 KST, core `71af2b9d`).
+     - It has the single role `oam-key-entry` (read, write, delete, keys, SQN reset), the audience `kaluza-udr-provisioning` only, and is exempt from key-entry step-up.
+     - Tokens are ES256 and last 300 s.
+   - **Two credentials, both required.** The UDR's listener checks an **mTLS client certificate as well as the token**. Both live in `~/.config/kaluza-sim/provisioning/` (directory 0700, files 0600) on the dev PC:
+     - `client-secret`, with no trailing newline. It is passed as `--data-urlencode "client_secret@client-secret"`, never on a command line;
+     - `tls-chain.pem` and `tls.key`: the client certificate, CN `kaluza-sim.kaluza.internal`, from the management issuing CA 001-001, valid to 2027-10-14;
+     - `root.pem`, which verifies Keycloak and the UDR;
+     - a README with the token URL, the UDR URL and the `--resolve` targets.
+
+     These files are never opened in a session, never printed, and never deployed to the VM.
+   - **Proven by kaluza-core** with exactly these files on `imsi-001010000300999`: a token, then GET 404, PUT 201 (no step-up asked, stored sealed), GET 200, DELETE 204, GET 404.
    - **Keys.** K and OPc travel in clear inside the API's mTLS, and the UDR seals them itself. The bundle never carries `protectionParameterId`: beside key values, the UDR refuses it with PROTECTED_KEY_UNSUPPORTED.
    - **Output.** Bodies are built in memory from the derived keys and the profile, and are never logged or written to disk. The tool prints only the ueId, the HTTP status and `K_FPR`.
    - **Scope.** It refuses any IMSI outside the sim ranges above. Tell the core session before a first import or a bulk delete.
-3. **Fallback:** `ksim-sim range seed --block …` writes the same bundles as a **0600 seed fragment** outside the repo, for a kaluza-core session to import. The seed is a create-only bootstrap, read at UDR start: it needs an `apply.sh` roll and cannot remove anyone. It is used only if the API is unavailable. This repo never edits kaluza-core files.
+3. <a id="the-999-70-range"></a>**999/70: the seed file** (user's decision, 2026-10-14). The home UDR (`kaluza-h99970`) has **no provisioning listener**: the home PLMN has no OAM and no IdP. So:
+   1. `ksim-sim range seed --block 999700000300000/…` writes the block as one JSON list, mode 0600, at `~/.config/kaluza-sim/seed/h99970-sim.json` on the dev PC. It is never printed.
+   2. We tell the core session it is there. kaluza-core merges it into the home UDR's gitignored seed with a script that never echoes bodies and refuses any ueId outside the range or already present.
+   3. kaluza-core restarts that UDR alone, in an agreed window. The import seals K/OPc to the home UDM's key, and core reports counts back.
+   4. The seed is create-only, so removing subscribers later is a DB step on core's side.
+
+   The same file format is the fallback for 001/01 if the API is ever unavailable. This repo never edits kaluza-core files.
 4. `ksim-sim burn` writes a real card over PC/SC: VERIFY ADM1 from the sealed file, then the EFs and AF20. **The user runs this step**, never an agent. Real cards outside the sim ranges keep the core's rule that **K/OPc are typed by a person**.
 
 **The SubscriberBundle** (one per subscriber, the same documents as the core's seed entries; the models are the TS 29.505 and TS 29.519 types as served):
@@ -189,4 +205,18 @@ Unredacted traces need an explicit test-only flag and land in a 0600 file.
 - **Scoping:** per-slice documents carry `memberId`, and per-PLMN documents carry `servingPlmn`.
 - **Independence:** `ksim-sim` builds them from the spec's OpenAPI types and our own profile YAML, not from kaluza-core's code or seeds ([ADR 0005](adr/0005-independence-from-kaluza-core.md)).
 
-**Never print:** subscriber seeds, sealed secrets, the provisioning credential, provisioning request bodies, `/home/amadeus/Development/ran/usim/*.md` (which hold keys and an ADM1 PIN in clear), or card images' secret files. When a seed must be read, parse the JSON and drop the authentication-data entries by `resource` before anything is printed. Never `head`, `cat` or `sed` a seed, not even behind a grep.
+**The 999/70 seed file** uses the seed's flat shape: a JSON list of `{ueId, resource, body}`, plus `servingPlmn` or `memberId` where shown. Keys go in clear in `encPermanentKey` and `encOpcKey`, never with `protectionParameterId`. Per subscriber (kaluza-core, 2026-10-14):
+
+| Resource | Body |
+|---|---|
+| `subscription-data:authentication-data:authentication-subscription` | `authenticationMethod`, `encPermanentKey`, `encOpcKey`, `authenticationManagementField` `8000`, `sequenceNumber` |
+| `subscription-data:identity-data` | `supiList` [`imsi-…`], `gpsiList` [`msisdn-…`] |
+| `policy-data:ues:am-data` | `{}` or `subscCats` |
+| `policy-data:ues:sm-data` | `smPolicySnssaiData` {`"1"`: {`snssai` {sst 1}, `smPolicyDnnData` {`internet`, plus `home` for HR}}} |
+| `subscription-data:provisioned-data:am-data`, **twice** | Unscoped, and with `"servingPlmn": "00101"`: `gpsis`, `subsRegTimer` 3600, `subscribedUeAmbr`, `nssai.defaultSingleNssais` [{sst 1}] |
+| `subscription-data:provisioned-data:smf-selection-subscription-data` | `subscribedSnssaiInfos` {`"1"`: {`dnnInfos` [{`internet`, `lboRoamingAllowed` true, `defaultDnnIndicator` true}, plus {`home`, `lboRoamingAllowed` false} for HR]}} |
+| `subscription-data:provisioned-data:sm-data`, with `"memberId": "1"` | `singleNssai` {sst 1}; `dnnConfigurations`: `internet` (IPv4, SSC 1, 5QI 9, Session-AMBR), plus `home` in the same shape for the HR sub-block |
+
+SMS documents are left out unless the UE tests SMS. The 999/70 range uses no SD, and its cards keep routing indicator 0000.
+
+**Never print:** subscriber seeds, sealed secrets, the provisioning credentials (`~/.config/kaluza-sim/provisioning/`), the 999/70 seed file (`~/.config/kaluza-sim/seed/`), provisioning request bodies, `/home/amadeus/Development/ran/usim/*.md` (which hold keys and an ADM1 PIN in clear), or card images' secret files. When a seed must be read, parse the JSON and drop the authentication-data entries by `resource` before anything is printed. Never `head`, `cat` or `sed` a seed, not even behind a grep.

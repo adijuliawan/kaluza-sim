@@ -307,7 +307,7 @@ The on-air link measures 41 Mbit/s DL and 7 Mbit/s UL, so the sim is never the b
 - **Where keys come from:** only 0600 files (checked at start) or sealed card secrets.
 - **Key logs:** the test-only key log is opt-in, recorded in the manifest, and written 0600. Only AS keys can be exported (for `pdcp-nr` decryption); K and OPc have no export path.
 - **Real cards:** the PC/SC backend keeps K inside the card.
-- **Provisioning:** K and OPc reach the core's UDR only inside `ksim-sim`'s API calls. Bodies are built in memory and never logged, and the client credential is a 0600 file on the dev PC ([ADR 0008](adr/0008-subscriber-provisioning-api.md)).
+- **Provisioning:** K and OPc reach the core's UDR only inside `ksim-sim`'s API calls (001/01) or its 0600 seed file (999/70). Bodies are built in memory and never logged. The client credentials (secret and mTLS certificate) stay in `~/.config/kaluza-sim/provisioning/` on the dev PC, and the 999/70 seed file is 0600 ([ADR 0008](adr/0008-subscriber-provisioning-api.md)).
 - **Lab card files:** never copy them into the repo or any log. `/home/amadeus/Development/ran/usim/*.md` holds keys and an ADM1 PIN in clear text.
 - **CI canary:** the "secret canary" runs a scenario with a known test K and expects 0 hits in every log, event and pcap.
 

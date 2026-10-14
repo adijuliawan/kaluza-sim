@@ -78,7 +78,9 @@ kaluza-core is a Java 25 / Quarkus 5G core, Rel-19.
 
 Statuses as of 2026-10-14, after kaluza-core's answers.
 
-1. **Importing the sim subscriber ranges into the core.** *Decided:* through the UDR's provisioning API, from the dev PC, under kaluza-sim's own Keycloak client. The seed fragment is only the fallback ([ADR 0008](../adr/0008-subscriber-provisioning-api.md), [`../sim-uicc.md`](../sim-uicc.md) §8). kaluza-core creates the client and its step-up exemption before P1. Real cards keep the core's "K/OPc typed by a person" rule.
+1. **Importing the sim subscriber ranges into the core.** *Decided:*
+   - 001/01 goes through the UDR's provisioning API, from the dev PC, under kaluza-sim's own Keycloak client and mTLS certificate (both live since 16:11 KST).
+   - 999/70 goes as a seed file that kaluza-core merges, then rolls the home UDR, because that UDR has no API ([ADR 0008](../adr/0008-subscriber-provisioning-api.md), [`../sim-uicc.md`](../sim-uicc.md) §8). kaluza-core creates the client and its step-up exemption before P1. Real cards keep the core's "K/OPc typed by a person" rule.
 2. **Adopting the gate contract** (`docs/verification.md` §6) is still a kaluza-core session's call. It raised no objection and asked for three things, now in §6.
 3. **The .11 address clash.** *Resolved:* kaluza-gnb2 moves to .12 (user's go). A kaluza-core session edits its phase-3 plan.
 4. **O-RAN specs** (E2AP, E2SM-KPM/RC, O1, WG4/WG5) need the user's O-RAN registration. Only phase 2 needs them.
@@ -88,7 +90,7 @@ Statuses as of 2026-10-14, after kaluza-core's answers.
 8. **A second TAC served by the AMF.** *Answered:* 000007 comes with wave 40, for P3's mobility-registration rows. Until then, cells use 000001 ([`../lab.md`](../lab.md) §3).
 9. **New P1 prerequisites on kaluza-core's side:**
    - the V-UPF neighbour entries for .30–.39, done on 2026-10-14 at 15:59 KST;
-   - kaluza-sim's Keycloak client, still owed and confirmed by kaluza-core.
+   - kaluza-sim's Keycloak client: done on 2026-10-14 at 16:11 KST (`kaluza-sim-key-entry`, plus an mTLS certificate).
 
    Lab windows are asked at P1 ([`../roadmap.md`](../roadmap.md), P1 entry conditions).
 10. **SUCI:** the null scheme on the sim cards until P1 reaches its SUCI rows; then the user picks the Profile A/B key ids.

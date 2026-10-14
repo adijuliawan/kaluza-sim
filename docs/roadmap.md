@@ -40,7 +40,8 @@
 
 **P1 entry conditions** (on kaluza-core's side, agreed 2026-10-14; [`lab.md`](lab.md) §8):
 - The V-UPF holds static neighbour entries for 172.30.30.30–.39. **Done** 2026-10-14 ([`lab.md`](lab.md) §4).
-- kaluza-sim's own Keycloak client exists, is exempt from key-entry step-up, and its credential is on the dev PC ([ADR 0008](adr/0008-subscriber-provisioning-api.md)).
+- kaluza-sim's own Keycloak client exists, is exempt from key-entry step-up, and its credentials (secret plus mTLS certificate) are on the dev PC. **Done** 2026-10-14 ([ADR 0008](adr/0008-subscriber-provisioning-api.md)).
+- For roaming scenarios (not a P1 exit row): the 999/70 seed file merged by kaluza-core, with the home UDR rolled in a window.
 - A lab window is agreed with the core session.
 
 **P3 scope:**

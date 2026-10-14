@@ -50,7 +50,7 @@ kaluza-sim targets:
 | Independence | Our own reading of the spec. Nothing from kaluza-core is used to produce an expected value | [0005](docs/adr/0005-independence-from-kaluza-core.md) |
 | RRC_INACTIVE | v1.x (build phase P3b), right after the v1 handover milestone | [0006](docs/adr/0006-rrc-inactive-in-v1x.md) |
 | Phase 2 | Positioning (LPP/NRPPa) comes first, to land with wave 41 | [0007](docs/adr/0007-positioning-first-in-phase-2.md) |
-| Subscribers | The sim ranges go into the core's UDR through its provisioning API, under kaluza-sim's own Keycloak client; null SUCI until P1's SUCI rows | [0008](docs/adr/0008-subscriber-provisioning-api.md) |
+| Subscribers | The 001/01 range goes into the core's UDR through its provisioning API, under kaluza-sim's own Keycloak client and mTLS certificate. The 999/70 range goes as a seed file that kaluza-core imports, since the home UDR has no API. Null SUCI until P1's SUCI rows | [0008](docs/adr/0008-subscriber-provisioning-api.md) |
 
 ## Documents
 

@@ -99,7 +99,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 
   Old versions are pruned, keeping the last three.
 - **Secrets** (sealed card secrets, the range master secret) are streamed separately into a 0600 path, never printed, and verified by checksum. That is kaluza-core's practice for lab secrets.
-- **The provisioning credential** (kaluza-sim's Keycloak client, [ADR 0008](adr/0008-subscriber-provisioning-api.md)) stays on the dev PC in a 0600 file and is never deployed to the VM. Provisioning runs from the dev PC only ([`sim-uicc.md`](sim-uicc.md) §8).
+- **The provisioning credentials** (the Keycloak client `kaluza-sim-key-entry`'s secret and its mTLS client certificate, [ADR 0008](adr/0008-subscriber-provisioning-api.md)) stay on the dev PC in `~/.config/kaluza-sim/provisioning/` (0700/0600). They are never deployed to the VM. The 999/70 seed file (`~/.config/kaluza-sim/seed/`) stays there too. Provisioning runs from the dev PC only ([`sim-uicc.md`](sim-uicc.md) §8).
 - **Run directories** (`~/kaluza-sim-runs/<ts>/`: logs, pcaps, manifest) are pruned by age, because of the small disk.
 
 ## 6. Running alongside UERANSIM and the core's gates
@@ -137,8 +137,8 @@ kaluza-core answered the open items on 2026-10-14, and the user decided the thre
 | Record 172.30.30.30–.39 (kaluza-sim) in `lab-relayout.md`'s VLAN 30 table | a kaluza-core session | Checked free in every repo and live. User's go given; core records it |
 | Move kaluza-gnb2's example address from .11 to .12 in the phase-3 plan | a kaluza-core session | User's go given; core edits it |
 | V-UPF `PLANE_NEIGHBOURS` entries for .30–.39 (a V-UPF roll, §4) | a kaluza-core session | **Done** 2026-10-14, 15:59 KST |
-| kaluza-sim's own Keycloak client, exempt from key-entry step-up; its credential as a 0600 file on the dev PC ([ADR 0008](adr/0008-subscriber-provisioning-api.md)) | a kaluza-core session | **Before P1**. Core names the client |
-| Import the sim subscriber ranges | kaluza-sim, through the UDR's provisioning API ([`sim-uicc.md`](sim-uicc.md) §8) | At P1, once the client exists |
+| kaluza-sim's own Keycloak client, exempt from key-entry step-up, plus an mTLS client certificate ([ADR 0008](adr/0008-subscriber-provisioning-api.md)) | a kaluza-core session | **Done** 2026-10-14, 16:11 KST: `kaluza-sim-key-entry`, credentials in `~/.config/kaluza-sim/provisioning/` |
+| Import the sim subscriber ranges | 001/01: kaluza-sim, through the UDR's provisioning API. 999/70: kaluza-sim writes the seed file; a kaluza-core session merges it and rolls the home UDR in a window ([`sim-uicc.md`](sim-uicc.md) §8) | 001/01 at P1; 999/70 before the first roaming scenario |
 | Lab windows | ask the core session | At P1 |
 | A second TAC served by the AMF (000007), for mobility-registration rows | a kaluza-core session | Comes with wave 40, before P3 needs it |
 | SUCI Profile A/B key ids for the sim cards | your decision | When P1 reaches its SUCI rows; the null scheme until then |

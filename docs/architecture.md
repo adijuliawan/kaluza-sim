@@ -38,7 +38,7 @@
 | `ksim-radio` | Scene authority. Sites, cells, UE positions and mobility models, model parameters, the run epoch. It applies control edits (move, blackout, pathloss) and publishes them as versioned deltas. |
 | `ksim` | All-in-one. Any subset of the roles above in one process. F1, E1, Xn and the air link use in-memory byte channels (or `--loopback-sctp`); NG-C and NG-U are always real sockets. |
 | `ksim-ctl` | CLI over every node's control API ([`cli.md`](cli.md)). |
-| `ksim-sim` | Offline card lifecycle: validate, import/export, serve over vpcd, derive range keys, provision the sim ranges through the core's UDR provisioning API (a seed fragment as the fallback; [ADR 0008](adr/0008-subscriber-provisioning-api.md)), burn a real card over PC/SC ([`sim-uicc.md`](sim-uicc.md)). |
+| `ksim-sim` | Offline card lifecycle: validate, import/export, serve over vpcd, derive range keys, provision the 001/01 range through the core's UDR provisioning API and write the 999/70 seed file ([ADR 0008](adr/0008-subscriber-provisioning-api.md)), burn a real card over PC/SC ([`sim-uicc.md`](sim-uicc.md)). |
 | `ksim-netd` | Optional privileged helper. It creates the netns and TUN devices and hands the file descriptors over SCM_RIGHTS, so the farm can run unprivileged. |
 
 ### 2.2 Interfaces
