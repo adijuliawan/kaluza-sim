@@ -147,6 +147,7 @@ The rules are enforced by PRIVATE CMake link graphs plus `tools/guards/check_lay
 **As built** (P0 put the codecs under four directories, not one per protocol): `codec/asn1`, `codec/nas` (5GMM, 5GSM, SMS), `codec/uicc` (APDU, AUTHENTICATE, BER-TLV, FCP) and `codec/up` (GTP-U, PSC, NR-U). Two consequences of the rules for P1:
 - the vpcd transport splits in two: its framing is `uicc/transport/vpcd`, and its TCP socket is `net/tcp`, wired together in `apps/ksim-sim` (R7);
 - `codec` cannot hold `SecretBytes`, so the layouts of EF 4F03 and 4F05, which carry keys, are coded in `proc/ue/nas_sec/persist`.
+- P1 N6 added `codec/air` (KAIR v1), `codec/pdcp`, `codec/sdap` and `codec/asn1/msg/rrc`. The RRC builders build each value as X.697 JSON and let the generated code encode it (strict UPER), so the ASN.1 constraints are applied by the code that decodes (row KS-RRC-B2). `entity/` holds `pdcp`, `sdap`, `rlc/{iface,ideal}` and `mac/{iface,ue_ideal}`; the DU side of the ideal MAC comes with N7.
 
 ## 4. Codec pipelines
 

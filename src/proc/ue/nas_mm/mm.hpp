@@ -113,6 +113,13 @@ public:
     std::optional<Millis> t3512() const noexcept { return t3512_; }
     /// The current 5G NAS security context, once a SECURITY MODE COMMAND put one in use.
     const NasSecurityContext* security() const noexcept { return ctx_ ? &*ctx_ : nullptr; }
+    /// K_gNB for AS security activation (TS 33.501 A.9): from the current
+    /// K_AMF and the uplink NAS COUNT of the most recent SECURITY MODE COMPLETE
+    /// (§6.8.1.2.2, §6.8.1.3); without one in this connection, of the initial
+    /// NAS message. Errc::invalid_argument without a context.
+    Result<SecretBytes> kgnb() const;
+    /// The 5G-S-TMSI of the 5G-GUTI (AMF set, pointer, 5G-TMSI: 48 bits), if any.
+    std::optional<std::uint64_t> s_tmsi() const noexcept;
     bool running(MmTimer t) const noexcept { return timers_.at(static_cast<std::size_t>(t)).has_value(); }
     /// Transitions made that mm_transitions() does not list (must stay 0).
     std::uint64_t unlisted_transitions() const noexcept { return unlisted_; }
@@ -186,6 +193,7 @@ private:
     bool initial_without_context_ = false;
     nas::Message dereg_;             // the DEREGISTRATION REQUEST, for T3521 retransmissions
     bool dereg_switch_off_ = false;
+    std::optional<std::uint32_t> kgnb_count_;   // the uplink NAS COUNT K_gNB takes
     int t3521_expiries_ = 0;
 
     Bytes stored_rand_;

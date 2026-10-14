@@ -24,3 +24,4 @@ ksim_add_fuzzer(fuzz_card SOURCES fuzz_card.cpp LIBS ksim::uicc)
 target_compile_definitions(fuzz_card PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 # P1 N4: the typed NAS IEs and the NAS security context.
 ksim_add_fuzzer(fuzz_nas_ies SOURCES fuzz_nas_ies.cpp LIBS ksim::proc)
+ksim_add_fuzzer(fuzz_uu SOURCES fuzz_uu.cpp LIBS ksim::codec_air ksim::codec_pdcp ksim::codec_rrc ksim::entity)

@@ -86,6 +86,17 @@ def main() -> int:
         seq("0070000001", "01A4040C07A0000000871002", "0070800100"),
         seq("00A4000C022F06", "00A201040383010100", "00B2000228", "00B2000328"),
     ]
+    # fuzz_uu: a selector octet, then a KAIR frame (0), a PDCP PDU (1), length-prefixed
+    # PDUs for a PDCP entity (2), or an RRC message for one of the readers (3-11): the
+    # builder samples of tests/unit/asn1/rrc_samples.hpp.
+    kair = ("4b41010b0000001a01020304000000070102030405060708000201094601000301001101020005e3540e"
+            "b5e9a2ec15689d750790010006040181")
+    seeds["fuzz_uu"] = [bytes([sel]) + bytes.fromhex(v) for sel, v in [
+        (0, kair), (1, "82abcd00"), (1, "0001020304a0"), (2, "0001" "0f0005e3540eb5e9a2ec15689d750790" "0a000022091000af3926bd"),
+        (3, "410604"), (4, "408008600201ccc9c0000004680000006b682280"), (5, "204032810000000403281000003fc0"),
+        (6, "1123456789a6"), (7, "2040009a002500088bd76380a1c0222f5d8e028909f380"), (7, "0880"), (8, "220910"),
+        (8, "1600"), (8, "2a808fc00b6020"), (9, "2a00"), (9, "3a01bf002180"), (9, "4882028000000000000000002680"),
+        (10, "4004a001117aec7014380445ebb1c051213e70")]]
     seeds["fuzz_mustfail"] = [b"KSIM must crash here"]
     total = 0
     for target, items in seeds.items():

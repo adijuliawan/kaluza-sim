@@ -51,3 +51,11 @@ target_link_libraries(ksim_asn1_registry
     PUBLIC ksim::codec_asn1 ksim::asn1_rrc ksim::asn1_ngap ksim::asn1_f1ap ksim::asn1_e1ap ksim::asn1_xnap
     PRIVATE ksim::warnings)
 ksim_layer(ksim_asn1_registry codec)
+
+# Typed RRC builders and readers (P1 N6; architecture.md §4.1 msg/): values
+# built as JER, encoded by the generated code.
+add_library(ksim_codec_rrc STATIC msg/rrc.cpp)
+add_library(ksim::codec_rrc ALIAS ksim_codec_rrc)
+target_include_directories(ksim_codec_rrc PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(ksim_codec_rrc PUBLIC ksim::platform PRIVATE ksim::codec_asn1 ksim::asn1_rrc nlohmann_json::nlohmann_json ksim::warnings)
+ksim_layer(ksim_codec_rrc codec)

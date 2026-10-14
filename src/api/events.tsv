@@ -25,3 +25,19 @@ nas.sec.discard	24.501 4.4.4.2	a downlink 5GMM message not processed; message, v
 nas.dereg.sent	24.501 5.5.2.2.1	a DEREGISTRATION REQUEST sent; switch_off, identity, transmission (1, then T3521's retransmissions)
 nas.dereg.accept	24.501 5.5.2.2.2	a DEREGISTRATION ACCEPT taken: the UE is deregistered
 nas.dereg.abort	24.501 5.5.2.2.6	a UE-initiated de-registration ended without an accept; reason=T3521|released
+rrc.camped	38.331 5.2.2	the UE camps on a cell (fixed camping, ledger A-12): MIB not barred, SIB1 lists the selected PLMN; cell (KAIR handle), tac, nci, plmn
+rrc.cell_barred	38.331 5.2.2.5	the camped cell's MIB says barred
+rrc.paging	38.331 5.3.2.3	a Paging record matched this UE's 5G-S-TMSI; state
+rrc.setup.request	38.331 5.3.3.3	RRCSetupRequest sent in Msg3; identity=ng-5G-S-TMSI-Part1|randomValue, cause
+rrc.setup.complete	38.331 5.3.3.4	RRCSetup taken and RRCSetupComplete sent with the NAS message; c_rnti
+rrc.setup.failure	38.331 5.3.3.7	the setup failed (T300, random access, RRCReject); the NAS sees a lower layer failure; reason
+rrc.smc.complete	38.331 5.3.4.3	AS security active: SecurityModeComplete sent integrity protected, unciphered; nia, nea, alg=nia<n>/nea<m>
+rrc.smc.failure	38.331 5.3.4.3	SecurityModeFailure sent unprotected; reason
+rrc.reconfiguration.complete	38.331 5.3.5.3	RRCReconfiguration applied and RRCReconfigurationComplete sent; added (srb2, drb<n>), nas (messages forwarded)
+rrc.reconfiguration.failure	38.331 5.3.5.8	an RRCReconfiguration the UE cannot comply with; what
+rrc.release	38.331 5.3.8.3	RRCRelease taken: RRC_IDLE
+rrc.capability.sent	38.331 5.6.1.3	UECapabilityInformation sent; octets (the UE-NR-Capability)
+rrc.integrity_failure	38.323 5.2.2.1	a PDCP integrity failure on an SRB (re-establishment is not in P1: the connection is lost); bearer, count
+rrc.connection_lost	38.331 5.3.11	the UE left RRC_CONNECTED on its own (integrity failure, bearers before AS security, a reconfiguration it cannot follow); reason
+rrc.decode_error	38.331 5.7.3	a DL-DCCH message the UE could not decode; bearer, what
+rrc.encode_error	sim	a message the UE's builders refused (a sim bug); what

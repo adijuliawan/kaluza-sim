@@ -182,6 +182,7 @@ void Mm::start_registration() {
     // registration starts without a 5G NAS security context.
     ctx_.reset();
     partial_.reset();
+    kgnb_count_.reset();
     ++gen_;
     nas::Message m = make(kRegistrationRequest);
     put(m, "5GS registration type", ie::RegistrationType{ie::RegistrationType::initial, cfg_.follow_on_request}.encode());
@@ -672,6 +673,7 @@ void Mm::on_security_mode_command(ByteView wire) {
     if (!plain) {
         return;
     }
+    kgnb_count_ = ctx_->ul_count();   // the SECURITY MODE COMPLETE's COUNT (TS 33.501 6.8.1.2.2)
     auto out = ctx_->protect(*plain, Sht::integrity_ciphered_new);
     if (!out) {
         return;
@@ -691,6 +693,27 @@ void Mm::reject_security_mode(std::uint8_t cause) {
     put(r, "5GMM cause", Bytes{cause});
     events_.emit("nas.smc.reject", cfg_.id, {{"cause", str(cause)}});
     send(r);
+}
+
+// ---- AS keys ---------------------------------------------------------------------------
+
+Result<SecretBytes> Mm::kgnb() const {
+    if (!ctx_ || !kgnb_count_) {
+        return make_error(Errc::invalid_argument, 0, "5GMM: no 5G NAS security context for K_gNB");
+    }
+    std::uint32_t count = *kgnb_count_;
+    if (KSIM_MUTANT("kgnb_wrong_ul_count")) {
+        count = ctx_->ul_count();   // the next uplink COUNT, not the SECURITY MODE COMPLETE's
+    }
+    return crypto::keys5g::kgnb(ctx_->kamf(), count);
+}
+
+std::optional<std::uint64_t> Mm::s_tmsi() const noexcept {
+    if (!guti_) {
+        return std::nullopt;
+    }
+    return (static_cast<std::uint64_t>(guti_->amf_set & 0x3FF) << 38) |
+           (static_cast<std::uint64_t>(guti_->amf_pointer & 0x3F) << 32) | guti_->tmsi;
 }
 
 // ---- receiving -------------------------------------------------------------------------

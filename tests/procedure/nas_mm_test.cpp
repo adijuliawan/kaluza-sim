@@ -12,6 +12,7 @@
 #include <set>
 #include <sstream>
 
+#include "crypto/keys5g.hpp"
 #include "platform/mutation.hpp"
 #include "rig.hpp"
 
@@ -377,6 +378,24 @@ TEST(Mm, Clause5_1_3_2_1_TheStateTableNamesEachUeStateOfTheSpec) {
     }
 }
 
+/// The K_gNB the AMF would put in the INITIAL CONTEXT SETUP: its own K_AMF and
+/// the uplink COUNT of the SECURITY MODE COMPLETE it received (0 after 5G AKA).
+SecretBytes amf_kgnb(const Rig& r) {
+    const proc::ue::NasSecurityContext* ctx = r.amf.security();
+    return ctx != nullptr ? crypto::keys5g::kgnb(ctx->kamf(), 0) : SecretBytes{};
+}
+
+TEST(Mm, Clause6_8_1_2_KgnbTakesTheUplinkCountOfTheSecurityModeComplete) {
+    Rig r;
+    ASSERT_TRUE(r.registered());
+    ASSERT_TRUE(r.run_until([&] { return r.amf.registered(); }, 1'000));
+    auto k = r.ue.kgnb();   // TS 33.501 6.8.1.2.2: not the next uplink COUNT (2 by now)
+    ASSERT_TRUE(k);
+    EXPECT_TRUE(ct_equal(*k, amf_kgnb(r)));
+    ASSERT_TRUE(r.ue.s_tmsi());
+    EXPECT_EQ(*r.ue.s_tmsi(), (std::uint64_t{1} << 38) | (std::uint64_t{1} << 32) | 1u);   // set 1, pointer 1, TMSI 1
+}
+
 TEST(CoreStub, ItsProfilesLoadAndAnUnknownKeyIsAnError) {
     const std::string dir = std::string(KSIM_SOURCE_DIR) + "/tests/corestub/profiles/";
     const Profile d = Profile::from_yaml(Yaml::load_file(dir + "default.yaml"));
@@ -404,6 +423,19 @@ TEST(Mm, Mutant_null_suci_full_imsi_FailsTheSuciCheck) {
     r.loop.run_for(5'000);
     EXPECT_NE(r.failures().find("MSIN of a known subscriber"), std::string::npos) << r.failures();
     EXPECT_NE(r.ue.state(), MmState::registered_normal_service);
+}
+
+TEST(Mm, Mutant_kgnb_wrong_ul_count_GivesAKgnbTheAmfDoesNotHave) {
+    if (!kMutationsBuild) {
+        GTEST_SKIP() << "mutant build only";
+    }
+    testing::MutantScope m("kgnb_wrong_ul_count");
+    Rig r;
+    ASSERT_TRUE(r.registered());
+    ASSERT_TRUE(r.run_until([&] { return r.amf.registered(); }, 1'000));
+    auto k = r.ue.kgnb();
+    ASSERT_TRUE(k);
+    EXPECT_FALSE(ct_equal(*k, amf_kgnb(r)));   // the AS SMC's MAC-I then fails (UeRrc.Clause5_3_4_3)
 }
 
 TEST(Mm, Mutant_kamf_input_sbi_spelling_FailsTheSecurityModeCommand) {

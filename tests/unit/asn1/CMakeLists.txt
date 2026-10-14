@@ -47,3 +47,10 @@ add_test(NAME asn1-nm-hygiene-selftest
 add_executable(unit_asn1_wrapper wrapper_test.cpp)
 target_link_libraries(unit_asn1_wrapper PRIVATE ksim::asn1_registry ksim::warnings GTest::gtest_main)
 gtest_discover_tests(unit_asn1_wrapper DISCOVERY_MODE PRE_TEST)
+
+add_executable(unit_rrc_msg rrc_msg_test.cpp)
+target_link_libraries(unit_rrc_msg PRIVATE ksim::codec_rrc ksim::warnings GTest::gtest_main)
+gtest_discover_tests(unit_rrc_msg DISCOVERY_MODE PRE_TEST)
+
+add_executable(rrc_builders_dump rrc_builders_dump.cpp)
+target_link_libraries(rrc_builders_dump PRIVATE ksim::codec_rrc ksim::warnings)
