@@ -8,6 +8,9 @@
 
 #include <gtest/gtest.h>
 
+#include <netinet/in.h>
+#include <sys/socket.h>
+
 #include <chrono>
 #include <condition_variable>
 #include <functional>
@@ -334,6 +337,48 @@ TEST(SctpClient, RetriesWhileRefused) {
         EXPECT_GE(c->attempts(), 3u);
         EXPECT_FALSE(c->up());
         c.reset();
+    });
+    shard.stop();
+    shard.join();
+}
+
+TEST(SctpClient, TakesItsSocketsFromASourceWhenGivenOne) {
+    // ksim in the lab gets its NG-C sockets from ksim-netd (ADR 0009 point 4);
+    // here a source that makes them itself, counted, the rest as usual.
+    MonotonicClock clock;
+    Shard shard{5, 1024, clock};
+    shard.start();
+    Recorder rec;
+    std::unique_ptr<net::SctpListener> l;
+    std::unique_ptr<IAssoc> server;
+    std::unique_ptr<net::SctpClient> c;
+    std::atomic<int> made{0};
+    on_shard(shard, [&] {
+        auto r = net::SctpListener::listen(shard.reactor(), {Endpoint::v4(127, 0, 0, 1, 0)}, {},
+                                           [&](std::unique_ptr<IAssoc> a) { server = std::move(a); });
+        ASSERT_TRUE(r.has_value());
+        l = std::move(*r);
+        net::SocketSource source = [&](int family) -> Result<Fd> {
+            ++made;
+            Fd fd(::socket(family, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_SCTP));   // blocking: the client fixes it
+            if (!fd) {
+                return make_error(Errc::io, 0, "test: socket");
+            }
+            return fd;
+        };
+        c = std::make_unique<net::SctpClient>(shard.reactor(), shard, std::vector<Endpoint>{Endpoint::v4(127, 0, 0, 1, 0)},
+                                              std::vector<Endpoint>{l->local()}, net::SctpOptions{},
+                                              net::SctpBackoff{20, 40}, source);
+        attach(*c, rec, 0);
+        c->start();
+    });
+    ASSERT_TRUE(poll([&] { return rec.count(0, LinkEvent::up) == 1; }));
+    EXPECT_EQ(made.load(), 1);
+    on_shard(shard, [&] {
+        EXPECT_TRUE(c->send(Bytes{1, 2}, SctpMeta{60, 0}));
+        c.reset();
+        server.reset();
+        l.reset();
     });
     shard.stop();
     shard.join();

@@ -26,3 +26,4 @@ target_compile_definitions(fuzz_card PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_D
 ksim_add_fuzzer(fuzz_nas_ies SOURCES fuzz_nas_ies.cpp LIBS ksim::proc)
 ksim_add_fuzzer(fuzz_uu SOURCES fuzz_uu.cpp LIBS ksim::codec_air ksim::codec_pdcp ksim::codec_rrc ksim::entity)
 ksim_add_fuzzer(fuzz_ngap_proc SOURCES fuzz_ngap_proc.cpp LIBS ksim::proc)
+ksim_add_fuzzer(fuzz_netd_req SOURCES fuzz_netd_req.cpp LIBS ksim::net)

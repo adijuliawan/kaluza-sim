@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "codec/air/kair.hpp"
+#include "net/netd.hpp"
 #include "net/sctp.hpp"
 #include "platform/memlink.hpp"
 #include "platform/yaml.hpp"
@@ -146,8 +147,31 @@ Result<void> AllInOne::build(std::string& why) {
     f1_tap_ = std::make_unique<TapAssoc>(f1_->b(), [cap](bool tx, ByteView m) { cap->f1ap(tx, m); });
     net::SctpOptions opt;
     opt.out_streams = topo_.ng_streams;
+    net::SocketSource source;
+    if (topo_.netd.enabled) {
+        // The CU-CP's namespace with its address (ADR 0009 point 4); a namespace
+        // left by a run that died is ours, so it is replaced.
+        auto c = net::netd::Client::connect(topo_.netd.socket);
+        if (!c) {
+            why = "ksim-netd: " + std::string(c.error().what) + " at " + topo_.netd.socket;
+            return c.error();
+        }
+        netd_ = std::make_unique<net::netd::Client>(std::move(*c));
+        std::array<std::uint8_t, 4> addr{};
+        std::copy(topo_.ng_bind.addr.begin(), topo_.ng_bind.addr.begin() + 4, addr.begin());
+        auto up = netd_->setup_node(topo_.netd.netns, topo_.netd.parent, addr, topo_.netd.prefix);
+        if (!up && netd_->last_error() == "netd: the namespace exists") {
+            (void)netd_->teardown(topo_.netd.netns);
+            up = netd_->setup_node(topo_.netd.netns, topo_.netd.parent, addr, topo_.netd.prefix);
+        }
+        if (!up) {
+            why = "ksim-netd: " + netd_->last_error();
+            return up.error();
+        }
+        source = [this](int family) { return netd_->socket(topo_.netd.netns, net::netd::SockKind::sctp, family); };
+    }
     ng_ = std::make_unique<net::SctpClient>(shard_->reactor(), *shard_, std::vector<Endpoint>{topo_.ng_bind},
-                                            std::vector<Endpoint>{topo_.amf}, opt);
+                                            std::vector<Endpoint>{topo_.amf}, opt, net::SctpBackoff{}, std::move(source));
     ng_tap_ = std::make_unique<TapAssoc>(*ng_, [cap](bool tx, ByteView m) { cap->ngap(tx, m); });
 
     proc::ran::CuCpConfig cc;
@@ -269,6 +293,10 @@ void AllInOne::teardown() {
     ng_.reset();
     f1_tap_.reset();
     f1_.reset();
+    if (netd_) {
+        (void)netd_->teardown(topo_.netd.netns);
+        netd_.reset();
+    }
 }
 
 void AllInOne::stop() {

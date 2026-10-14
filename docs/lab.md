@@ -113,6 +113,12 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
   - Since kaluza-core-e9 ended there is no standing coordinator: kaluza-sim agrees each window with whichever kaluza-core session is active, and asks the user when none is (P1 working agreement, 2026-10-15).
   - P1's windows: **W0** (N9) imports imsi-001010000300000..099 through the provisioning API, then NG Setup, registration of 1–3 UEs, AS SMC and deregistration; **W1** (N11) sessions, a ping to the DN, an MTU probe, two sessions; **W2/W3** (N18) the full P1 row set. The sub-blocks of that import: 000–049 default, 050–059 SMS (`smsSubscribed` true), 060–069 `subsRegTimer` 120 s (each re-registers every 2 min while registered, so they stay out of rows that count AMF log lines), 070–079 EAP-AKA′, 080–099 spare.
 - **The dev-PC guard.** The real AMF listens on the dev PC itself (172.30.30.1:38412), so `ksim` refuses any peer in 172.30.0.0/16 unless it runs with `--lab` on `kaluza-uesim`, and the scripted core binds 127.0.0.x only ([ADR 0009](adr/0009-p1-runtime-shape.md), point 11). vmnet8 (192.168.134.0/24, host-only) is allowed for the Open5GS control.
+- **W0 and later lab runs (P1 N9).** Steps 1–3 run once per release or provisioning change:
+  1. `tools/deploy-uesim.sh --window-agreed --secrets` installs a release under `~/ksim/releases` and sends the sealed cards and the KEK.
+  2. The user installs `ksim-netd` as root with the commands the script prints. The binary goes to `/usr/local/sbin`, and `tools/systemd/ksim-netd.service` serves the user's uid with ipvlans on `ens19` and 172.30.30.30–.39/24 only.
+  3. `ksim-sim range provision --target kaluza --block 001010000300000/100 …` runs from the dev PC, after the core session has checked a `--dry-run`.
+  4. On the VM, `KSIM_LAB=1 KSIM_BIN=~/ksim/current/bin gates/run.sh kaluza` runs the gates from `topologies/aio-lab.yaml`. netd makes `ksim-cucp` with 172.30.30.30, and NG-C goes from there to 172.30.30.1:38412.
+  5. Afterwards, check that `ip netns list` shows no `ksim-` namespace. `ksim stop` tears it down; `ksim-netd`'s gc covers a run that died.
 - **The Open5GS rig (D5, ADR 0010).** A control run follows the same steps each time, all from the dev PC, inside a window agreed with the active kaluza-core session:
   1. `ksim-sim range provision --target open5gs --block … --ssh amadeus-open5gs`.
   2. `tools/open5gs-rig.sh start`. It refuses when any open5gs NF already runs.

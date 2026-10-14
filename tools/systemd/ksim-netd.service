@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# ksim-netd on kaluza-uesim (P1 N9; ADR 0009 point 3). Installed by the user:
+# the binary root-owned in /usr/local/sbin (never run as root from a home
+# directory), this unit in /etc/systemd/system; tools/deploy-uesim.sh prints
+# the commands. It serves the uid of the user who runs ksim (KSIM_UID below)
+# and allows ipvlans on ens19 with 172.30.30.30-.39/24 only.
+[Unit]
+Description=kaluza-sim privileged helper (netns, ipvlan, sockets by fd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=KSIM_UID=1000
+ExecStart=/usr/local/sbin/ksim-netd --uid ${KSIM_UID} --parent ens19 --range 172.30.30.30-172.30.30.39 --prefix 24
+Restart=on-failure
+RestartSec=2
+# No ProtectSystem, ProtectHome or PrivateTmp: each would give the service a
+# mount namespace of its own, and its /run/netns mounts would not show on the
+# host (ip netns, the gc check). The capability set is the limit instead.
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

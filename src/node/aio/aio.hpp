@@ -32,6 +32,9 @@
 
 namespace ksim::net {
 class SctpClient;
+namespace netd {
+class Client;
+}
 }
 namespace ksim::proc::ran {
 class CuCp;
@@ -110,6 +113,7 @@ private:
     bool stopped_ = false;
 
     // On the shard.
+    std::unique_ptr<net::netd::Client> netd_;   // with topology netd: the CU-CP's namespace
     std::unique_ptr<net::SctpClient> ng_;
     std::unique_ptr<TapAssoc> ng_tap_;
     std::unique_ptr<MemAssocPair> f1_;

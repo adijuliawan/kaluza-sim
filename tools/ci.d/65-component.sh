@@ -8,7 +8,8 @@
 #   2. gates/run.sh stub: every P1 gate, rows scored from the sim's evidence;
 #   3. the stub's own verdicts: FAILURES=0;
 #   4. tools/pcap_check.py on the run's captures (tshark and pycrate);
-#   5. the canary over the run directory, the gates' ksim-ctl output included.
+#   5. the canary over the run directory, the gates' ksim-ctl output and
+#      ksim-sim's output (derive, a kaluza dry run) included.
 # The run directory (no keys in it) is kept as build/component/last.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -25,7 +26,10 @@ trap 'rm -rf "$T"' EXIT
 BLOCK=001010000300001/3
 "$B/ksim-sim/ksim-sim" range init --master "$T/keys/master.key" --kek "$T/keys/kek.key" >/dev/null || exit 1
 "$B/ksim-sim/ksim-sim" range derive --block "$BLOCK" --master "$T/keys/master.key" --kek "$T/keys/kek.key" \
-    --out "$T/cards" >/dev/null || exit 1
+    --out "$T/cards" > "$T/derive.out" || exit 1
+# What ksim-sim prints is scanned too (ADR 0008): derive, and a kaluza dry run.
+"$B/ksim-sim/ksim-sim" range provision --target kaluza --block "$BLOCK" --master "$T/keys/master.key" --dry-run \
+    > "$T/kaluza-dryrun.out" || exit 1
 
 rc=0
 KSIM_RUNS="$T/runs" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
@@ -34,6 +38,7 @@ cat "$T/gates.out"
 RUN="$(sed -n 's/^RUN_DIR=//p' "$T/gates.out")"
 [[ -n "$RUN" && -d "$RUN" ]] || { echo "COMPONENT=FAIL (no run directory)"; exit 1; }
 cp "$T/gates.out" "$RUN/gates.out"
+cp "$T/derive.out" "$T/kaluza-dryrun.out" "$RUN/"
 
 echo "-- the stub's verdicts"
 cat "$RUN/stub.txt"

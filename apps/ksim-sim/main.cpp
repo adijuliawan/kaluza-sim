@@ -43,9 +43,11 @@
 #include <iostream>
 #include <regex>
 #include <sstream>
+#include <cstdlib>
 #include <vector>
 
 #include "crypto/aead.hpp"
+#include "kaluza.hpp"
 #include "platform/secret.hpp"
 #include "uicc/image/image.hpp"
 #include "uicc/secrets/secrets.hpp"
@@ -376,6 +378,11 @@ static int run_main(int argc, char** argv) {
     unsigned sst = 1;
     bool force = false;
     bool replace = false;
+    bool dry_run = false;
+    ksim::sim::KaluzaApi api;
+    const char* home = std::getenv("HOME");   // NOLINT(concurrency-mt-unsafe): read at start-up only
+    api.cred_dir = std::string(home != nullptr ? home : "") + "/.config/kaluza-sim/provisioning";
+    std::vector<std::string> resolve;
     auto* init_cmd = range->add_subcommand("init", "create the range master and the KEK if missing");
     init_cmd->add_option("--master", master, "the range master file")->required();
     init_cmd->add_option("--kek", kek, "the KEK file")->required();
@@ -388,16 +395,22 @@ static int run_main(int argc, char** argv) {
     auto* prov_cmd = range->add_subcommand("provision", "put a block into a core");
     auto* deprov_cmd = range->add_subcommand("deprovision", "remove a block from a core");
     for (auto* c : {prov_cmd, deprov_cmd}) {
-        c->add_option("--target", target, "open5gs (kaluza: N9)")->required();
+        c->add_option("--target", target, "open5gs or kaluza")->required();
         c->add_option("--block", block, "<first IMSI>/<count>")->required();
-        c->add_option("--ssh", ssh, "the rig's ssh host")->required();
-        c->add_option("--db-config", db_config, "the rig's NF config holding db_uri");
+        c->add_option("--ssh", ssh, "open5gs: the rig's ssh host");
+        c->add_option("--db-config", db_config, "open5gs: the rig's NF config holding db_uri");
+        c->add_option("--token-url", api.token_url, "kaluza: the Keycloak token endpoint (https)");
+        c->add_option("--udr-url", api.udr_url, "kaluza: the UDR provisioning listener (https://host:port)");
+        c->add_option("--resolve", resolve, "kaluza: host=address, as curl --resolve (repeatable)");
+        c->add_option("--cred-dir", api.cred_dir, "kaluza: the provisioning credentials' directory");
+        c->add_flag("--token-mtls", api.token_mtls, "kaluza: the client certificate on the token request too");
     }
     prov_cmd->add_option("--master", master, "the range master file")->required();
     prov_cmd->add_option("--sst", sst, "the slice's SST");
     prov_cmd->add_option("--sd", sd, "the slice's SD (6 hex digits)");
     prov_cmd->add_option("--dnn", dnn, "the session's DNN");
     prov_cmd->add_flag("--replace", replace, "overwrite subscribers of the block that exist");
+    prov_cmd->add_flag("--dry-run", dry_run, "kaluza: print each bundle with its keys as placeholders, send nothing");
     CLI11_PARSE(app, argc, argv);
     ::umask(077);
     if (init_cmd->parsed()) {
@@ -411,8 +424,27 @@ static int run_main(int argc, char** argv) {
     if (derive_cmd->parsed()) {
         return derive(b, master, kek, out, force);
     }
+    if (target == "kaluza") {
+        // 001/01 only: the 999/70 home UDR has no provisioning listener (ADR 0008).
+        if (b.first.rfind("001010000300", 0) != 0) {
+            std::cerr << "ksim-sim: --target kaluza takes the 001/01 sim range only\n";
+            return 2;
+        }
+        for (const auto& r : resolve) {
+            const auto eq = r.find('=');
+            if (eq == std::string::npos) {
+                std::cerr << "ksim-sim: --resolve is host=address\n";
+                return 2;
+            }
+            api.resolve[r.substr(0, eq)] = r.substr(eq + 1);
+        }
+        if (prov_cmd->parsed()) {
+            return ksim::sim::kaluza_provision(b.first, b.count, master, api, dry_run, replace);
+        }
+        return ksim::sim::kaluza_deprovision(b.first, b.count, api);
+    }
     if (target != "open5gs") {
-        std::cerr << "ksim-sim: --target open5gs only (kaluza comes with N9)\n";
+        std::cerr << "ksim-sim: --target open5gs or kaluza\n";
         return 2;
     }
     if (!safe_remote_path(db_config) || ssh.empty() || ssh.find_first_of(" ;'\"$`\\") != std::string::npos ||

@@ -8,7 +8,11 @@ add_library(ksim_net STATIC
     sockaddr.cpp
     sctp.cpp
     udp.cpp
-    tcp.cpp)
+    tcp.cpp
+    netlink.cpp
+    netns.cpp
+    netd.cpp
+    netd_linux.cpp)
 add_library(ksim::net ALIAS ksim_net)
 target_include_directories(ksim_net PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_net PUBLIC ksim::platform PRIVATE ksim::warnings)

@@ -7,6 +7,7 @@
 #include <linux/sctp.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -66,6 +67,21 @@ Result<Fd> open_socket(int family, const SctpOptions& o) {
         return r.error();
     }
     return fd;
+}
+
+/// A socket from a SocketSource, made non-blocking and configured.
+Result<Fd> configure_from(Result<Fd> fd, const SctpOptions& o) {
+    if (!fd) {
+        return fd.error();
+    }
+    const int flags = ::fcntl(fd->get(), F_GETFL);
+    if (flags < 0 || ::fcntl(fd->get(), F_SETFL, flags | O_NONBLOCK) != 0) {
+        return os_error("sctp: fcntl");
+    }
+    if (auto r = configure(fd->get(), o); !r) {
+        return r.error();
+    }
+    return std::move(*fd);
 }
 
 Result<void> bind_all(int fd, const std::vector<Endpoint>& local) {
@@ -506,9 +522,9 @@ void SctpListener::accept_all() {
 // ---- the client ------------------------------------------------------------
 
 SctpClient::SctpClient(Reactor& reactor, TimerService& timers, std::vector<Endpoint> local, std::vector<Endpoint> remote,
-                       SctpOptions options, SctpBackoff backoff)
+                       SctpOptions options, SctpBackoff backoff, SocketSource source)
     : reactor_(reactor), timers_(timers), local_(std::move(local)), remote_(std::move(remote)), options_(options),
-      backoff_(backoff), next_delay_(backoff.initial_ms) {}
+      backoff_(backoff), source_(std::move(source)), next_delay_(backoff.initial_ms) {}
 
 SctpClient::~SctpClient() { stop(); }
 
@@ -545,7 +561,8 @@ void SctpClient::attempt() {
         return;
     }
     ++attempts_;
-    auto fd = open_socket(family_of(remote_.front()), options_);
+    auto fd = source_ ? configure_from(source_(family_of(remote_.front())), options_)
+                      : open_socket(family_of(remote_.front()), options_);
     if (!fd) {
         on_socket_event(LinkEvent::refused);
         return;

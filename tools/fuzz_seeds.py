@@ -103,6 +103,16 @@ def main() -> int:
     def lp(*pdus):
         return b"".join(len(p).to_bytes(2, "big") + p for p in pdus)
     seeds["fuzz_ngap_proc"] = [lp(bytes.fromhex(r["hex"])) for r in ngap_rows]
+    # fuzz_netd_req: ksim-netd requests (src/net/netd.cpp encode()): setup_node in and out
+    # of the policy, teardown, socket, list, gc.
+    def nstr(t):
+        return bytes([len(t)]) + t
+    seeds["fuzz_netd_req"] = [
+        bytes([1, 1]) + nstr(b"ksim-cucp") + nstr(b"ens19") + bytes([172, 30, 30, 30, 24]),
+        bytes([1, 1]) + nstr(b"ksim-cuup") + nstr(b"") + bytes([0, 0, 0, 0, 0]),
+        bytes([1, 1]) + nstr(b"ksim-x") + nstr(b"eth0") + bytes([172, 30, 30, 1, 24]),
+        bytes([1, 2]) + nstr(b"ksim-cucp"), bytes([1, 3]) + nstr(b"ksim-cucp") + bytes([1, 4]),
+        bytes([1, 3]) + nstr(b"ksim-cucp") + bytes([2, 6]), bytes([1, 4]), bytes([1, 5])]
     seeds["fuzz_mustfail"] = [b"KSIM must crash here"]
     total = 0
     for target, items in seeds.items():

@@ -32,7 +32,7 @@ std::string resolve_path(const std::string& p, const std::string& base_dir) {
 Result<Topology> load_topology(const std::string& file, std::string& why) {
     try {
         const Yaml y = Yaml::load_file(file);
-        y.only({"plmn", "seed", "amf", "gnbs", "ues", "secrets", "peer", "security"});
+        y.only({"plmn", "seed", "amf", "gnbs", "ues", "secrets", "peer", "security", "netd"});
         const std::string base = std::filesystem::path(file).parent_path().string();
         Topology t;
         t.file = file;
@@ -137,6 +137,18 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         if (y.has("peer")) {
             for (const auto& k : y.at("peer").keys()) {
                 t.peer[k] = y.at("peer").at(k).as<std::string>();
+            }
+        }
+        if (y.has("netd")) {
+            const Yaml n = y.at("netd");
+            n.only({"socket", "netns", "parent", "prefix"});
+            t.netd.enabled = true;
+            t.netd.socket = n.get<std::string>("socket", t.netd.socket);
+            t.netd.netns = n.get<std::string>("netns", t.netd.netns);
+            t.netd.parent = n.get<std::string>("parent", "");
+            t.netd.prefix = n.get<std::uint8_t>("prefix", 24);
+            if (t.netd.netns.rfind("ksim-", 0) != 0 || t.ng_bind.family != Endpoint::Family::v4 || t.netd.prefix > 32) {
+                n.fail("netd needs a ksim- namespace, an IPv4 ng_bind and a prefix up to 32");
             }
         }
         if (y.has("security")) {

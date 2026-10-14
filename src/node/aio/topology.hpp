@@ -20,6 +20,8 @@
 //   secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek}
 //   peer: {name: stub}                      # free-form pins for the manifest
 //   security: {allow_null: false}            # D1: the bisect switch only
+//   netd: {socket: /run/ksim/netd.sock, netns: ksim-cucp, parent: ens19, prefix: 24}
+//                                            # lab only: NG-C from the CU-CP's own namespace
 
 #pragma once
 
@@ -49,6 +51,16 @@ struct UeGroup {
     std::string imeisv_tac = "86000000";   // 8 digits; the SNR comes from the IMSI
 };
 
+/// The CU-CP's namespace from ksim-netd (ADR 0009 points 3 and 4): ng_bind is
+/// the address its ipvlan carries, and NG-C sockets are made inside it.
+struct NetdConfig {
+    bool enabled = false;
+    std::string socket = "/run/ksim/netd.sock";
+    std::string netns = "ksim-cucp";
+    std::string parent;
+    std::uint8_t prefix = 24;
+};
+
 struct Topology {
     std::string file;                      // where it was read from
     std::string mcc;
@@ -73,6 +85,7 @@ struct Topology {
     /// run --plain-nas). Without it the Uu capture holds RRC, and the NAS
     /// inside it as it went over the air.
     bool plain_nas = false;
+    NetdConfig netd;
 };
 
 /// Reads and checks a topology; the error's text says where and why.

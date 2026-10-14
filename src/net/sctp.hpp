@@ -32,6 +32,12 @@ struct SctpOptions {
     std::size_t max_message = 1U << 20;  // a longer reassembled message aborts the association
 };
 
+/// Where a client's sockets come from: by default socket(2) in the process's
+/// namespace; ksim in the lab gets them from ksim-netd, made in a node's
+/// namespace (ADR 0009 point 4). It returns an unconfigured, unbound socket
+/// of `family`; the client sets its options, binds and connects it.
+using SocketSource = std::function<Result<Fd>(int family)>;
+
 struct SctpBackoff {
     Millis initial_ms = 500;
     Millis max_ms = 30'000;
@@ -75,7 +81,7 @@ private:
 class SctpClient final : public IAssoc {
 public:
     SctpClient(Reactor& reactor, TimerService& timers, std::vector<Endpoint> local, std::vector<Endpoint> remote,
-               SctpOptions options = {}, SctpBackoff backoff = {});
+               SctpOptions options = {}, SctpBackoff backoff = {}, SocketSource source = {});
     ~SctpClient() override;
     SctpClient(const SctpClient&) = delete;
     SctpClient& operator=(const SctpClient&) = delete;
@@ -105,6 +111,7 @@ private:
     std::vector<Endpoint> remote_;
     SctpOptions options_;
     SctpBackoff backoff_;
+    SocketSource source_;
     std::unique_ptr<SctpSocket> sock_;
     std::vector<std::unique_ptr<SctpSocket>> retired_;   // freed at the next attempt, never inside their callbacks
     TimerId retry_{};
