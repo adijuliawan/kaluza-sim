@@ -132,7 +132,10 @@ private:
             const Millis now = e.exec_.now();
             const Millis due = now + hop > e.last_due_ ? now + hop : e.last_due_;
             e.last_due_ = due;
-            e.exec_.start_timer(due - now, [w, me, fn = std::move(fn)]() mutable {
+            // An absolute deadline: a delay would be added to a later clock
+            // reading, and a tick in between could put this message behind
+            // the next one.
+            e.exec_.start_timer_at(due, [w, me, fn = std::move(fn)]() mutable {
                 if (const auto t = w.lock()) {
                     fn(*t->ends[me]);
                 }
@@ -262,7 +265,7 @@ public:
                 due = s->last_due;
             }
             s->last_due = due;
-            s->exec.start_timer(due - now, [w, from, bytes = std::move(bytes)] {
+            s->exec.start_timer_at(due, [w, from, bytes = std::move(bytes)] {
                 if (auto t = w.lock(); t && t->handler) {
                     t->handler(bytes, from);
                 }

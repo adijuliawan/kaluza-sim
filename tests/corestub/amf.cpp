@@ -452,6 +452,7 @@ void Amf::on_security_mode_complete(const nas::Message& m, Sht sht) {
     check(sht == Sht::integrity_ciphered_new, "5.4.2.3",
           "SECURITY MODE COMPLETE is integrity protected and ciphered with the new context");
     check(last_ul_ && *last_ul_ == 0, "5.4.2.3", "the uplink NAS COUNT is reset after 5G AKA");
+    smc_count_ = last_ul_;
     const Bytes* imeisv = nas::get(m, "IMEISV");
     check((imeisv != nullptr) == imeisv_asked_, "5.4.2.3", "the IMEISV is included exactly when the AMF asked");
     if (imeisv != nullptr) {
@@ -522,6 +523,16 @@ void Amf::send_registration_result() {
             put(a, "T3502 value", timer2(*p_.t3502_s).encode());
         }
         state_ = State::accepting;
+        if (link_.initial_context && p_.registration == Profile::Registration::accept && ctx_) {
+            auto plain = nas::encode(a);
+            auto wire = plain ? ctx_->protect(*plain, Sht::integrity_ciphered) : Result<Bytes>(plain.error());
+            auto key = kgnb();
+            check(wire.has_value() && key.has_value(), "TS 33.501 6.8.1.2.2", "the AMF has K_gNB for the accept");
+            if (wire && key) {
+                link_.initial_context(std::move(*wire), std::move(*key));
+            }
+            return;
+        }
         send(a, p_.registration == Profile::Registration::accept);
         return;
     }
@@ -587,6 +598,13 @@ void Amf::send(const nas::Message& m, bool protect) {
 }
 
 void Amf::send_plain(Bytes plain) { downlink(std::move(plain)); }
+
+Result<SecretBytes> Amf::kgnb() const {
+    if (!ctx_ || !smc_count_) {
+        return make_error(Errc::invalid_argument, 0, "stub: no context for K_gNB");
+    }
+    return crypto::keys5g::kgnb(ctx_->kamf(), *smc_count_);
+}
 
 void Amf::send_protected(Bytes plain) {
     if (!ctx_) {

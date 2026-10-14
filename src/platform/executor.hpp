@@ -24,6 +24,10 @@ public:
     /// A timer `delay` ms from now (a negative delay counts as 0). It never
     /// fires early, and its callback runs on the executor's thread.
     virtual TimerId start_timer(Millis delay, Callback cb) = 0;
+    /// A timer at `deadline` on the executor's clock (a past one fires at
+    /// once). Timers with the same deadline fire in the order they were
+    /// started, so a sequence of non-decreasing deadlines keeps its order.
+    virtual TimerId start_timer_at(Millis deadline, Callback cb) = 0;
     /// False when the timer has fired or was stopped already (a stale id).
     virtual bool stop_timer(TimerId id) noexcept = 0;
     virtual Millis now() const noexcept = 0;

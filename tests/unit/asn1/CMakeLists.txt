@@ -52,5 +52,15 @@ add_executable(unit_rrc_msg rrc_msg_test.cpp)
 target_link_libraries(unit_rrc_msg PRIVATE ksim::codec_rrc ksim::warnings GTest::gtest_main)
 gtest_discover_tests(unit_rrc_msg DISCOVERY_MODE PRE_TEST)
 
-add_executable(rrc_builders_dump rrc_builders_dump.cpp)
-target_link_libraries(rrc_builders_dump PRIVATE ksim::codec_rrc ksim::warnings)
+add_executable(unit_ngap_msg ngap_msg_test.cpp)
+target_link_libraries(unit_ngap_msg PRIVATE ksim::codec_ngap ksim::codec_rrc ksim::warnings GTest::gtest_main)
+target_compile_definitions(unit_ngap_msg PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+gtest_discover_tests(unit_ngap_msg DISCOVERY_MODE PRE_TEST)
+
+add_executable(unit_f1ap_msg f1ap_msg_test.cpp)
+target_link_libraries(unit_f1ap_msg PRIVATE ksim::codec_f1ap ksim::codec_rrc ksim::warnings GTest::gtest_main)
+target_compile_definitions(unit_f1ap_msg PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+gtest_discover_tests(unit_f1ap_msg DISCOVERY_MODE PRE_TEST)
+
+add_executable(msg_builders_dump msg_builders_dump.cpp)
+target_link_libraries(msg_builders_dump PRIVATE ksim::codec_rrc ksim::codec_ngap ksim::codec_f1ap ksim::warnings)

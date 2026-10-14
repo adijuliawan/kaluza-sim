@@ -31,7 +31,7 @@ public:
     void bind(proc::ue::Mm* ue, corestub::Amf* amf) {
         ue_ = ue;
         amf_ = amf;
-        amf_->attach({[this](Bytes b) { to_ue(std::move(b)); }, [this] { release_from_network(); }});
+        amf_->attach({[this](Bytes b) { to_ue(std::move(b)); }, [this] { release_from_network(); }, {}});
     }
 
     void send_nas(Bytes pdu) override {

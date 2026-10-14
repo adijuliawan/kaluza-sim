@@ -49,8 +49,11 @@ struct Mib {
     bool intra_freq_reselection = true;
     friend bool operator==(const Mib&, const Mib&) = default;
 };
-Result<Bytes> encode(const Mib& m);
+Result<Bytes> encode(const Mib& m);   // a BCCH-BCH-Message
 Result<Mib> decode_mib(ByteView in);
+/// The MIB alone, as F1 Setup's gNB-DU System Information carries it (TS 38.473 §9.3.1.18).
+Result<Bytes> mib_ie(const Mib& m);
+Result<Mib> decode_mib_ie(ByteView in);
 
 // ---- BCCH-DL-SCH ----------------------------------------------------------------------
 
@@ -73,8 +76,11 @@ struct Sib1 {
     std::optional<UeTimers> timers;
     friend bool operator==(const Sib1&, const Sib1&) = default;
 };
-Result<Bytes> encode(const Sib1& s);
+Result<Bytes> encode(const Sib1& s);   // a BCCH-DL-SCH-Message
 Result<Sib1> decode_sib1(ByteView in);
+/// SIB1 alone, as F1 Setup carries it.
+Result<Bytes> sib1_ie(const Sib1& s);
+Result<Sib1> decode_sib1_ie(ByteView in);
 
 // ---- PCCH ------------------------------------------------------------------------------
 
@@ -253,6 +259,16 @@ Result<UlDcch> decode_ul_dcch(ByteView in);
 /// A minimal UE-NR-Capability for the generic persona (N15 brings real ones):
 /// Rel-15, no ROHC, band n78.
 Result<Bytes> generic_nr_capability();
+
+/// A MeasurementTimingConfiguration (TS 38.331 §11.2.2) with no SMTC list:
+/// what F1 Setup's served cell carries (TS 38.473 §9.3.1.10).
+Result<Bytes> measurement_timing_configuration();
+
+/// UERadioAccessCapabilityInformation (TS 38.331 §11.2.2) around an NR
+/// capability: what NGAP's UE Radio Capability IE carries (TS 38.413 §9.3.1.74).
+Result<Bytes> radio_access_capability(const Bytes& nr_capability);
+/// The UE-NR-Capability inside a UERadioAccessCapabilityInformation, if any.
+Result<Bytes> nr_capability_of(ByteView radio_access_capability);
 
 /// The message's JER (X.697 JSON) for logs and the oracle: `channel` is
 /// "BCCH-BCH", "BCCH-DL-SCH", "PCCH", "UL-CCCH", "DL-CCCH", "DL-DCCH",

@@ -5,9 +5,8 @@
 
 #include <algorithm>
 #include <array>
-#include <nlohmann/json.hpp>
-
 #include "codec/asn1/asn1.hpp"
+#include "codec/asn1/msg/jer.hpp"
 
 extern "C" {
 #include "RRC_BCCH-BCH-Message.h"
@@ -16,7 +15,12 @@ extern "C" {
 #include "RRC_DL-CCCH-Message.h"
 #include "RRC_DL-DCCH-Message.h"
 #include "RRC_PCCH-Message.h"
+#include "RRC_MIB.h"
+#include "RRC_MeasurementTimingConfiguration.h"
+#include "RRC_SIB1.h"
+#include "RRC_UE-CapabilityRAT-ContainerList.h"
 #include "RRC_UE-NR-Capability.h"
+#include "RRC_UERadioAccessCapabilityInformation.h"
 #include "RRC_UL-CCCH-Message.h"
 #include "RRC_UL-DCCH-Message.h"
 }
@@ -25,46 +29,18 @@ namespace ksim::rrc {
 
 namespace {
 
-using json = nlohmann::ordered_json;   // asn1c's JER decoder wants SEQUENCE members in definition order
+using jer::arm;
+using jer::bad;
+using jer::bits;
+using jer::guarded;
+using jer::hex;
+using jer::json;
+using jer::read_bits;
+using jer::read_octets;
+using jer::unread;
 
-Error bad(const char* what) { return Error{Errc::invalid_argument, 0, what}; }
-Error unread(const char* what) { return Error{Errc::malformed, 0, what}; }
-
-// ---- JER values ------------------------------------------------------------------------
-
-std::string hex(ByteView v) { return to_hex(v); }
-
-/// A fixed-size BIT STRING: its octets, the value left-aligned (X.697 §24).
-std::string bits(std::uint64_t value, unsigned n) {
-    const unsigned octets = (n + 7) / 8;
-    const std::uint64_t v = value << (octets * 8 - n);
-    Bytes b(octets);
-    for (unsigned i = 0; i < octets; ++i) {
-        b[i] = static_cast<std::uint8_t>(v >> (8 * (octets - 1 - i)));
-    }
-    return hex(b);
-}
-
-std::uint64_t read_bits(const json& j, unsigned n) {
-    const std::string s = j.is_object() ? j.at("value").get<std::string>() : j.get<std::string>();
-    auto b = from_hex(s);
-    if (!b) {
-        throw json::other_error::create(501, "bad bit string", &j);
-    }
-    std::uint64_t v = 0;
-    for (std::uint8_t o : *b) {
-        v = (v << 8) | o;
-    }
-    return v >> (b->size() * 8 - n);
-}
-
-Bytes read_octets(const json& j) {
-    auto b = from_hex(j.get<std::string>());
-    if (!b) {
-        throw json::other_error::create(501, "bad octet string", &j);
-    }
-    return std::move(*b);
-}
+Result<Bytes> to_uper(const asn_TYPE_descriptor_t& td, const json& j) { return jer::encode(td, j, asn1::Rules::uper); }
+Result<json> from_uper(const asn_TYPE_descriptor_t& td, ByteView in) { return jer::decode(td, in, asn1::Rules::uper); }
 
 json plmn_json(const Plmn& p) {
     json mcc = json::array();
@@ -118,32 +94,6 @@ constexpr std::initializer_list<int> kTReordering{0,   1,   2,   4,   5,   8,   
                                                    60,  80,  100, 120, 140, 160, 180,  200,  220,  240,  260,  280,
                                                    300, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000};
 
-// ---- UPER <-> JER through the generated code ------------------------------------------
-
-Result<Bytes> to_uper(const asn_TYPE_descriptor_t& td, const json& j) {
-    auto v = asn1::from_jer(td, j.dump());
-    if (!v) {
-        return v.error();
-    }
-    return asn1::encode(v.value(), asn1::Rules::uper, asn1::Check::strict);
-}
-
-Result<json> from_uper(const asn_TYPE_descriptor_t& td, ByteView in) {
-    auto v = asn1::decode(td, asn1::Rules::uper, in);
-    if (!v) {
-        return v.error();
-    }
-    auto s = asn1::to_jer(v.value());
-    if (!s) {
-        return s.error();
-    }
-    json j = json::parse(*s, nullptr, false);
-    if (j.is_discarded()) {
-        return unread("RRC: the JER of a decoded value did not parse");
-    }
-    return j;
-}
-
 json c1(const char* arm, json body) { return {{"message", {{"c1", {{arm, std::move(body)}}}}}}; }
 
 json transaction(std::uint8_t tid, const char* ext, json ies) {
@@ -151,14 +101,6 @@ json transaction(std::uint8_t tid, const char* ext, json ies) {
 }
 
 bool bad_tid(std::uint8_t tid) { return tid > 3; }
-
-/// The single arm of a CHOICE.
-std::pair<std::string, const json*> arm(const json& choice) {
-    if (!choice.is_object() || choice.size() != 1) {
-        throw json::other_error::create(501, "not a CHOICE", &choice);
-    }
-    return {choice.begin().key(), &choice.begin().value()};
-}
 
 // ---- radio bearers and the cell group ----------------------------------------------------
 
@@ -338,16 +280,6 @@ CellGroup read_cell_group(const json& j) {
     return c;
 }
 
-template <class F>
-auto guarded(F&& f) -> decltype(f()) {
-    try {
-        return f();
-    } catch (const json::exception&) {
-        return unread("RRC: a field P1 reads is missing or of the wrong type");
-    } catch (const std::exception&) {
-        return unread("RRC: a field P1 reads is out of range");
-    }
-}
 
 constexpr std::array<const char*, 10> kCauses{"emergency",     "highPriorityAccess", "mt-Access",   "mo-Signalling",
                                               "mo-Data",       "mo-VoiceCall",       "mo-VideoCall", "mo-SMS",
@@ -359,44 +291,36 @@ const char* cause_name(EstablishmentCause c) noexcept { return kCauses.at(static
 
 // ---- BCCH-BCH -----------------------------------------------------------------------------
 
-Result<Bytes> encode(const Mib& m) {
+namespace {
+
+Result<json> mib_json(const Mib& m) {
     if (m.sfn > 1023 || m.ssb_subcarrier_offset > 15 || m.coreset0 > 15 || m.search_space0 > 15) {
         return bad("RRC: a MIB field out of range");
     }
-    const json mib = {{"systemFrameNumber", bits(m.sfn >> 4, 6)},
-                      {"subCarrierSpacingCommon", m.scs_30_or_120 ? "scs30or120" : "scs15or60"},
-                      {"ssb-SubcarrierOffset", m.ssb_subcarrier_offset},
-                      {"dmrs-TypeA-Position", m.dmrs_pos3 ? "pos3" : "pos2"},
-                      {"pdcch-ConfigSIB1", {{"controlResourceSetZero", m.coreset0}, {"searchSpaceZero", m.search_space0}}},
-                      {"cellBarred", m.barred ? "barred" : "notBarred"},
-                      {"intraFreqReselection", m.intra_freq_reselection ? "allowed" : "notAllowed"},
-                      {"spare", bits(0, 1)}};
-    return to_uper(asn_DEF_RRC_BCCH_BCH_Message, {{"message", {{"mib", mib}}}});
+    return json{{"systemFrameNumber", bits(m.sfn >> 4, 6)},
+                {"subCarrierSpacingCommon", m.scs_30_or_120 ? "scs30or120" : "scs15or60"},
+                {"ssb-SubcarrierOffset", m.ssb_subcarrier_offset},
+                {"dmrs-TypeA-Position", m.dmrs_pos3 ? "pos3" : "pos2"},
+                {"pdcch-ConfigSIB1", {{"controlResourceSetZero", m.coreset0}, {"searchSpaceZero", m.search_space0}}},
+                {"cellBarred", m.barred ? "barred" : "notBarred"},
+                {"intraFreqReselection", m.intra_freq_reselection ? "allowed" : "notAllowed"},
+                {"spare", bits(0, 1)}};
 }
 
-Result<Mib> decode_mib(ByteView in) {
-    auto j = from_uper(asn_DEF_RRC_BCCH_BCH_Message, in);
-    if (!j) {
-        return j.error();
-    }
-    return guarded([&]() -> Result<Mib> {
-        const json& m = j->at("message").at("mib");
-        Mib out;
-        out.sfn = static_cast<std::uint16_t>(read_bits(m.at("systemFrameNumber"), 6) << 4);
-        out.scs_30_or_120 = m.at("subCarrierSpacingCommon").get<std::string>() == "scs30or120";
-        out.ssb_subcarrier_offset = m.at("ssb-SubcarrierOffset").get<std::uint8_t>();
-        out.dmrs_pos3 = m.at("dmrs-TypeA-Position").get<std::string>() == "pos3";
-        out.coreset0 = m.at("pdcch-ConfigSIB1").at("controlResourceSetZero").get<std::uint8_t>();
-        out.search_space0 = m.at("pdcch-ConfigSIB1").at("searchSpaceZero").get<std::uint8_t>();
-        out.barred = m.at("cellBarred").get<std::string>() == "barred";
-        out.intra_freq_reselection = m.at("intraFreqReselection").get<std::string>() == "allowed";
-        return out;
-    });
+Mib read_mib(const json& m) {
+    Mib out;
+    out.sfn = static_cast<std::uint16_t>(read_bits(m.at("systemFrameNumber"), 6) << 4);
+    out.scs_30_or_120 = m.at("subCarrierSpacingCommon").get<std::string>() == "scs30or120";
+    out.ssb_subcarrier_offset = m.at("ssb-SubcarrierOffset").get<std::uint8_t>();
+    out.dmrs_pos3 = m.at("dmrs-TypeA-Position").get<std::string>() == "pos3";
+    out.coreset0 = m.at("pdcch-ConfigSIB1").at("controlResourceSetZero").get<std::uint8_t>();
+    out.search_space0 = m.at("pdcch-ConfigSIB1").at("searchSpaceZero").get<std::uint8_t>();
+    out.barred = m.at("cellBarred").get<std::string>() == "barred";
+    out.intra_freq_reselection = m.at("intraFreqReselection").get<std::string>() == "allowed";
+    return out;
 }
 
-// ---- BCCH-DL-SCH ---------------------------------------------------------------------------
-
-Result<Bytes> encode(const Sib1& s) {
+Result<json> sib1_json(const Sib1& s) {
     if (s.plmns.empty() || s.plmns.size() > 12 || s.tac >> 24 != 0 || s.cell_identity >> 36 != 0) {
         return bad("RRC: SIB1 needs 1..12 PLMNs, a 24-bit TAC and a 36-bit cell identity");
     }
@@ -427,7 +351,79 @@ Result<Bytes> encode(const Sib1& s) {
         sib1["ue-TimersAndConstants"] = {{"t300", *t300}, {"t301", *t301}, {"t310", *t310}, {"n310", *n310},
                                          {"t311", *t311}, {"n311", *n311}, {"t319", *t319}};
     }
-    return to_uper(asn_DEF_RRC_BCCH_DL_SCH_Message, c1("systemInformationBlockType1", sib1));
+    return sib1;
+}
+
+Result<Sib1> read_sib1(const json& v) {
+    const json& info = v.at("cellAccessRelatedInfo").at("plmn-IdentityInfoList").at(0);
+    Sib1 s;
+    for (const auto& p : info.at("plmn-IdentityList")) {
+        s.plmns.push_back(read_plmn(p));
+    }
+    if (!s.plmns.empty() && s.plmns.front().mcc.empty()) {
+        return unread("RRC: the first PLMN of SIB1 has no MCC");
+    }
+    for (std::size_t i = 1; i < s.plmns.size(); ++i) {
+        if (s.plmns[i].mcc.empty()) {
+            s.plmns[i].mcc = s.plmns[i - 1].mcc;   // Cond MCC: the previous entry's
+        }
+    }
+    if (info.contains("trackingAreaCode")) {
+        s.tac = static_cast<std::uint32_t>(read_bits(info.at("trackingAreaCode"), 24));
+    }
+    s.cell_identity = read_bits(info.at("cellIdentity"), 36);
+    s.reserved_for_operator_use = info.at("cellReservedForOperatorUse").get<std::string>() == "reserved";
+    if (v.contains("ue-TimersAndConstants")) {
+        const json& t = v.at("ue-TimersAndConstants");
+        s.timers = UeTimers{enum_value(t.at("t300")), enum_value(t.at("t301")), enum_value(t.at("t310")),
+                            enum_value(t.at("n310")), enum_value(t.at("t311")), enum_value(t.at("n311")),
+                            enum_value(t.at("t319"))};
+    }
+    return s;
+}
+
+} // namespace
+
+Result<Bytes> encode(const Mib& m) {
+    auto j = mib_json(m);
+    if (!j) {
+        return j.error();
+    }
+    return to_uper(asn_DEF_RRC_BCCH_BCH_Message, {{"message", {{"mib", *j}}}});
+}
+
+Result<Mib> decode_mib(ByteView in) {
+    auto j = from_uper(asn_DEF_RRC_BCCH_BCH_Message, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<Mib> { return read_mib(j->at("message").at("mib")); });
+}
+
+Result<Bytes> mib_ie(const Mib& m) {
+    auto j = mib_json(m);
+    if (!j) {
+        return j.error();
+    }
+    return to_uper(asn_DEF_RRC_MIB, *j);
+}
+
+Result<Mib> decode_mib_ie(ByteView in) {
+    auto j = from_uper(asn_DEF_RRC_MIB, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<Mib> { return read_mib(*j); });
+}
+
+// ---- BCCH-DL-SCH ---------------------------------------------------------------------------
+
+Result<Bytes> encode(const Sib1& s) {
+    auto j = sib1_json(s);
+    if (!j) {
+        return j.error();
+    }
+    return to_uper(asn_DEF_RRC_BCCH_DL_SCH_Message, c1("systemInformationBlockType1", *j));
 }
 
 Result<Sib1> decode_sib1(ByteView in) {
@@ -440,32 +436,24 @@ Result<Sib1> decode_sib1(ByteView in) {
         if (k != "systemInformationBlockType1") {
             return Error{Errc::unsupported, 0, "RRC: a BCCH-DL-SCH message other than SIB1"};
         }
-        const json& info = v->at("cellAccessRelatedInfo").at("plmn-IdentityInfoList").at(0);
-        Sib1 s;
-        for (const auto& p : info.at("plmn-IdentityList")) {
-            s.plmns.push_back(read_plmn(p));
-        }
-        if (!s.plmns.empty() && s.plmns.front().mcc.empty()) {
-            return unread("RRC: the first PLMN of SIB1 has no MCC");
-        }
-        for (std::size_t i = 1; i < s.plmns.size(); ++i) {
-            if (s.plmns[i].mcc.empty()) {
-                s.plmns[i].mcc = s.plmns[i - 1].mcc;   // Cond MCC: the previous entry's
-            }
-        }
-        if (info.contains("trackingAreaCode")) {
-            s.tac = static_cast<std::uint32_t>(read_bits(info.at("trackingAreaCode"), 24));
-        }
-        s.cell_identity = read_bits(info.at("cellIdentity"), 36);
-        s.reserved_for_operator_use = info.at("cellReservedForOperatorUse").get<std::string>() == "reserved";
-        if (v->contains("ue-TimersAndConstants")) {
-            const json& t = v->at("ue-TimersAndConstants");
-            s.timers = UeTimers{enum_value(t.at("t300")), enum_value(t.at("t301")), enum_value(t.at("t310")),
-                                enum_value(t.at("n310")), enum_value(t.at("t311")), enum_value(t.at("n311")),
-                                enum_value(t.at("t319"))};
-        }
-        return s;
+        return read_sib1(*v);
     });
+}
+
+Result<Bytes> sib1_ie(const Sib1& s) {
+    auto j = sib1_json(s);
+    if (!j) {
+        return j.error();
+    }
+    return to_uper(asn_DEF_RRC_SIB1, *j);
+}
+
+Result<Sib1> decode_sib1_ie(ByteView in) {
+    auto j = from_uper(asn_DEF_RRC_SIB1, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<Sib1> { return read_sib1(*j); });
 }
 
 // ---- PCCH ------------------------------------------------------------------------------------
@@ -876,6 +864,46 @@ Result<Bytes> generic_nr_capability() {
                       {"phy-Parameters", json::object()},
                       {"rf-Parameters", {{"supportedBandListNR", json::array({{{"bandNR", 78}}})}}}};
     return to_uper(asn_DEF_RRC_UE_NR_Capability, cap);
+}
+
+Result<Bytes> measurement_timing_configuration() {
+    return to_uper(asn_DEF_RRC_MeasurementTimingConfiguration,
+                   {{"criticalExtensions", {{"c1", {{"measTimingConf", json::object()}}}}}});
+}
+
+Result<Bytes> radio_access_capability(const Bytes& nr_capability) {
+    if (nr_capability.empty()) {
+        return bad("RRC: no NR capability");
+    }
+    auto list = to_uper(asn_DEF_RRC_UE_CapabilityRAT_ContainerList,
+                        json::array({{{"rat-Type", "nr"}, {"ue-CapabilityRAT-Container", hex(nr_capability)}}}));
+    if (!list) {
+        return list.error();
+    }
+    return to_uper(asn_DEF_RRC_UERadioAccessCapabilityInformation,
+                   {{"criticalExtensions",
+                     {{"c1", {{"ueRadioAccessCapabilityInformation", {{"ue-RadioAccessCapabilityInfo", hex(*list)}}}}}}}});
+}
+
+Result<Bytes> nr_capability_of(ByteView radio_access_capability) {
+    auto j = from_uper(asn_DEF_RRC_UERadioAccessCapabilityInformation, radio_access_capability);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<Bytes> {
+        const Bytes inner = read_octets(
+            j->at("criticalExtensions").at("c1").at("ueRadioAccessCapabilityInformation").at("ue-RadioAccessCapabilityInfo"));
+        auto list = from_uper(asn_DEF_RRC_UE_CapabilityRAT_ContainerList, inner);
+        if (!list) {
+            return list.error();
+        }
+        for (const auto& e : *list) {
+            if (e.at("rat-Type").get<std::string>() == "nr") {
+                return read_octets(e.at("ue-CapabilityRAT-Container"));
+            }
+        }
+        return Error{Errc::invalid_argument, 0, "RRC: no NR capability in the container list"};
+    });
 }
 
 Result<std::string> to_jer(std::string_view channel, ByteView in) {

@@ -1,0 +1,439 @@
+// SPDX-FileCopyrightText: 2026 Adi Juliawan
+// SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+#include "proc/ran/du.hpp"
+
+#include <utility>
+
+#include "codec/asn1/msg/ngap.hpp"
+
+namespace ksim::proc::ran {
+
+namespace {
+
+std::string str(std::int64_t v) { return std::to_string(v); }
+
+template <class... F>
+struct Overload : F... {
+    using F::operator()...;
+};
+template <class... F>
+Overload(F...) -> Overload<F...>;
+
+Millis wait_of(const std::optional<std::string>& t) {
+    if (!t || t->size() < 3) {
+        return 5'000;
+    }
+    return static_cast<Millis>(std::stoi(t->substr(1, t->size() - 2))) * 1'000;   // "v10s" -> 10 s
+}
+
+} // namespace
+
+Du::Du(Executor& ex, IEventSink& events, DuConfig cfg, IAssoc& f1, std::function<void(air::Frame)> to_air)
+    : ex_(ex), events_(events), cfg_(std::move(cfg)), f1_(f1), to_air_(std::move(to_air)),
+      alive_(std::make_shared<bool>(true)) {
+    f1_.set_handlers([this](ByteView msg, SctpMeta) { on_f1(msg); }, [this](LinkEvent e) { on_f1_event(e); });
+}
+
+Du::~Du() {
+    *alive_ = false;
+    for (auto* t : {&setup_retry_, &mib_timer_, &sib1_timer_}) {
+        if (*t) {
+            ex_.stop_timer(**t);
+        }
+    }
+}
+
+f1ap::NrCgi Du::cgi() const { return {ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc), cfg_.nci}; }
+
+std::uint16_t Du::sfn() const noexcept { return static_cast<std::uint16_t>((ex_.now() / 10) % 1024); }
+
+air::Frame Du::frame(air::FrameType t, std::uint32_t radio_id) const {
+    air::Frame f;
+    f.type = t;
+    f.cell_handle = cfg_.cell_handle;
+    f.radio_id = radio_id;
+    const Millis now = ex_.now();
+    f.tx_time_ns = static_cast<std::uint64_t>(now) * 1'000'000;
+    f.sfn_slot = static_cast<std::uint32_t>(sfn()) << 8 | static_cast<std::uint32_t>((now % 10) * 2);
+    return f;
+}
+
+// ---- F1 ----------------------------------------------------------------------------------
+
+void Du::on_f1_event(LinkEvent e) {
+    if (e == LinkEvent::up || e == LinkEvent::restart) {
+        f1_setup();
+        return;
+    }
+    // The association is gone: the cell goes down and so do its UEs.
+    active_ = false;
+    for (auto* t : {&mib_timer_, &sib1_timer_}) {
+        if (*t) {
+            ex_.stop_timer(**t);
+            t->reset();
+        }
+    }
+    ues_.clear();
+    by_rnti_.clear();
+    ra_.clear();
+}
+
+void Du::send_f1(const f1ap::Pdu& p, bool ue_associated) {
+    auto wire = f1ap::encode(p);
+    if (!wire) {
+        ++stats_.f1_errors;
+        events_.emit("ran.encode_error", cfg_.id, {{"what", wire.error().what}});
+        return;
+    }
+    const std::uint16_t stream = ue_associated && f1_.out_streams() > 1 ? 1 : 0;
+    (void)f1_.send(*wire, SctpMeta{kF1apPpid, stream});
+}
+
+void Du::f1_setup() {
+    rrc::Sib1 sib1;
+    sib1.plmns = {cfg_.plmn};
+    sib1.tac = cfg_.tac;
+    sib1.cell_identity = cfg_.nci;
+    sib1.timers = cfg_.timers;
+    auto mib = rrc::mib_ie(rrc::Mib{});
+    auto sib = rrc::sib1_ie(sib1);
+    auto mtc = rrc::measurement_timing_configuration();
+    auto sib_frame = rrc::encode(sib1);
+    if (!mib || !sib || !mtc || !sib_frame) {
+        events_.emit("ran.encode_error", cfg_.id, {{"what", "the cell's system information"}});
+        return;
+    }
+    sib1_frame_ = std::move(*sib_frame);
+    f1ap::ServedCell cell;
+    cell.cgi = cgi();
+    cell.pci = cfg_.pci;
+    cell.tac = cfg_.tac;
+    cell.plmns = {cgi().plmn};
+    cell.arfcn = cfg_.arfcn;
+    cell.meas_timing = std::move(*mtc);
+    cell.mib = std::move(*mib);
+    cell.sib1 = std::move(*sib);
+    transaction_ = static_cast<std::uint8_t>(transaction_ + 1);
+    send_f1(f1ap::F1SetupRequest{transaction_, cfg_.du_id, cfg_.name, {cell}}, false);
+}
+
+void Du::on_f1(ByteView msg) {
+    auto p = f1ap::decode(msg);
+    if (!p) {
+        ++stats_.f1_errors;
+        auto h = f1ap::peek(msg);
+        events_.emit("ran.f1.error", cfg_.id, {{"what", p.error().what}});
+        if (h && h->reject) {
+            f1ap::ErrorIndication e;
+            e.cu_ue = h->cu_ue;
+            e.du_ue = h->du_ue;
+            e.cause = f1ap::Cause{"protocol", "abstract-syntax-error-reject"};
+            send_f1(e, h->du_ue.has_value());
+        }
+        return;
+    }
+    std::visit(Overload{
+                   [this](const f1ap::F1SetupResponse& m) { handle(m); },
+                   [this](const f1ap::F1SetupFailure& m) { handle(m); },
+                   [this](const f1ap::DlRrcMessageTransfer& m) { handle(m); },
+                   [this](const f1ap::UeContextSetupRequest& m) { handle(m); },
+                   [this](const f1ap::UeContextModificationRequest& m) { handle(m); },
+                   [this](const f1ap::UeContextReleaseCommand& m) { handle(m); },
+                   [this](const f1ap::Paging& m) { handle(m); },
+                   [this](const f1ap::ErrorIndication& m) {
+                       events_.emit("ran.f1.error_indication", cfg_.id,
+                                    {{"cause", m.cause ? m.cause->group + "/" + m.cause->value : ""}});
+                   },
+                   [this](const auto&) { ++stats_.f1_errors; },
+               },
+               *p);
+}
+
+void Du::handle(const f1ap::F1SetupResponse& m) {
+    if (m.transaction != transaction_) {
+        return;
+    }
+    if (setup_retry_) {
+        ex_.stop_timer(*setup_retry_);
+        setup_retry_.reset();
+    }
+    active_ = std::find(m.activate.begin(), m.activate.end(), cgi()) != m.activate.end();
+    events_.emit("ran.f1.setup", cfg_.id, {{"cu", m.cu_name}, {"cell_active", active_ ? "1" : "0"}});
+    if (active_) {
+        broadcast();
+        schedule_si(cfg_.mib_period, true);
+        schedule_si(cfg_.sib1_period, false);
+    }
+}
+
+void Du::handle(const f1ap::F1SetupFailure& m) {
+    const Millis wait = wait_of(m.time_to_wait);
+    events_.emit("ran.f1.setup.failure", cfg_.id,
+                 {{"cause", m.cause.group + "/" + m.cause.value}, {"retry_ms", str(wait)}});
+    setup_retry_ = ex_.start_timer(wait, [this, alive = alive_] {
+        if (*alive) {
+            setup_retry_.reset();
+            f1_setup();
+        }
+    });
+}
+
+// ---- broadcast and paging ------------------------------------------------------------------
+
+void Du::send_mib() {
+    rrc::Mib mib;
+    mib.sfn = sfn();
+    if (auto wire = rrc::encode(mib)) {
+        air::Frame b = frame(air::FrameType::bch, 0);
+        b.sdus.push_back({0, air::RlcMode::tm, std::move(*wire)});
+        b.seq = seq_++;
+        to_air_(std::move(b));
+    }
+}
+
+void Du::send_sib1() {
+    air::Frame si = frame(air::FrameType::si, 0);
+    si.sdus.push_back({0, air::RlcMode::tm, sib1_frame_});
+    si.seq = seq_++;
+    to_air_(std::move(si));
+}
+
+void Du::broadcast() {
+    if (active_) {
+        send_mib();
+        send_sib1();
+    }
+}
+
+void Du::schedule_si(Millis period, bool mib) {
+    auto& timer = mib ? mib_timer_ : sib1_timer_;
+    timer = ex_.start_timer(period, [this, period, mib, alive = alive_] {
+        if (!*alive || !active_) {
+            return;
+        }
+        if (mib) {
+            mib_timer_.reset();
+            send_mib();
+        } else {
+            sib1_timer_.reset();
+            send_sib1();
+        }
+        schedule_si(period, mib);
+    });
+}
+
+void Du::handle(const f1ap::Paging& m) {
+    if (!active_ || std::find(m.cells.begin(), m.cells.end(), cgi()) == m.cells.end()) {
+        return;
+    }
+    auto pcch = rrc::encode(rrc::Paging{{m.s_tmsi}});
+    if (!pcch) {
+        return;
+    }
+    // TS 38.304 §7.1 with T = 128, N = T, Ns = 1: PF where SFN mod T = UE_ID mod N; i_s 0.
+    const std::uint16_t now = sfn();
+    const std::uint16_t pf = static_cast<std::uint16_t>(m.ue_identity_index % 128);
+    const auto ahead = static_cast<std::uint16_t>((pf - (now % 128) + 128) % 128);
+    air::Frame p = frame(air::FrameType::pcch, 0);
+    p.paging = air::PagingStamp{static_cast<std::uint16_t>((now + ahead) % 1024), 0, false};
+    p.sdus.push_back({0, air::RlcMode::tm, std::move(*pcch)});
+    p.seq = seq_++;
+    events_.emit("ran.du.paging", cfg_.id, {{"pf", str(p.paging->pf_sfn)}});
+    to_air_(std::move(p));
+}
+
+// ---- MAC: random access and SDUs -------------------------------------------------------------
+
+void Du::on_frame(const air::Frame& f) {
+    if (!active_ || f.cell_handle != cfg_.cell_handle) {
+        return;
+    }
+    switch (f.type) {
+    case air::FrameType::prach:
+        on_prach(f);
+        return;
+    case air::FrameType::msg3:
+        on_msg3(f);
+        return;
+    case air::FrameType::ul_sdu:
+        on_ul_sdu(f);
+        return;
+    default:
+        return;
+    }
+}
+
+void Du::on_prach(const air::Frame& f) {
+    if (!f.prach) {
+        return;
+    }
+    ++stats_.prach;
+    const air::Prach& p = *f.prach;
+    const std::uint32_t key = static_cast<std::uint32_t>(p.ra_rnti()) << 8 | p.preamble;
+    const Millis now = ex_.now();
+    auto it = ra_.find(key);
+    if (it == ra_.end() || now - it->second.at > 10) {
+        while (by_rnti_.count(next_rnti_) != 0 || next_rnti_ < 0x4601 || next_rnti_ > 0xFFEF) {
+            next_rnti_ = next_rnti_ < 0x4601 || next_rnti_ > 0xFFEF ? std::uint16_t{0x4601}
+                                                                    : static_cast<std::uint16_t>(next_rnti_ + 1);
+        }
+        it = ra_.insert_or_assign(key, Ra{next_rnti_++, now}).first;
+    }
+    air::Frame r = frame(air::FrameType::rar, f.radio_id);
+    r.rnti = p.ra_rnti();
+    r.rar = air::Rar{p.preamble, it->second.tc_rnti, 0, 0};
+    r.seq = seq_++;
+    ++stats_.rar;
+    to_air_(std::move(r));
+}
+
+Result<Bytes> Du::cell_group(const std::set<std::uint8_t>& srbs) const {
+    rrc::CellGroup cg;
+    for (std::uint8_t s : srbs) {
+        cg.bearers.push_back(rrc::RlcBearer{s, true, s, true});
+    }
+    return rrc::encode(cg);
+}
+
+void Du::on_msg3(const air::Frame& f) {
+    if (by_rnti_.count(f.rnti) != 0) {
+        ++stats_.msg3_lost_contention;   // another UE's Msg3 for this TC-RNTI came first
+        return;
+    }
+    const air::Sdu& ccch = f.sdus.front();
+    if (ccch.lcid != 0) {
+        return;   // a C-RNTI Msg3 (resume, re-establishment) is not in P1
+    }
+    Ue ue;
+    ue.du_ue = next_du_ue_++;
+    ue.rnti = f.rnti;
+    ue.radio_id = f.radio_id;
+    ue.contention = air::contention_id_of(ccch.data);
+    auto cg = cell_group({1});
+    if (!cg) {
+        return;
+    }
+    by_rnti_[ue.rnti] = ue.du_ue;
+    ues_.emplace(ue.du_ue, ue);
+    send_f1(f1ap::InitialUlRrcMessageTransfer{ue.du_ue, cgi(), ue.rnti, ccch.data, std::move(*cg), 0}, true);
+}
+
+void Du::on_ul_sdu(const air::Frame& f) {
+    auto r = by_rnti_.find(f.rnti);
+    if (r == by_rnti_.end()) {
+        return;
+    }
+    Ue* ue = by_du(r->second);
+    if (ue == nullptr || !ue->cu_ue) {
+        return;
+    }
+    for (const air::Sdu& s : f.sdus) {
+        ++stats_.ul_sdus;
+        if (ue->srbs.count(s.lcid) != 0) {
+            send_f1(f1ap::UlRrcMessageTransfer{*ue->cu_ue, ue->du_ue, s.lcid, s.data}, true);
+        }
+        // DRB logical channels go to F1-U (N10).
+    }
+}
+
+void Du::dl_sdu(const Ue& ue, std::uint8_t lcid, Bytes sdu) {
+    air::Frame d = frame(air::FrameType::dl_sdu, ue.radio_id);
+    d.rnti = ue.rnti;
+    d.sdus.push_back({lcid, lcid == 0 ? air::RlcMode::tm : air::RlcMode::am, std::move(sdu)});
+    d.seq = seq_++;
+    ++stats_.dl_sdus;
+    to_air_(std::move(d));
+}
+
+Du::Ue* Du::by_du(std::uint32_t id) {
+    auto it = ues_.find(id);
+    return it != ues_.end() ? &it->second : nullptr;
+}
+
+// ---- UE-associated F1 ----------------------------------------------------------------------
+
+void Du::handle(const f1ap::DlRrcMessageTransfer& m) {
+    Ue* ue = by_du(m.du_ue);
+    if (ue == nullptr) {
+        ++stats_.f1_errors;
+        send_f1(f1ap::ErrorIndication{0, m.cu_ue, m.du_ue, f1ap::Cause{"radioNetwork", "unknown-or-already-allocated-gnb-du-ue-f1ap-id"}},
+                true);
+        return;
+    }
+    ue->cu_ue = m.cu_ue;
+    if (m.srb == 0 && ue->contention) {
+        air::Frame m4 = frame(air::FrameType::msg4, ue->radio_id);
+        m4.rnti = ue->rnti;
+        m4.contention_id = *ue->contention;
+        m4.sdus.push_back({0, air::RlcMode::tm, m.rrc});
+        m4.seq = seq_++;
+        ue->contention.reset();
+        ++stats_.dl_sdus;
+        to_air_(std::move(m4));
+        return;
+    }
+    dl_sdu(*ue, m.srb, m.rrc);
+}
+
+void Du::handle(const f1ap::UeContextSetupRequest& m) {
+    Ue* ue = m.du_ue ? by_du(*m.du_ue) : nullptr;
+    if (ue == nullptr) {
+        send_f1(f1ap::UeContextSetupFailure{m.cu_ue, m.du_ue, f1ap::Cause{"radioNetwork", "unknown-or-already-allocated-gnb-du-ue-f1ap-id"}},
+                true);
+        return;
+    }
+    ue->cu_ue = m.cu_ue;
+    std::set<std::uint8_t> added(m.srbs.begin(), m.srbs.end());
+    added.erase(0);
+    ue->srbs.insert(added.begin(), added.end());
+    auto cg = cell_group(added);
+    if (!cg) {
+        send_f1(f1ap::UeContextSetupFailure{m.cu_ue, ue->du_ue, f1ap::Cause{"misc", "unspecified"}}, true);
+        return;
+    }
+    std::vector<std::pair<std::uint8_t, std::uint8_t>> setup;
+    setup.reserve(added.size());
+    for (std::uint8_t s : added) {
+        setup.emplace_back(s, s);
+    }
+    send_f1(f1ap::UeContextSetupResponse{m.cu_ue, ue->du_ue, std::move(*cg), setup}, true);
+    if (m.rrc) {
+        dl_sdu(*ue, 1, *m.rrc);
+    }
+}
+
+void Du::handle(const f1ap::UeContextModificationRequest& m) {
+    Ue* ue = by_du(m.du_ue);
+    if (ue == nullptr) {
+        ++stats_.f1_errors;
+        return;
+    }
+    std::set<std::uint8_t> added(m.srbs.begin(), m.srbs.end());
+    added.erase(0);
+    ue->srbs.insert(added.begin(), added.end());
+    std::optional<Bytes> cg;
+    if (!added.empty()) {
+        if (auto c = cell_group(added)) {
+            cg = std::move(*c);
+        }
+    }
+    send_f1(f1ap::UeContextModificationResponse{m.cu_ue, ue->du_ue, std::move(cg)}, true);
+    if (m.rrc) {
+        dl_sdu(*ue, 1, *m.rrc);
+    }
+}
+
+void Du::handle(const f1ap::UeContextReleaseCommand& m) {
+    Ue* ue = by_du(m.du_ue);
+    if (ue != nullptr) {
+        if (m.rrc && m.srb) {
+            dl_sdu(*ue, *m.srb, *m.rrc);
+        }
+        by_rnti_.erase(ue->rnti);
+        ues_.erase(m.du_ue);
+    }
+    send_f1(f1ap::UeContextReleaseComplete{m.cu_ue, m.du_ue}, true);
+}
+
+} // namespace ksim::proc::ran

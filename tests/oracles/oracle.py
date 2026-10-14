@@ -179,11 +179,11 @@ def cmd_roundtrip(a) -> int:
 
 
 def cmd_builders(a) -> int:
-    """Every sample of the typed RRC builders (P1 N6), as rrc_builders_dump
-    prints them, through pycrate and tshark, and asn1c's own decode and
-    re-encode: each must PASS."""
+    """Every sample of the typed builders (RRC from P1 N6, NGAP from N7), as
+    msg_builders_dump prints them, through pycrate and tshark, and asn1c's own
+    decode and re-encode: each must PASS."""
     import subprocess
-    dump = Path(a.dump) if a.dump else ROOT / "build" / "dev" / "tests" / "unit" / "asn1" / "rrc_builders_dump"
+    dump = Path(a.dump) if a.dump else ROOT / "build" / "dev" / "tests" / "unit" / "asn1" / "msg_builders_dump"
     run = subprocess.run([str(dump)], capture_output=True, text=True)
     if run.returncode != 0:
         print(f"BUILDERS=FAIL {dump.name} exited {run.returncode}: {run.stderr.strip()[:200]}")
@@ -191,12 +191,12 @@ def cmd_builders(a) -> int:
     c = collections.Counter()
     with Codec(Path(a.codec) if a.codec else None) as codec:
         for line in run.stdout.splitlines():
-            _channel, name, hx = line.split("\t")
-            r = roundtrip.check(codec, "rrc", name.split(".")[0], bytes.fromhex(hx))
+            proto, name, hx = line.split("\t")
+            r = roundtrip.check(codec, proto, name.split(".")[0], bytes.fromhex(hx))
             ok = r.status == "PASS" and r.pycrate_ok and r.tshark_clean and r.asn1c_roundtrip
             c["PASS" if ok else "FAIL"] += 1
             if not ok or a.verbose:
-                print(f"BUILDER {name} status={r.status} pycrate={int(r.pycrate_ok)} tshark={int(r.tshark_clean)} "
+                print(f"BUILDER {proto} {name} status={r.status} pycrate={int(r.pycrate_ok)} tshark={int(r.tshark_clean)} "
                       f"asn1c_roundtrip={int(r.asn1c_roundtrip)} jer_match={int(r.jer_match)} "
                       + "; ".join(dict.fromkeys(r.notes))[:300])
     print("BUILDERS " + " ".join(f"{k}={n}" for k, n in sorted(c.items())))
@@ -466,7 +466,7 @@ def main() -> None:
     lo.add_argument("mode", choices=("min", "max"))
     lo.add_argument("--codec")
     bu = sub.add_parser("builders")
-    bu.add_argument("--dump", help="the rrc_builders_dump binary (default: the dev build's)")
+    bu.add_argument("--dump", help="the msg_builders_dump binary (default: the dev build's)")
     bu.add_argument("--codec", help="ksim-codec binary")
     bu.add_argument("--verbose", action="store_true")
     al = sub.add_parser("allowlists")

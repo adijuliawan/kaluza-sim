@@ -7,6 +7,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -81,6 +83,23 @@ TYPED_TEST(ExecutorContract, TimersFireInDeadlineOrderAndTiesInStartOrder) {
         ex.start_timer(40, done);
     }));
     EXPECT_EQ(order, (std::vector<int>{1, 2, 22, 3}));
+}
+
+TYPED_TEST(ExecutorContract, AbsoluteDeadlinesKeepTheirOrderAcrossClockTicks) {
+    // memlink's per-direction order rests on this (P1 N7: a delay computed
+    // from one clock reading and added to a later one reordered messages).
+    std::vector<int> order;
+    ASSERT_TRUE(this->h.run([&](Executor& ex, const std::function<void()>& done) {
+        const Millis base = ex.now();
+        for (int i = 0; i < 200; ++i) {
+            ex.start_timer_at(base + 2 + i / 50, [&order, i] { order.push_back(i); });
+        }
+        ex.start_timer_at(base - 5, [&order] { order.insert(order.begin(), -1); });   // past: fires at once
+        ex.start_timer_at(base + 20, done);
+    }));
+    ASSERT_EQ(order.size(), 201u);
+    EXPECT_EQ(order.front(), -1);
+    EXPECT_TRUE(std::is_sorted(order.begin(), order.end()));
 }
 
 TYPED_TEST(ExecutorContract, ATimerNeverFiresEarly) {

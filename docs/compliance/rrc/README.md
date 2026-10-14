@@ -47,6 +47,9 @@ Row suffixes (requirements.md): -D defect in the sim, -B a choice the spec leave
 | KS-RRCU-009 | RRC release (with or without suspend, with redirect); actions on going to RRC_IDLE | 38.331 §5.3.8, §5.3.11 | P: tests/procedure UeRrc.Clause5_3_8_* | built in P1 N6: RRCRelease without suspend or redirect, and the actions on going to RRC_IDLE |
 | KS-RRCU-010 | UE capability transfer from personas | 38.331 §5.6.1 | P: tests/procedure UeRrc.Clause5_6_1_* | built in P1 N6: UECapabilityInformation answering the enquiry with a generic UE-NR-Capability; personas come with N15 |
 | KS-RRCU-011 | DL/UL information transfer; paging on PF/PO with DRX | 38.331 §5.7.1, §5.7.2, §5.3.2; 38.304 §7 (T0) | P: tests/procedure UeRrc.Clause5_3_2_*, UeRrc.Clause5_3_4_* | built in P1 N6: DL and UL information transfer (SRB2 once it exists); paging matched on the 5G-S-TMSI (PF/PO stamped, not enforced, A-11) |
+| KS-RRCC-001 | Connection management; release on inactivity; re-establishment checks | 38.331 §5.3.3, §5.3.7, §5.3.8 | P: tests/procedure Ran | built in P1 N7: connection setup at the CU-CP (RRCSetup with the DU's CellGroupConfig) and release through F1; release on inactivity and re-establishment checks are N12/P3 |
+| KS-RRCC-002 | Ordering with Initial Context Setup: SMC before DRBs. Ask the UE for its capabilities only if the ICS carries none, then send UE Radio Capability Info Indication | 38.331 §5.3.4, §5.6.1; 38.413 §8.14.1 | P: tests/procedure Ran.AUeRegisters* | built in P1 N7: SMC before any further bearer, a capability enquiry only when the INITIAL CONTEXT SETUP REQUEST carries no capability, then UE RADIO CAPABILITY INFO INDICATION |
+| KS-RRCC-005 | CN paging dispatched to cells; RAN paging (v1.x) | 38.300 §9.2.5 (T0 reading) | P: tests/procedure Ran.Ngap8_2_1_* | built in P1 N7: CN paging dispatched to the cell; RAN paging is v1.x |
 
 ## Typed rows
 
@@ -61,4 +64,4 @@ Row suffixes (requirements.md): -D defect in the sim, -B a choice the spec leave
 
 ## Not built yet
 
-9 v1, 2 v1.x requirement(s): KS-RRCU-002, KS-RRCU-006, KS-RRCU-007, KS-RRCU-008, KS-RRCU-012, KS-RRCC-001, KS-RRCC-002, KS-RRCC-003, KS-RRCC-004, KS-RRCC-005, KS-RRCC-006.
+6 v1, 2 v1.x requirement(s): KS-RRCU-002, KS-RRCU-006, KS-RRCU-007, KS-RRCU-008, KS-RRCU-012, KS-RRCC-003, KS-RRCC-004, KS-RRCC-006.

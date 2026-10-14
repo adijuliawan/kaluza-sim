@@ -27,6 +27,7 @@ public:
 
     bool post(Task t) override;
     TimerId start_timer(Millis delay, Callback cb) override;
+    TimerId start_timer_at(Millis deadline, Callback cb) override { return wheel_.schedule_at(deadline, std::move(cb)); }
     bool stop_timer(TimerId id) noexcept override { return wheel_.cancel(id); }
     Millis now() const noexcept override { return clock_.now_ms(); }
 

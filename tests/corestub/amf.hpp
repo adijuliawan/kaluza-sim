@@ -71,6 +71,9 @@ public:
     struct Link {
         std::function<void(Bytes)> to_ue;       // a downlink NAS PDU
         std::function<void()> release;          // the network releases the N1 connection
+        /// With NGAP below: the REGISTRATION ACCEPT goes in an INITIAL CONTEXT
+        /// SETUP REQUEST with K_gNB, instead of to_ue.
+        std::function<void(Bytes accept, SecretBytes kgnb)> initial_context;
     };
 
     Amf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p);
@@ -101,6 +104,10 @@ public:
     const std::string& supi() const noexcept { return supi_; }
     std::optional<std::uint32_t> last_ul_count() const noexcept { return last_ul_; }
     const proc::ue::NasSecurityContext* security() const noexcept { return ctx_ ? &*ctx_ : nullptr; }
+    /// The UE security capability of its REGISTRATION REQUEST.
+    const std::optional<nas::ie::UeSecurityCapability>& ue_capabilities() const noexcept { return ue_caps_; }
+    /// K_gNB as TS 33.501 6.8.1.2.2 has it: K_AMF and the SECURITY MODE COMPLETE's uplink COUNT.
+    Result<SecretBytes> kgnb() const;
 
 private:
     enum class State : std::uint8_t { idle, authenticating, securing, accepting, registered, released };
@@ -144,6 +151,7 @@ private:
     std::optional<proc::ue::NasSecurityContext> ctx_;
     std::optional<std::uint32_t> last_ul_;
     bool imeisv_asked_ = false;
+    std::optional<std::uint32_t> smc_count_;
     Bytes pending_;            // the message T3560 retransmits
     bool pending_plain_ = true;
     int t3560_expiries_ = 0;

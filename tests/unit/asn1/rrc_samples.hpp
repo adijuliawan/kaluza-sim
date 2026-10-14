@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: LicenseRef-kaluza-sim-private
 //
 // One sample of every RRC builder (P1 N6), shared by the round-trip tests and
-// rrc_builders_dump, whose output the oracle checks with tshark and pycrate.
+// msg_builders_dump, whose output the oracle checks with tshark and pycrate.
 
 #pragma once
 

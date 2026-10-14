@@ -147,7 +147,8 @@ The rules are enforced by PRIVATE CMake link graphs plus `tools/guards/check_lay
 **As built** (P0 put the codecs under four directories, not one per protocol): `codec/asn1`, `codec/nas` (5GMM, 5GSM, SMS), `codec/uicc` (APDU, AUTHENTICATE, BER-TLV, FCP) and `codec/up` (GTP-U, PSC, NR-U). Two consequences of the rules for P1:
 - the vpcd transport splits in two: its framing is `uicc/transport/vpcd`, and its TCP socket is `net/tcp`, wired together in `apps/ksim-sim` (R7);
 - `codec` cannot hold `SecretBytes`, so the layouts of EF 4F03 and 4F05, which carry keys, are coded in `proc/ue/nas_sec/persist`.
-- P1 N6 added `codec/air` (KAIR v1), `codec/pdcp`, `codec/sdap` and `codec/asn1/msg/rrc`. The RRC builders build each value as X.697 JSON and let the generated code encode it (strict UPER), so the ASN.1 constraints are applied by the code that decodes (row KS-RRC-B2). `entity/` holds `pdcp`, `sdap`, `rlc/{iface,ideal}` and `mac/{iface,ue_ideal}`; the DU side of the ideal MAC comes with N7.
+- P1 N6 added `codec/air` (KAIR v1), `codec/pdcp`, `codec/sdap` and `codec/asn1/msg/rrc`. The RRC builders build each value as X.697 JSON and let the generated code encode it (strict UPER), so the ASN.1 constraints are applied by the code that decodes (row KS-RRC-B2). `entity/` holds `pdcp`, `sdap`, `rlc/{iface,ideal}` and `mac/{iface,ue_ideal}`.
+- P1 N7 added `codec/asn1/msg/{ngap,f1ap}` (the same JER route, with `peek()` for the TS 38.413 §10 handling) and `proc/ran/{du,cucp}`. The DU holds the network side of the ideal MAC itself; both take their F1 and NG-C associations as `IAssoc`, so memlink and SCTP serve alike. The gNB ID layout `[shard:4][gen:4][index:24]` is kept with shard and generation 0 (one shard in P1); the `node/` binders and the SCTP I/O thread come with `ksim` in N8.
 
 ## 4. Codec pipelines
 

@@ -54,8 +54,27 @@ ksim_layer(ksim_asn1_registry codec)
 
 # Typed RRC builders and readers (P1 N6; architecture.md §4.1 msg/): values
 # built as JER, encoded by the generated code.
+add_library(ksim_codec_jer STATIC msg/jer.cpp)
+target_include_directories(ksim_codec_jer PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(ksim_codec_jer PUBLIC ksim::platform ksim::codec_asn1 nlohmann_json::nlohmann_json PRIVATE ksim::warnings)
+ksim_layer(ksim_codec_jer codec)
+
 add_library(ksim_codec_rrc STATIC msg/rrc.cpp)
 add_library(ksim::codec_rrc ALIAS ksim_codec_rrc)
 target_include_directories(ksim_codec_rrc PUBLIC ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(ksim_codec_rrc PUBLIC ksim::platform PRIVATE ksim::codec_asn1 ksim::asn1_rrc nlohmann_json::nlohmann_json ksim::warnings)
+target_link_libraries(ksim_codec_rrc PUBLIC ksim::platform PRIVATE ksim_codec_jer ksim::asn1_rrc ksim::warnings)
 ksim_layer(ksim_codec_rrc codec)
+
+# Typed NGAP builders and readers (P1 N7), the same route.
+add_library(ksim_codec_ngap STATIC msg/ngap.cpp)
+add_library(ksim::codec_ngap ALIAS ksim_codec_ngap)
+target_include_directories(ksim_codec_ngap PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(ksim_codec_ngap PUBLIC ksim::platform PRIVATE ksim_codec_jer ksim::asn1_ngap ksim::warnings)
+ksim_layer(ksim_codec_ngap codec)
+
+# Typed F1AP builders and readers (P1 N7), the same route.
+add_library(ksim_codec_f1ap STATIC msg/f1ap.cpp)
+add_library(ksim::codec_f1ap ALIAS ksim_codec_f1ap)
+target_include_directories(ksim_codec_f1ap PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(ksim_codec_f1ap PUBLIC ksim::platform PRIVATE ksim_codec_jer ksim::asn1_f1ap ksim::warnings)
+ksim_layer(ksim_codec_f1ap codec)

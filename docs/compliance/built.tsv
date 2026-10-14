@@ -15,7 +15,7 @@ KS-UICC-007	built in P0: SUCI null scheme, Profile A and Profile B (ECIES); GET 
 KS-UICC-010	built in P0: TUAK and MILENAGE-256 libraries (v1.x as card algorithms)	U: tests/unit/crypto (35.233, 35.236 sets)
 KS-SEC-001	built in P0: the key hierarchy library (33.501 Annex A: K_AUSF to K_AMF', NH, K_NG-RAN*)	U: tests/unit/crypto keys5g_test (33.501 C.4 vectors); U: tests/oracles/keychain.py (10,000 inputs)
 KS-SEC-003	built in P0: NEA/NIA 0-2 (SNOW 3G vendored from OCUDU); 128-NEA3/NIA3 not built (KS-SEC-G1)	U: tests/unit/crypto (33.401 Annex C, 35.217 vectors)
-KS-NGAP-012	built in P0: the codec's PER coverage, SEQUENCE OF at its bounds (the N-20 class) probed; the procedure with the entity (P1)	U: oracle probes and roundtrip (asn1c against pycrate and tshark); F: fuzz_asn1_ngap
+KS-NGAP-012	built in P0: the codec's PER coverage, SEQUENCE OF at its bounds (the N-20 class) probed; in P1 N7 NG Reset received, full and partial, the UEs released locally and acknowledged	U: oracle probes and roundtrip (asn1c against pycrate and tshark); F: fuzz_asn1_ngap; P: tests/procedure Ran.Ngap8_7_4_*
 KS-GTPU-001	built in P0: GTPv1-U codec (header, extension chain, clause 8 IEs, every message type); the NG-U endpoint (Echo, Error Indication, the PDU Session Container) is P1 (N10), F1-U and Xn-U are P2 and P3	U: tests/unit/up, oracle m12roundtrip (pycrate, tshark); F: fuzz_codecs
 KS-GTPU-002	built in P0: PDU Session Container DL type 0 and UL type 1, padding, what follows the last field kept	U: tests/unit/up, oracle m12roundtrip (pycrate, tshark, OCUDU vectors); F: fuzz_codecs
 KS-GTPU-004	built in P0: NR-U DL USER DATA and DL DATA DELIVERY STATUS codec	U: tests/unit/up, oracle m12roundtrip (tshark nrup, OCUDU vectors); F: fuzz_codecs
@@ -43,3 +43,19 @@ KS-SDAP-001	built in P1 N6: header configuration per direction, QFI-to-DRB mappi
 KS-SDAP-003	built in P1 N6: UL QFI marking; the end-marker on remapping is not yet	U: tests/unit/entity Sdap
 KS-L2R-001	built in P1 N6: the ideal RLC passing whole SDUs per logical channel with AM/UM/TM modes; latency, jitter and loss per link are not configurable yet	U: tests/unit/entity UeMac; P: tests/procedure UeRrc
 KS-L2R-002	built in P1 N6: the UE side of the abstract MAC: C-RNTI, random access with real contention resolution, backoff and preambleTransMax; the DU side comes with N7	U: tests/unit/entity UeMac.Clause5_1_*
+KS-NGAP-001	built in P1 N7: PPID 60, stream 0 for non-UE-associated messages and 1 + RAN UE NGAP ID mod (streams - 1) for UEs; NG Setup redone when NG-C comes back, after Time to wait; one AMF	P: tests/procedure Ran (memlink)
+KS-NGAP-002	built in P1 N7: NG Setup; AMF Configuration Update acknowledged; RAN Configuration Update is not P1	P: tests/procedure Ran.Ngap8_7_1_*, Ran.Ngap8_7_3_*
+KS-NGAP-003	built in P1 N7: Initial UE Message (with the 5G-S-TMSI from Part1 and Part2), DL/UL NAS Transport; NAS Non Delivery Indication built and read	P: tests/procedure Ran; U: tests/unit/asn1 NgapMsg
+KS-NGAP-004	built in P1 N7: Initial Context Setup and its failure, sessions aside (N10)	P: tests/procedure Ran.AUeRegisters*, Ran.Mutant_kgnb_wrong_ul_count_*
+KS-NGAP-005	built in P1 N7: UE Context Release Command and Complete through F1; Release Request when the DU reports the UE lost	P: tests/procedure Ran.ADeregistrationEndsInAReleaseThroughF1
+KS-NGAP-006	built in P1 N7: UE Context Modification acknowledged; a key change through it is P3	U: tests/unit/asn1 NgapMsg
+KS-NGAP-008	built in P1 N7: Paging dispatched to the DU when its TAI is listed	P: tests/procedure Ran.Ngap8_2_1_*
+KS-NGAP-011	built in P1 N7: Error Indication both ways; clause 10 for transfer syntax errors, procedures outside P1 by criticality, missing IEs and unknown or inconsistent UE NGAP IDs; fuzz_ngap_proc	P: tests/procedure Ran.Ngap10_*; F: fuzz_ngap_proc
+KS-NGAP-013	built in P1 N7: AMF Status Indication read and reported as an event; backup AMF selection is P2 (one AMF in P1)	U: tests/unit/asn1 NgapMsg
+KS-NGAP-014	built in P1 N7: UE Radio Capability Info Indication after the CU-CP's capability enquiry	P: tests/procedure Ran.AUeRegisters*
+KS-F1AP-001	built in P1 N7: F1 Setup with the DU's MIB and SIB1, PPID 62, over memlink; SCTP port 38472 and configuration updates come with N8	P: tests/procedure Ran; U: tests/unit/asn1 F1apMsg
+KS-F1AP-002	built in P1 N7: Initial UL, DL and UL RRC Message Transfer (SRB0 CCCH messages, SRB1/2 PDCP PDUs)	P: tests/procedure Ran; U: tests/unit/asn1 F1apMsg
+KS-F1AP-003	built in P1 N7: UE Context Setup (SRB2), Modification and Release with the RRCRelease container; Release Request and Paging; Modification Required is not P1	P: tests/procedure Ran; U: tests/unit/asn1 F1apMsg
+KS-RRCC-001	built in P1 N7: connection setup at the CU-CP (RRCSetup with the DU's CellGroupConfig) and release through F1; release on inactivity and re-establishment checks are N12/P3	P: tests/procedure Ran
+KS-RRCC-002	built in P1 N7: SMC before any further bearer, a capability enquiry only when the INITIAL CONTEXT SETUP REQUEST carries no capability, then UE RADIO CAPABILITY INFO INDICATION	P: tests/procedure Ran.AUeRegisters*
+KS-RRCC-005	built in P1 N7: CN paging dispatched to the cell; RAN paging is v1.x	P: tests/procedure Ran.Ngap8_2_1_*

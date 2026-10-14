@@ -12,3 +12,8 @@ gtest_discover_tests(procedure_nas DISCOVERY_MODE PRE_TEST)
 add_executable(procedure_rrc rrc_ue_test.cpp)
 target_link_libraries(procedure_rrc PRIVATE ksim::proc ksim::warnings GTest::gtest_main)
 gtest_discover_tests(procedure_rrc DISCOVERY_MODE PRE_TEST)
+
+add_executable(procedure_ran ran_test.cpp)
+target_link_libraries(procedure_ran PRIVATE ksim_corestub ksim::proc ksim::uicc ksim::warnings GTest::gtest_main)
+target_compile_definitions(procedure_ran PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+gtest_discover_tests(procedure_ran DISCOVERY_MODE PRE_TEST)

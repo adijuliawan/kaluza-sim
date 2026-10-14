@@ -97,6 +97,12 @@ def main() -> int:
         (6, "1123456789a6"), (7, "2040009a002500088bd76380a1c0222f5d8e028909f380"), (7, "0880"), (8, "220910"),
         (8, "1600"), (8, "2a808fc00b6020"), (9, "2a00"), (9, "3a01bf002180"), (9, "4882028000000000000000002680"),
         (10, "4004a001117aec7014380445ebb1c051213e70")]]
+    # fuzz_ngap_proc: length-prefixed NGAP PDUs: every NGAP vector of the external
+    # corpus, one per PDU.
+    ngap_rows = [r for r in rows("ngap") if r.get("hex")]
+    def lp(*pdus):
+        return b"".join(len(p).to_bytes(2, "big") + p for p in pdus)
+    seeds["fuzz_ngap_proc"] = [lp(bytes.fromhex(r["hex"])) for r in ngap_rows]
     seeds["fuzz_mustfail"] = [b"KSIM must crash here"]
     total = 0
     for target, items in seeds.items():

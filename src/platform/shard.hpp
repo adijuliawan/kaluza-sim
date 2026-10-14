@@ -49,6 +49,9 @@ public:
     TimerId start_timer(Millis delay, TimerWheel::Callback cb) override {
         return wheel_.schedule_at(clock_.now_ms() + (delay > 0 ? delay : 0), std::move(cb));
     }
+    TimerId start_timer_at(Millis deadline, TimerWheel::Callback cb) override {
+        return wheel_.schedule_at(deadline, std::move(cb));
+    }
     bool stop_timer(TimerId id) noexcept override { return wheel_.cancel(id); }
     TimerWheel& timers() noexcept { return wheel_; }
     Reactor& reactor() noexcept { return reactor_; }

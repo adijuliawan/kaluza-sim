@@ -45,14 +45,19 @@ Row suffixes (requirements.md): -D defect in the sim, -B a choice the spec leave
 
 ## Requirements built
 
-None yet.
+| Row | What | Clause | Verified by | Status |
+|---|---|---|---|---|
+| KS-F1AP-001 | The DU opens SCTP (PPID 62, port 38472); F1 Setup with a DU-built MIB and SIB1; gNB-DU/CU configuration updates | 38.472; 38.473 §8.2 (T0) | P: tests/procedure Ran; U: tests/unit/asn1 F1apMsg | built in P1 N7: F1 Setup with the DU's MIB and SIB1, PPID 62, over memlink; SCTP port 38472 and configuration updates come with N8 |
+| KS-F1AP-002 | Initial UL RRC Message Transfer, DL and UL RRC Message Transfer (SRB ID width per the ASN.1) | 38.473 §8.4 (T0) | P: tests/procedure Ran; U: tests/unit/asn1 F1apMsg | built in P1 N7: Initial UL, DL and UL RRC Message Transfer (SRB0 CCCH messages, SRB1/2 PDCP PDUs) |
+| KS-F1AP-003 | UE Context Setup, Modification and Release; Release Request from the DU on RLF; Modification Required; Paging | 38.473 §8.3 (T0) | P: tests/procedure Ran; U: tests/unit/asn1 F1apMsg | built in P1 N7: UE Context Setup (SRB2), Modification and Release with the RRCRelease container; Release Request and Paging; Modification Required is not P1 |
 
 ## Typed rows
 
 | Row | Date | What | Evidence |
 |---|---|---|---|
 | KS-F1AP-S1 | 2026-10-14 | TS 38.473 j40, F1AP-Constants: 'id-EarlySyncInformationRelease ProtocolIE-ID ::= 925' and 'id-CSI-RSResourceSetToReleaseList ProtocolIE-ID ::= 926' share one paragraph with no break ('...::= 925id-CSI-...'). asn1c tokenises it anyway; pycrate's line-based reader cannot. The reading chosen: a line break after '::= 925'. A recorded repair (split-after) that must apply, or extraction fails | spec/tools/docx_asn1.py REPAIRS, found by the M8 pycrate compile |
+| KS-F1AP-B1 | 2026-10-15 | The DU as built in P1 N7 (src/proc/ran/du): one TDD cell (n78, SCS 30 kHz, 106 PRBs as F1 Setup states them; no PHY behind them, A-01); F1 Setup with the MIB and SIB1 as gNB-DU System Information, retried after a failure's time to wait; MIB every 80 ms and SIB1 every 160 ms once the CU activates the cell; one RAR per PRACH, the same TC-RNTI for UEs on the same preamble and occasion within 10 ms, the first Msg3 winning and getting Msg4 once the CU's RRCSetup arrives, later ones none (their UEs time out and retry); SRB PDUs carried as RRC containers; UE Context Setup and Modification adding SRBs with LCID = SRB ID and answering with the CellGroupConfig of the new RLC bearers; UE Context Release sending its RRC container before the context goes; Paging stamped with PF = UE_ID mod 128 (T = 128, N = T, i_s 0) but sent at once (A-11). F1 loss drops the cell and its UEs | src/proc/ran/du.cpp; P1 N7 |
 
 ## Not built yet
 
-5 v1 requirement(s): KS-F1AP-001, KS-F1AP-002, KS-F1AP-003, KS-F1AP-004, KS-F1AP-005.
+2 v1 requirement(s): KS-F1AP-004, KS-F1AP-005.
