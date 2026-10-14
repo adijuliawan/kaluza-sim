@@ -1,0 +1,4 @@
+# External-origin vectors (tools/corpus_ingest.py, rules in tests/vectors/rules.tsv). Do not edit.
+id	proto	pdu	octets	sha256	producer	direction	same_compiler	source	locator	licence	hex
+psc-ocudu-psup-001	psc		14	3686aea0b2f5d877381685ee238f9a2fe5841e53b4d60854dd01e0415d04193b	OCUDU PDU Session Container packer (489ed15c5c)	any	no	ocudu:tests/unittests/psup/psup_packing_test.cpp	psup_packing_test.cpp:86	BSD-3-Clause-Open-MPI (OCUDU unit tests)	0c9820ffeeddccbbaa9988996601
+psc-ocudu-psup-002	psc		14	ba0580e7282c3d04d4a10cf769a54f93272fc6690e141182e1cf824a72dc2cf4	OCUDU PDU Session Container packer (489ed15c5c)	any	no	ocudu:tests/unittests/psup/psup_packing_test.cpp	psup_packing_test.cpp:108	BSD-3-Clause-Open-MPI (OCUDU unit tests)	0c94a099eeddccbbaa5588cc6601

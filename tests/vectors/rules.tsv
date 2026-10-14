@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# Corpus sender rules for tools/corpus_ingest.py (plan M8, ADR 0005). One row per
+# source: what produced its octets, and whether we may use them. The first row
+# whose glob matches a file decides. Columns:
+#   source       a short id
+#   kind         bin (one PDU per file, INDEX.tsv beside it) | ocudu-cpp (byte arrays in C++ tests)
+#   path         relative to the base named in BASES (tools/corpus_ingest.py)
+#   glob         file pattern inside path
+#   proto        ngap | f1ap | e1ap | xnap | rrc | nru | psc | ngap-transfer
+#   producer     the encoder that wrote the octets, with version
+#   direction    the sender, as far as the rule knows it
+#   decision     in | out
+#   same_compiler  yes when an asn1c build produced the octets (independent of our code,
+#                  but not of our compiler; such a vector is never the only reading)
+#   reason       why
+source	kind	path	glob	proto	producer	direction	decision	same_compiler	reason
+free5gc	bin	testkit/ngap/free5gc	*.bin	ngap	free5gc ngap v1.1.3 + aper v1.1.1 (Go)	any	in	no	another implementation's encoder (testkit README)
+live-n2	bin	testkit/ngap/live-n2	*.bin	ngap	UERANSIM gNB (asn1c) / Open5GS AMF (asn1c)	both	in	yes	captured between UERANSIM and the incumbent C AMF, no kaluza-core encoder involved
+live-open5gs	bin	testkit/ngap/live-open5gs	*.bin	ngap-transfer	Open5GS SMF (asn1c)	SMF-to-AMF	in	yes	NGAP transfer PDUs from Open5GS SBI bodies
+live-sdr-ocudu	bin	testkit/ngap/live-sdr	*-ocudu.bin	ngap	OCUDU gNB release_26_04 (NGAP 18.8)	gNB-to-AMF	in	no	written by OCUDU's encoder
+live-sdr-rm520n	bin	testkit/ngap/live-sdr	*-rm520n.bin	ngap	OCUDU gNB release_26_04, NAS from a Quectel RM520N-GL	gNB-to-AMF	in	no	NGAP written by OCUDU; the NAS inside by the modem
+live-sdr-amf	bin	testkit/ngap/live-sdr	*.bin	ngap	kaluza-core AMF	AMF-to-gNB	out	no	ADR 0005: kaluza-core's own encoder
+live-n3iwf-ran	bin	testkit/ngap/live-n3iwf	initial-ue-message-*.bin	ngap	C N3IWF	N3IWF-to-AMF	in	yes	written by the N3IWF (its ULI defect is documented in the source README)
+live-n3iwf-ul	bin	testkit/ngap/live-n3iwf	uplink-nas-transport-*.bin	ngap	C N3IWF	N3IWF-to-AMF	in	yes	written by the N3IWF
+live-n3iwf-rest	bin	testkit/ngap/live-n3iwf	*.bin	ngap	kaluza-core AMF or mixed	unknown	out	no	ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+asn1c-w35	bin	testkit/ngap/asn1c-w35	*.bin	ngap	asn1c via a kaluza-core harness	any	out	yes	a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
+asn1c-modify	bin	testkit/ngap/asn1c-modify	*.bin	ngap-transfer	asn1c via a kaluza-core harness	any	out	yes	values chosen and written by a kaluza-core session's harness
+ocudu-ngap	ocudu-cpp	ocudu/tests/unittests	asn1/asn1_ngap_test.cpp	ngap	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD)
+ocudu-ngap-msgs	ocudu-cpp	ocudu/tests/unittests	ngap/ngap_test_messages.cpp	ngap	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD)
+ocudu-f1ap	ocudu-cpp	ocudu/tests/unittests	asn1/asn1_f1ap_test.cpp	f1ap	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD)
+ocudu-e1ap	ocudu-cpp	ocudu/tests/unittests	asn1/asn1_e1ap_test.cpp	e1ap	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD)
+ocudu-rrc	ocudu-cpp	ocudu/tests/unittests	asn1/asn1_rrc_nr_test.cpp	rrc	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD)
+ocudu-nru	ocudu-cpp	ocudu/tests/unittests	nru/nru_packing_test.cpp	nru	OCUDU NR-U packer (489ed15c5c)	any	in	no	an independent implementation's packing vectors (BSD)
+ocudu-psup	ocudu-cpp	ocudu/tests/unittests	psup/psup_packing_test.cpp	psc	OCUDU PDU Session Container packer (489ed15c5c)	any	in	no	an independent implementation's packing vectors (BSD)
+ocudu-rrc-msgs	ocudu-cpp	ocudu/tests/unittests	rrc/rrc_ue_test_messages.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
+ocudu-f1ap-cu	ocudu-cpp	ocudu/tests/unittests	f1ap/cu_cp/f1ap_cu_test_helpers.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
+ocudu-f1ap-ctxmod	ocudu-cpp	ocudu/tests/unittests	f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
+ocudu-f1ap-paging	ocudu-cpp	ocudu/tests/unittests	f1ap/cu_cp/f1ap_cu_paging_test.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
+ocudu-e1ap-msgs	ocudu-cpp	ocudu/tests/unittests	e1ap/common/e1ap_cu_cp_test_messages.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
+ocudu-xnap-msgs	ocudu-cpp	ocudu/tests/unittests	xnap/xnap_test_messages.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode

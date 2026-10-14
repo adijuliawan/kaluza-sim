@@ -57,11 +57,17 @@ PROTOCOLS: dict[str, dict] = {
 
 # Known defects of a pinned document that extraction must repair. Each entry is
 # a -S row in docs/compliance/rows.tsv.
-#   stop-typo:<text>  a paragraph whose marker text (spaces removed) equals
-#                     <text> closes the open block, like ASN1STOP would.
+#   stop-typo:<text>    a paragraph whose marker text (spaces removed) equals
+#                       <text> closes the open block, like ASN1STOP would.
+#   split-after:<text>  a line break is missing right after <text>: break there.
+# Every listed repair must apply at least once, or extraction fails: a repair
+# never silently outlives the defect it was written for.
 REPAIRS: dict[tuple[str, str], list[str]] = {
     # TS 37.483 j40: the last ASN.1 block (E1AP-Containers) ends "-- ASN1STO". Row KS-E1AP-S1.
     ("37.483", "j40"): ["stop-typo:--ASN1STO"],
+    # TS 38.473 j40, F1AP-Constants: "...ProtocolIE-ID ::= 925id-CSI-RSResourceSetToReleaseList
+    # ProtocolIE-ID ::= 926" sits in one paragraph with no break. Row KS-F1AP-S1.
+    ("38.473", "j40"): ["split-after:ProtocolIE-ID ::= 925"],
 }
 
 _CHAR_MAP = {
@@ -152,6 +158,8 @@ def asn1_lines(xml: bytes, repairs: list[str] | None = None) -> list[str]:
     example = False         # inside a "/example/" block: content dropped
     starts = 0
     typos = {r.split(":", 1)[1] for r in (repairs or []) if r.startswith("stop-typo:")}
+    splits = [r.split(":", 1)[1] for r in (repairs or []) if r.startswith("split-after:")]
+    applied: set[str] = set()
     for p in paragraphs(body):
         text = para_text(p)
         squashed = text.strip().replace(" ", "").replace("\t", "")
@@ -174,9 +182,16 @@ def asn1_lines(xml: bytes, repairs: list[str] | None = None) -> list[str]:
                 before = text[:stop_at].rstrip()
                 if before.strip():
                     lines.append(before.translate(_MAP_TABLE).rstrip())
+            if is_typo_stop:
+                applied.add("stop-typo:" + squashed)
             inside = example = False
             continue
         if inside:
+            for cut in splits:
+                at = text.find(cut)
+                if at >= 0 and at + len(cut) < len(text) and not text[at + len(cut)].isspace():
+                    text = text[:at + len(cut)] + "\n" + text[at + len(cut):]
+                    applied.add("split-after:" + cut)
             for ln in text.split("\n"):
                 ln = ln.translate(_MAP_TABLE).rstrip()
                 if "\ufffd" in ln:
@@ -184,6 +199,9 @@ def asn1_lines(xml: bytes, repairs: list[str] | None = None) -> list[str]:
                 lines.append(ln)
     if inside or example:
         raise ExtractError(f"ASN1START #{starts} never closed")
+    unused = set(repairs or []) - applied
+    if unused:
+        raise ExtractError(f"listed repairs did not apply: {sorted(unused)}")
     if starts == 0:
         raise ExtractError("no ASN1START markers")
     return lines

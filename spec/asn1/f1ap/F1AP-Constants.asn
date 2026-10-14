@@ -1229,7 +1229,8 @@ id-LTMConfig-to-Modify-List							ProtocolIE-ID ::= 921
 id-InterSNLTMMCGInformation							ProtocolIE-ID ::= 922
 id-LPWUSSupportedBandInfo							ProtocolIE-ID ::= 923
 id-DeliveryStatusReq								ProtocolIE-ID ::= 924
-id-EarlySyncInformationRelease						ProtocolIE-ID ::= 925id-CSI-RSResourceSetToReleaseList					ProtocolIE-ID ::= 926
+id-EarlySyncInformationRelease						ProtocolIE-ID ::= 925
+id-CSI-RSResourceSetToReleaseList					ProtocolIE-ID ::= 926
 id-CSI-IMResourceToReleaseList						ProtocolIE-ID ::= 927
 id-CSI-IMResourceSetToReleaseList					ProtocolIE-ID ::= 928
 

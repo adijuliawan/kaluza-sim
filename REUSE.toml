@@ -51,3 +51,11 @@ path = ["spec/kat/eap_aka_prime.tsv"]
 precedence = "override"
 SPDX-FileCopyrightText = "IETF Trust and the persons identified as the document authors (RFC 9048)"
 SPDX-License-Identifier = "LicenseRef-IETF-RFC-Text"
+
+# The external-origin corpus: rows carry octets from OCUDU's BSD unit tests and
+# from the user's kaluza-core testkit captures (per-row licence column).
+[[annotations]]
+path = ["tests/vectors/*/index.tsv", "tests/vectors/excluded.tsv"]
+precedence = "override"
+SPDX-FileCopyrightText = ["2026 Adi Juliawan", "2021-2026 Software Radio Systems Limited (OCUDU unit-test vectors)"]
+SPDX-License-Identifier = "LicenseRef-kaluza-sim-private AND BSD-3-Clause-Open-MPI"

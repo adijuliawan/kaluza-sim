@@ -3,5 +3,5 @@ F1AP-PDU-Descriptions	spec/asn1/f1ap/F1AP-PDU-Descriptions.asn	1143	e34a838156ec
 F1AP-PDU-Contents	spec/asn1/f1ap/F1AP-PDU-Contents.asn	6223	4b437802cab7a7cfb929495ba5218da2139baa7f7e33d2e74154cbb99d507d7f
 F1AP-IEs	spec/asn1/f1ap/F1AP-IEs.asn	11383	e32066c34c53a712ae8490ceb40b3675346b533fcb32ff66ff678319dfed083f
 F1AP-CommonDataTypes	spec/asn1/f1ap/F1AP-CommonDataTypes.asn	29	4a011f32cd9536992a23f5a120b16555fa8f54ae0d738fb410bfa5de6f859e5d
-F1AP-Constants	spec/asn1/f1ap/F1AP-Constants.asn	1237	550d6e0608aa8669e673f7a1839e4b9244f0ebb3821ba9285851819622a2ec79
+F1AP-Constants	spec/asn1/f1ap/F1AP-Constants.asn	1238	ca0449eb62df0fd2b6c2cee0e570e2417fe3a496be12bc75464464fb377109d7
 F1AP-Containers	spec/asn1/f1ap/F1AP-Containers.asn	181	355fa39634d0eae07baa662628c22209b87ab73b70747090b701d818bae3df01

@@ -111,6 +111,13 @@ class Traps(unittest.TestCase):
             lines(*body)
         self.assertEqual(lines(*body, repairs=["stop-typo:--ASN1STO"]), ["A ::= NULL"])
 
+    def test_split_repair_inserts_the_missing_break_and_must_apply(self):
+        body = (START, para(run("a INTEGER ::= 925b INTEGER ::= 926")), STOP)
+        got = lines(*body, repairs=["split-after:INTEGER ::= 925"])
+        self.assertEqual(got, ["a INTEGER ::= 925", "b INTEGER ::= 926"])
+        with self.assertRaises(dx.ExtractError):
+            lines(START, para(run("a INTEGER ::= 1")), STOP, repairs=["split-after:INTEGER ::= 925"])
+
     def test_symbol_font_glyph_inside_asn1_raises(self):
         with self.assertRaises(dx.ExtractError):
             lines(START, para('<w:r><w:sym w:font="Symbol" w:char="F0B3"/></w:r>'), STOP)

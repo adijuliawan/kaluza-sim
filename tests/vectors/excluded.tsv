@@ -1,0 +1,52 @@
+# Candidates the sender rules exclude (tools/corpus_ingest.py). Do not edit.
+source	locator	reason
+ocudu:tests/unittests/e1ap/common/e1ap_cu_cp_test_messages.cpp	e1ap_cu_cp_test_messages.cpp:115	ocudu-e1ap-msgs: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_paging_test.cpp	f1ap_cu_paging_test.cpp:53	ocudu-f1ap-paging: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_test_helpers.cpp	f1ap_cu_test_helpers.cpp:132	ocudu-f1ap-cu: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_test_helpers.cpp	f1ap_cu_test_helpers.cpp:133	ocudu-f1ap-cu: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_test_helpers.cpp	f1ap_cu_test_helpers.cpp:134	ocudu-f1ap-cu: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_test_helpers.cpp	f1ap_cu_test_helpers.cpp:50	ocudu-f1ap-cu: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	f1ap_cu_ue_context_modification_procedure_test.cpp:184	ocudu-f1ap-ctxmod: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	f1ap_cu_ue_context_modification_procedure_test.cpp:49	ocudu-f1ap-ctxmod: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	f1ap_cu_ue_context_modification_procedure_test.cpp:50	ocudu-f1ap-ctxmod: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	f1ap_cu_ue_context_modification_procedure_test.cpp:51	ocudu-f1ap-ctxmod: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	f1ap_cu_ue_context_modification_procedure_test.cpp:58	ocudu-f1ap-ctxmod: not a whole PDU of any known protocol
+ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	f1ap_cu_ue_context_modification_procedure_test.cpp:64	ocudu-f1ap-ctxmod: not a whole PDU of any known protocol
+ocudu:tests/unittests/rrc/rrc_ue_test_messages.cpp	rrc_ue_test_messages.cpp:172	ocudu-rrc-msgs: not a whole PDU of any known protocol
+ocudu:tests/unittests/xnap/xnap_test_messages.cpp	xnap_test_messages.cpp:116	ocudu-xnap-msgs: not a whole PDU of any known protocol
+ocudu:tests/unittests/xnap/xnap_test_messages.cpp	xnap_test_messages.cpp:71	ocudu-xnap-msgs: not a whole PDU of any known protocol
+ocudu:tests/unittests/xnap/xnap_test_messages.cpp	xnap_test_messages.cpp:77	ocudu-xnap-msgs: not a whole PDU of any known protocol
+testkit:ngap/asn1c-modify/list-failed-to-modify.bin	list-failed-to-modify.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/list-mod-req.bin	list-mod-req.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/list-mod-res.bin	list-mod-res.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/modify-request-message.bin	modify-request-message.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/modify-request-transfer-add-gbr.bin	modify-request-transfer-add-gbr.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/modify-request-transfer-add-nongbr.bin	modify-request-transfer-add-nongbr.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/modify-request-transfer-modify-mfbr.bin	modify-request-transfer-modify-mfbr.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/modify-request-transfer-release.bin	modify-request-transfer-release.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/modify-response-message.bin	modify-response-message.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/modify-response-transfer-accepted.bin	modify-response-transfer-accepted.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/modify-response-transfer-partial.bin	modify-response-transfer-partial.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-modify/modify-unsuccessful-transfer.bin	modify-unsuccessful-transfer.bin	asn1c-modify: values chosen and written by a kaluza-core session's harness
+testkit:ngap/asn1c-w35/amf-configuration-update-2.bin	amf-configuration-update-2.bin	asn1c-w35: a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
+testkit:ngap/asn1c-w35/initial-ue-message-wagf-1.bin	initial-ue-message-wagf-1.bin	asn1c-w35: a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
+testkit:ngap/asn1c-w35/ng-setup-request-wagf-1.bin	ng-setup-request-wagf-1.bin	asn1c-w35: a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
+testkit:ngap/asn1c-w35/pdu-session-resource-notify-2.bin	pdu-session-resource-notify-2.bin	asn1c-w35: a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
+testkit:ngap/asn1c-w35/pdu-session-resource-notify-transfer-1.bin	pdu-session-resource-notify-transfer-1.bin	asn1c-w35: a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
+testkit:ngap/asn1c-w35/uli-wagf-1.bin	uli-wagf-1.bin	asn1c-w35: a kaluza-core harness wrote it; its README says kaluza-core's encoder produced the same octets first
+testkit:ngap/live-n3iwf/downlink-nas-transport-1.bin	downlink-nas-transport-1.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/downlink-nas-transport-2.bin	downlink-nas-transport-2.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/downlink-nas-transport-3.bin	downlink-nas-transport-3.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/downlink-nas-transport-4.bin	downlink-nas-transport-4.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/downlink-nas-transport-5.bin	downlink-nas-transport-5.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/downlink-nas-transport-6.bin	downlink-nas-transport-6.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/initial-context-setup-request-1.bin	initial-context-setup-request-1.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/initial-context-setup-request-2.bin	initial-context-setup-request-2.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/initial-context-setup-response-1.bin	initial-context-setup-response-1.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/initial-context-setup-response-2.bin	initial-context-setup-response-2.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/ng-setup-request-1.bin	ng-setup-request-1.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/ng-setup-response-1.bin	ng-setup-response-1.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/ue-context-release-command-1.bin	ue-context-release-command-1.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/ue-context-release-command-2.bin	ue-context-release-command-2.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/ue-context-release-complete-1.bin	ue-context-release-complete-1.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
+testkit:ngap/live-n3iwf/ue-context-release-complete-2.bin	ue-context-release-complete-2.bin	live-n3iwf-rest: ADR 0005: the AMF direction is kaluza-core's encoder; sender not separable by name
