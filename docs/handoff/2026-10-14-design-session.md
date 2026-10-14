@@ -56,7 +56,7 @@ kaluza-core is a Java 25 / Quarkus 5G core, Rel-19.
 - **VLAN 30 172.30.30.0/24:**
   - AMF N2 is .1:38412; the V-UPF N3 is .2; the OCUDU gNB N3 is .10.
   - **.11 is the N3IWF DNAT alias.** kaluza-gnb2 moves to .12 in the phase-3 plan (user's go, 2026-10-14).
-  - **The V-UPF never ARPs for its N3 peers.** Each one needs a static neighbour entry, and kaluza-core adds .30–.39 before P1 ([`../lab.md`](../lab.md) §4).
+  - **The V-UPF never ARPs for its N3 peers.** Each one needs a static neighbour entry. kaluza-core pinned .30–.39 to `ens19`'s MAC on 2026-10-14, so RAN nodes stay ipvlan L2 children of `ens19` ([`../lab.md`](../lab.md) §4).
   - kaluza-uesim is .20, where UERANSIM and n3iwue run. Its aliases .21–.23 carry n3iwue multi-UE runs and UERANSIM's handover-target gNB.
   - **kaluza-sim takes .30–.39** (decided 2026-10-14, after the first draft's .21–.29 was found to collide; kaluza-core checked .30–.39 free in every repo and live). The full lab plan is [`../lab.md`](../lab.md).
 - **DN:** 172.30.61.1, the dev PC on VLAN 61, used for iperf3 and ping.
@@ -86,7 +86,11 @@ Statuses as of 2026-10-14, after kaluza-core's answers.
 6. **Measured 2026-10-14:** kaluza-uesim has 4 vCPU, 8 GB and Linux 7.0.0-34 ([`../lab.md`](../lab.md) §2). P2 checks the performance targets there.
 7. **Recording 172.30.30.30–.39 (kaluza-sim) in kaluza-core's `lab-relayout.md`.** The block was checked free. With the user's go, a kaluza-core session records it.
 8. **A second TAC served by the AMF.** *Answered:* 000007 comes with wave 40, for P3's mobility-registration rows. Until then, cells use 000001 ([`../lab.md`](../lab.md) §3).
-9. **New P1 prerequisites on kaluza-core's side:** the V-UPF neighbour entries for .30–.39 (a V-UPF roll in a window core gives) and kaluza-sim's Keycloak client. Lab windows are asked at P1 ([`../roadmap.md`](../roadmap.md), P1 entry conditions).
+9. **New P1 prerequisites on kaluza-core's side:**
+   - the V-UPF neighbour entries for .30–.39, done on 2026-10-14 at 15:59 KST;
+   - kaluza-sim's Keycloak client, still owed and confirmed by kaluza-core.
+
+   Lab windows are asked at P1 ([`../roadmap.md`](../roadmap.md), P1 entry conditions).
 10. **SUCI:** the null scheme on the sim cards until P1 reaches its SUCI rows; then the user picks the Profile A/B key ids.
 
 ## 6. First steps of P0 (only after the user's go)

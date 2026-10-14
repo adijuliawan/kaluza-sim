@@ -39,7 +39,7 @@
 - **UE side:** per-UE netns plus TUN; a first `ksim-ctl`; personas v0; IMEISV.
 
 **P1 entry conditions** (on kaluza-core's side, agreed 2026-10-14; [`lab.md`](lab.md) §8):
-- The V-UPF holds static neighbour entries for 172.30.30.30–.39 (a V-UPF roll in a window kaluza-core gives; [`lab.md`](lab.md) §4).
+- The V-UPF holds static neighbour entries for 172.30.30.30–.39. **Done** 2026-10-14 ([`lab.md`](lab.md) §4).
 - kaluza-sim's own Keycloak client exists, is exempt from key-entry step-up, and its credential is on the dev PC ([ADR 0008](adr/0008-subscriber-provisioning-api.md)).
 - A lab window is agreed with the core session.
 

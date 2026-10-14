@@ -37,7 +37,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 | .3–.6 | Core-side N3 peers; the dev PC's `lab-trunk.30` holds .3–.5. Roles in `lab-relayout.md` |
 | .10 | OCUDU gNB (B220) |
 | .11 | DNAT alias for the N3IWF gate's NAT rows. It keeps that role |
-| .12 | kaluza-gnb2 (phase 3). It moves here from the phase-3 plan's example .11: kaluza-core's proposal, with the user's go on 2026-10-14. It needs a V-UPF neighbour entry too |
+| .12 | kaluza-gnb2 (phase 3). It moves here from the phase-3 plan's example .11: kaluza-core's proposal, with the user's go on 2026-10-14. It gets its V-UPF neighbour entry once VM 109 exists |
 | .20 | kaluza-uesim: UERANSIM gNB, n3iwue IKE |
 | .21–.23 | kaluza-uesim aliases: n3iwue multi-UE runs, UERANSIM's handover-target gNB |
 | **.30–.39** | **kaluza-sim RAN nodes.** kaluza-core found the block free in every repo and live (2026-10-14). With the user's go of the same day, a kaluza-core session records it in `lab-relayout.md` |
@@ -72,12 +72,13 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 ## 4. Network plumbing (the VM's netplan is not touched)
 
 - **Per-node namespaces.** At run start, `ksim-netd` creates a netns per RAN node (`ksim-<run>-<node>`). Each gets an **ipvlan (L2 mode) child of `ens19`** carrying the node's .30–.39 address.
-  - ipvlan shares `ens19`'s MAC, so the Proxmox bridge and any MAC filtering see nothing new.
+  - ipvlan shares `ens19`'s MAC, so the Proxmox bridge and any MAC filtering see nothing new. The V-UPF's neighbour entries depend on that MAC, so the nodes **must stay ipvlan L2 children of `ens19`**. A macvlan or another NIC would bring a new MAC, and the V-UPF's downlink would go to the wrong place.
   - In L2 mode, ipvlan children cannot reach the parent's own addresses (.20–.23), and kaluza-sim never needs to.
 - **The V-UPF's static neighbours (a P1 entry condition).**
   - The V-UPF does not ARP for its N3 peers. It holds a permanent neighbour per peer: `PLANE_NEIGHBOURS` in kaluza-core's `deploy/k8s/userplane/visited/upf.env`, applied by `plane.sh`. On 2026-10-14 it listed .1, .3, .4, .5, .6, .10 and .20.
   - A CU-UP address without an entry gets no downlink GTP-U: the uplink works and the downlink silently never leaves the UPF.
-  - The ipvlan children share `ens19`'s MAC, which is already pinned for .20, so kaluza-core adds all ten of .30–.39 in one change. That restarts the V-UPF pod, so it happens **before P1**, in a window kaluza-core gives.
+  - **Done 2026-10-14, 15:59 KST.** kaluza-core added .30–.39 as permanent neighbours on the V-UPF's n3, all at `ens19`'s MAC `bc:24:11:2d:72:d9`, the one already pinned for .20. The roll changed nothing else, and the SMF re-associated.
+  - .12 (kaluza-gnb2) gets its entry once VM 109 exists and has a MAC.
   - If `ens19`'s MAC ever changes (the VM's NIC re-created), every entry goes stale. Tell the core session.
 - **The internal bridge.** `ksim-mid` connects the nodes of one gNB by veth legs.
 - **Run stop** removes the namespaces and the bridge. `ksim-netd gc` cleans up leftovers at start and reports what it removed.
@@ -135,10 +136,10 @@ kaluza-core answered the open items on 2026-10-14, and the user decided the thre
 |---|---|---|
 | Record 172.30.30.30–.39 (kaluza-sim) in `lab-relayout.md`'s VLAN 30 table | a kaluza-core session | Checked free in every repo and live. User's go given; core records it |
 | Move kaluza-gnb2's example address from .11 to .12 in the phase-3 plan | a kaluza-core session | User's go given; core edits it |
-| V-UPF `PLANE_NEIGHBOURS` entries for .30–.39 (a V-UPF roll, §4) | a kaluza-core session, in a window it gives | **Before P1** |
+| V-UPF `PLANE_NEIGHBOURS` entries for .30–.39 (a V-UPF roll, §4) | a kaluza-core session | **Done** 2026-10-14, 15:59 KST |
 | kaluza-sim's own Keycloak client, exempt from key-entry step-up; its credential as a 0600 file on the dev PC ([ADR 0008](adr/0008-subscriber-provisioning-api.md)) | a kaluza-core session | **Before P1**. Core names the client |
 | Import the sim subscriber ranges | kaluza-sim, through the UDR's provisioning API ([`sim-uicc.md`](sim-uicc.md) §8) | At P1, once the client exists |
-| Lab windows | ask the core session | At P1, after the V-UPF roll |
+| Lab windows | ask the core session | At P1 |
 | A second TAC served by the AMF (000007), for mobility-registration rows | a kaluza-core session | Comes with wave 40, before P3 needs it |
 | SUCI Profile A/B key ids for the sim cards | your decision | When P1 reaches its SUCI rows; the null scheme until then |
 | The SMF's `ims` pool (10.49.0.0/24) holds about 250 concurrent IMS sessions | a kaluza-core session, if ever needed | Enough for v1's ~100 UEs. A 1000-UE `ims` run needs a bigger pool |

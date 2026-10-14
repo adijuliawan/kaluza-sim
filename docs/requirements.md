@@ -313,7 +313,7 @@ The on-air link measures 41 Mbit/s DL and 7 Mbit/s UL, so the sim is never the b
 
 ### 3.7 Operability
 - **Host:** kaluza-uesim (Proxmox VM 105), VLAN 30.
-- **Addresses:** kaluza-uesim holds .20–.23 (UERANSIM, n3iwue and their aliases). kaluza-sim's RAN nodes use **172.30.30.30–.39**, each in its own ipvlan netns, and bind their own GTP-U port 2152. F1 and E1 stay on a host-internal bridge ([`lab.md`](lab.md)).
+- **Addresses:** kaluza-uesim holds .20–.23 (UERANSIM, n3iwue and their aliases). kaluza-sim's RAN nodes use **172.30.30.30–.39**, each in its own ipvlan (L2) netns on `ens19`, and bind their own GTP-U port 2152. The V-UPF pins `ens19`'s MAC for these addresses, so macvlan or another NIC is not an option. F1 and E1 stay on a host-internal bridge ([`lab.md`](lab.md)).
 - **ID collisions:** gNB IDs, NCIs and PCIs must not collide with OCUDU or UERANSIM. A startup check refuses collisions it can see.
 - **TACs are shared:** every cell advertises one the AMF serves (000001; 000003 on SNPN cells; 000007 from wave 40) and never a non-3GPP TAC ([`lab.md`](lab.md) §3).
 - **No RF:** no RF libraries. The systemd units use PrivateDevices, except `/dev/net/tun`.
