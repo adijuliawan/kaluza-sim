@@ -5,7 +5,11 @@ The resume point for the next kaluza-sim session. The session that wrote it ran 
 ## 1. Where things stand
 
 - **Done:** requirements and architecture, decided with the user. This repo was initialised (`git init -b main`, origin `ssh://git@ssh.github.com:443/adijuliawan/kaluza-sim.git`), and the docs were written.
-- **Not done:** no commit and no push; the user commits or pushes when they say. No code exists.
+- **Committed and pushed** at the user's request: `15508d9` (the docs), then this link commit. No code exists yet.
+- **A private review page** summarises the docs: https://claude.ai/artifact/DdYiFQqkbaC8kaMCn4ft95.
+  - The source HTML from this session is not in the repo.
+  - To update it, read the artifact (`Artifact` action `read`), then republish with `url=` so the link stays the same.
+  - The repo wins where they differ.
 - **Next:** build phase **P0** (§6), once the user says go. Their standing rule: an approved plan is not a start signal, and phases are never chained on our own.
 - **The approved plan** that produced these docs is `/home/amadeus/.claude/plans/use-this-as-root-composed-blossom.md`. It is a local file outside the repo; these docs supersede it.
 

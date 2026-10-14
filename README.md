@@ -9,6 +9,8 @@ It is a **second implementation**. It shares no code, tables or reference output
 
 **Status (2026-10-14):** design done; no code yet. The next step is build phase **P0**.
 
+**Review page (private artifact):** https://claude.ai/artifact/DdYiFQqkbaC8kaMCn4ft95. It summarises these docs as of commit 15508d9. Where they differ, the repo wins. Republish the page when the docs change.
+
 ## Start here (new session)
 
 1. [`docs/handoff/2026-10-14-design-session.md`](docs/handoff/2026-10-14-design-session.md): the resume point. It covers the decisions and their reasons, the research, the open items, and the first steps of P0.
