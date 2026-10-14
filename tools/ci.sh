@@ -44,7 +44,7 @@ LINK_JOBS=$(clamp $(( avail_mib / 4096 )) 1 4)
 GEN_JOBS=$JOBS
 
 PRESETS=(dev asan)
-[[ "$MODE" == full ]] && PRESETS+=(tsan release release-lab fuzz)
+[[ "$MODE" == full ]] && PRESETS+=(tsan release release-lab mutants fuzz)
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 LOGDIR="$ROOT/build/ci/$STAMP"

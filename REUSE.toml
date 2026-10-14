@@ -23,6 +23,13 @@ precedence = "override"
 SPDX-FileCopyrightText = "2003-2017 Lev Walkin <vlm@lionet.info> and contributors"
 SPDX-License-Identifier = "BSD-2-Clause"
 
+# cpp-httplib v0.26.0, vendored unmodified (MIT; P1 N1).
+[[annotations]]
+path = ["third_party/cpp-httplib/httplib.h", "third_party/cpp-httplib/LICENSE"]
+precedence = "override"
+SPDX-FileCopyrightText = "2017-2025 yhirose"
+SPDX-License-Identifier = "MIT"
+
 # Text extracted verbatim from 3GPP specifications (ASN.1 modules, transcribed
 # tables and test vectors). The tools that extract them are ours; the content is
 # 3GPP's.

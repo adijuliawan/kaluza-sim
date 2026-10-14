@@ -50,12 +50,20 @@ probe PYSIM env PYTHONPATH="$PYSIM_DIR/pysim-src" "$PYSIM_PY" -c 'import pySim; 
 if [[ -f /usr/lib/llvm-21/lib/clang/21/lib/linux/libclang_rt.fuzzer-x86_64.a ]]; then
     VER[LIBFUZZER]="llvm-21"; else VER[LIBFUZZER]="MISSING"; fi
 printf 'LIBFUZZER=%s\n' "${VER[LIBFUZZER]}"
+# P1's libraries (ADR 0009): versions from the Debian packages or headers.
+dpkg_ver() { dpkg-query -W -f='${Version}\n' "$1" 2>/dev/null | grep -v '^$'; }
+probe YAML_CPP dpkg_ver libyaml-cpp-dev
+probe NLOHMANN_JSON dpkg_ver nlohmann-json3-dev
+probe CLI11 dpkg_ver libcli11-dev
+probe VPCD dpkg_ver vsmartcard-vpcd
+probe CPP_HTTPLIB sh -c "grep -m1 -o '\"[0-9.]*\"' \"$ROOT/third_party/cpp-httplib/httplib.h\" | tr -d '\"'"
 
 required() {
     case "$1" in
-        dev|asan|tsan|release|release-lab) echo GCC GXX CMAKE NINJA CCACHE MOLD ;;
+        dev|asan|tsan|release|release-lab|mutants) echo GCC GXX CMAKE NINJA CCACHE MOLD YAML_CPP NLOHMANN_JSON CLI11 CPP_HTTPLIB ;;
         cov) echo GCC GXX CMAKE NINJA CCACHE MOLD GCOVR ;;
-        fuzz) echo CLANG CLANGXX LLD CMAKE NINJA CCACHE LIBFUZZER ;;
+        fuzz) echo CLANG CLANGXX LLD CMAKE NINJA CCACHE LIBFUZZER YAML_CPP NLOHMANN_JSON CLI11 CPP_HTTPLIB ;;
+        card) echo VPCD PYSIM ;;
         guards) echo PYTHON REUSE ;;
         asn1) echo ASN1C ;;
         oracle) echo VENV_PYTHON PYCRATE TSHARK ;;

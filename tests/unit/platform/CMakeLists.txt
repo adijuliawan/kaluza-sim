@@ -7,6 +7,12 @@ add_executable(unit_platform
     secret_test.cpp
     timer_wheel_test.cpp
     runtime_test.cpp
-    pcapng_test.cpp)
+    pcapng_test.cpp
+    executor_test.cpp
+    sim_loop_test.cpp
+    rng_test.cpp
+    yaml_test.cpp
+    event_test.cpp
+    coro_test.cpp)
 target_link_libraries(unit_platform PRIVATE ksim::platform ksim::warnings GTest::gtest_main)
 gtest_discover_tests(unit_platform DISCOVERY_MODE PRE_TEST)

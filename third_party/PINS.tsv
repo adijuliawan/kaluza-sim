@@ -4,3 +4,4 @@ ocudu	489ed15c5c	489ed15c5cd6b1d4f52cf16c2e4cc79c2bde1775	https://gitlab.com/ocu
 pycrate	0.8.1	sha256:65c4dd48d93248a0a4aa2fc78bab10ea64087c6382827035fae9f8bba343db53	https://pypi.org/project/pycrate/0.8.1/	LGPL-2.1-or-later	external oracle only, in .venv; never linked
 tshark	4.6.4	deb:4.6.4-1	Ubuntu 26.04 package	GPL-2.0-or-later	external oracle only (pcaps fed on stdin); never linked
 pysim	2761d165825f	2761d165825ff9fd619b1f31076ada6477913647	local /home/amadeus/Development/ran/usim/pysim-src (venv .venv-pysim)	GPL-2.0-or-later	external oracle only (FCP decoding, pySim-trace; pySim-shell from P1); never linked
+cpp-httplib	0.26.0	sha256:4a42da28ce477d06f53942c172197d3b83b4fe42b7e37b8af78c70e063c06da7	https://github.com/yhirose/cpp-httplib/tree/v0.26.0	MIT	single header vendored unmodified in third_party/cpp-httplib (P1 N1); the control API's HTTP/1.1 server and client (ADR 0009)

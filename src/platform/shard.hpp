@@ -14,19 +14,19 @@
 #include <thread>
 
 #include "platform/clock.hpp"
+#include "platform/executor.hpp"
 #include "platform/mpsc.hpp"
 #include "platform/reactor.hpp"
 #include "platform/timer_wheel.hpp"
 
 namespace ksim {
 
-class Shard {
+class Shard final : public Executor {
 public:
-    using Task = std::function<void()>;
 
     /// `clock` must outlive the shard (MonotonicClock in real time).
     Shard(unsigned id, std::size_t inbox_capacity, const Clock& clock);
-    ~Shard();   // stops and joins
+    ~Shard() override;   // stops and joins
 
     Shard(const Shard&) = delete;
     Shard& operator=(const Shard&) = delete;
@@ -40,19 +40,19 @@ public:
 
     /// Any thread: queue a task for the shard's thread. False when the inbox is
     /// full; the task is then not queued (the caller holds the backpressure).
-    bool post(Task t);
+    bool post(Task t) override;
 
     // The shard's own thread only.
     /// A timer `delay` ms from now by the shard's clock (never early: the
     /// wheel's own time may trail the clock by the work done since it last
     /// advanced, so TimerWheel::schedule_in is not used for this).
-    TimerId start_timer(Millis delay, TimerWheel::Callback cb) {
+    TimerId start_timer(Millis delay, TimerWheel::Callback cb) override {
         return wheel_.schedule_at(clock_.now_ms() + (delay > 0 ? delay : 0), std::move(cb));
     }
-    bool stop_timer(TimerId id) noexcept { return wheel_.cancel(id); }
+    bool stop_timer(TimerId id) noexcept override { return wheel_.cancel(id); }
     TimerWheel& timers() noexcept { return wheel_; }
     Reactor& reactor() noexcept { return reactor_; }
-    Millis now() const noexcept { return clock_.now_ms(); }
+    Millis now() const noexcept override { return clock_.now_ms(); }
     /// The shard running on the calling thread, or nullptr.
     static Shard* current() noexcept;
 

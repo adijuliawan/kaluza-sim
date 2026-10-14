@@ -27,6 +27,10 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)  # no C++20 modules; skips the dyndep scan
 
 option(KSIM_WERROR "Treat warnings in hand-written code as errors" ON)
 set(KSIM_ARCH_FLAGS "" CACHE STRING "Target-CPU flags, e.g. the release-lab preset's x86-64-v3 set")
+option(KSIM_MUTATIONS "Compile the sim mutants' switches in (platform/mutation.hpp; preset mutants)" OFF)
+if(KSIM_MUTATIONS)
+    add_compile_definitions(KSIM_MUTATIONS=1)
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(jobpools)
@@ -46,6 +50,7 @@ find_package(OpenSSL 3.0 REQUIRED)
 find_package(GTest 1.14 REQUIRED)
 find_package(fmt 10 REQUIRED)
 find_package(Threads REQUIRED)
+find_package(yaml-cpp 0.7 REQUIRED)
 ksim_asn1_generate()
 
 enable_testing()

@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The sim mutants (ADR 0009 point 6; verification.md section 1): each KSIM_MUTANT("name") switch, the
+# gates/rows/p1.tsv row it must fail (or - for a mutant only a procedure test kills) and the
+# misbehaviour it plants. tools/guards/check_mutants.py keeps this file and the code in step;
+# tools/mutants.sh (N16) runs each one against its row.
+name	row	description

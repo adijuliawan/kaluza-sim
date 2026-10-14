@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The event registry (ADR 0009 point 6; architecture section 9): every event name the sim emits, the
+# spec clause it reports (or sim, for the simulator's own state) and what it means. Gates and
+# ksim-ctl wait read these names, so they are a contract; tools/guards/check_events.py keeps this
+# file and the code in step. Fields are named in the description.
+name	clause	description

@@ -21,3 +21,9 @@ third_party/ocudu-security/
     Licence text: LICENSES/BSD-3-Clause-Open-MPI.txt. Hashes:
     third_party/ocudu-security/MANIFEST.sha256. SNOW 3G is used under the GSMA
     restricted usage undertaking held by the repository owner.
+
+third_party/cpp-httplib/
+    cpp-httplib's single header httplib.h, unmodified, from
+    https://github.com/yhirose/cpp-httplib at tag v0.26.0. MIT. Copyright (c) 2017
+    yhirose. Licence text: third_party/cpp-httplib/LICENSE (also LICENSES/MIT.txt).
+    Hash: third_party/cpp-httplib/MANIFEST.sha256.
