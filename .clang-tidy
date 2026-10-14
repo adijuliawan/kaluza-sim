@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# clang-tidy for hand-written code (plan M14; tools/ci.d/70-clang-tidy.sh).
+# Bug-finding and performance checks; style is clang-format's job. Turned off:
+# easily-swappable-parameters (byte-oriented APIs take several sizes by
+# design), narrowing-conversions (-Wconversion already errors), branch-clone
+# (switch arms in tables that read alike on purpose), performance-enum-size
+# (enums are sized by the wire field they model), optin.performance.Padding
+# (the MPSC ring pads to cache lines on purpose).
+Checks: >
+  -*,
+  clang-analyzer-*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
+  performance-*,
+  -performance-enum-size,
+  -clang-analyzer-optin.performance.Padding,
+  misc-redundant-expression,
+  misc-unused-using-decls,
+  modernize-use-nullptr,
+  modernize-use-override
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/kaluza-sim/(src|apps|tests)/.*'

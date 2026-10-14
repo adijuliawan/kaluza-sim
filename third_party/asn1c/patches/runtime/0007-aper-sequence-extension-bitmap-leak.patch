@@ -1,0 +1,34 @@
+SPDX-FileCopyrightText: 2026 Adi Juliawan
+SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+asn1c 18e56503 runtime, APER: a SEQUENCE's extension bitmap leaked when the
+input ended inside the bitmap or before the alignment that follows it: two
+early returns did not free it. Found by the M14 fuzz smoke (LeakSanitizer)
+in NGAP, F1AP, E1AP and XnAP. Row KS-PLAT-D5.
+
+--- a/constr_SEQUENCE_aper.c
++++ b/constr_SEQUENCE_aper.c
+@@ -169,8 +169,10 @@
+         if(!epres) ASN__DECODE_STARVED;
+ 
+         /* Get the extensions map */
+-        if(per_get_many_bits(pd, epres, 0, bmlength))
++        if(per_get_many_bits(pd, epres, 0, bmlength)) {
++            FREEMEM(epres);
+             ASN__DECODE_STARVED;
++        }
+ 
+         memset(&epmd, 0, sizeof(epmd));
+         epmd.buffer = epres;
+@@ -179,8 +181,10 @@
+                   td->name, bmlength, *epres);
+ 
+         /* Deal with padding */
+-        if (aper_get_align(pd) < 0)
++        if (aper_get_align(pd) < 0) {
++            FREEMEM(epres);
+             ASN__DECODE_STARVED;
++        }
+ 
+         /* Go over extensions and read them in */
+         for(edx = specs->first_extension; edx < td->elements_count; edx++) {

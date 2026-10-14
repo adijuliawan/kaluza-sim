@@ -58,7 +58,7 @@ struct Cursor {
     if (!var##_r) {                      \
         return var##_r.error();          \
     }                                    \
-    auto var = std::move(*var##_r)
+    auto var = std::move(*var##_r)   // NOLINT(bugprone-macro-parentheses): var names a declaration
 
 void put_lv(ByteWriter& w, const Bytes& v) {
     w.u8(static_cast<std::uint8_t>(v.size()));

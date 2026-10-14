@@ -156,6 +156,12 @@ TEST(Nas, TheSecurityProtectedHeader) {
     EXPECT_EQ(p->payload, kReg);
     EXPECT_EQ(encode_protected(*p), in);
     EXPECT_FALSE(decode_protected(hex("7e0211223344")));
+    // the spare half octet is kept as received (found by the M14 fuzz smoke)
+    const Bytes spare = cat(hex("7ef1a701b0c6ee"), hex("43"));
+    auto q = decode_protected(spare);
+    ASSERT_TRUE(q);
+    EXPECT_EQ(q->spare, 0xF);
+    EXPECT_EQ(encode_protected(*q), spare);
 }
 
 // Every message table: the mandatory IEs at their minimum length, then every

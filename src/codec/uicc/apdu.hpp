@@ -94,6 +94,9 @@ Result<AuthResult> decode_auth_result(ByteView data, AuthContext ctx);
 /// The response data a card returns. The keys come as views the caller takes
 /// from its SecretBytes at an allowlisted call site.
 Bytes encode_auth_success(ByteView res, ByteView ck, ByteView ik, ByteView kc);
+/// The response data with CK, IK and Kc zeroed: what a capture or a log of
+/// the SIM interface may carry (plan M14 secret canary).
+Bytes redact_keys(ByteView data, const AuthResult& r);
 Bytes encode_auth_sync_failure(ByteView auts);
 Bytes encode_auth_gsm(ByteView sres, ByteView kc);
 

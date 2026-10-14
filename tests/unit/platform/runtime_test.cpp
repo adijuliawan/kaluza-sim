@@ -63,6 +63,7 @@ TEST(Mpsc, ManyProducersOneConsumer) {
     const std::uint64_t each = total / kProducers;
     MpscQueue<std::uint64_t> q(1024);
     std::vector<std::thread> producers;
+    producers.reserve(kProducers);
     for (unsigned p = 0; p < kProducers; ++p) {
         producers.emplace_back([&q, p, each] {
             for (std::uint64_t i = 0; i < each; ++i) {
@@ -183,6 +184,7 @@ TEST(Shard, AFullInboxRefusesAndManyThreadsPost) {
     s.start();
     std::atomic<std::uint64_t> sum{0};
     std::vector<std::thread> posters;
+    posters.reserve(4);
     for (int p = 0; p < 4; ++p) {
         posters.emplace_back([&s, &sum] {
             for (int i = 0; i < 20000; ++i) {

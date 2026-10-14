@@ -97,31 +97,47 @@ Bytes encode_response(const Response& r) {
     return out;
 }
 
-Result<ClaInfo> decode_cla(std::uint8_t cla) {
+namespace {
+/// The class byte's coding (tables 10.3, 10.4a), or false for one that is not
+/// a class byte of TS 102 221; decode_cla() without the Result.
+bool cla_coding(std::uint8_t cla, ClaInfo::Coding& coding) noexcept {
     const unsigned hi = cla >> 4;
+    if ((cla & 0x10) != 0) {
+        return false;
+    }
+    if (hi == 0x0 || hi == 0x8 || hi == 0xA) {
+        coding = hi == 0x0 ? ClaInfo::Coding::interindustry : hi == 0x8 ? ClaInfo::Coding::uicc : ClaInfo::Coding::gsm;
+        return true;
+    }
+    if ((cla & 0x40) != 0) {
+        coding = (cla & 0x80) != 0 ? ClaInfo::Coding::uicc : ClaInfo::Coding::interindustry;
+        return true;
+    }
+    return false;
+}
+} // namespace
+
+Result<ClaInfo> decode_cla(std::uint8_t cla) {
     if ((cla & 0x10) != 0) {
         return err(Errc::unsupported, 0, "CLA: command chaining (b5) is not supported");
     }
-    if (hi == 0x0 || hi == 0x8 || hi == 0xA) {   // table 10.3: channels 0-3
-        const auto coding = hi == 0x0 ? ClaInfo::Coding::interindustry
-                          : hi == 0x8 ? ClaInfo::Coding::uicc
-                                      : ClaInfo::Coding::gsm;
-        return ClaInfo{coding, static_cast<std::uint8_t>(cla & 0x03), static_cast<std::uint8_t>((cla >> 2) & 0x03)};
+    ClaInfo::Coding coding{};
+    if (!cla_coding(cla, coding)) {
+        return err(Errc::malformed, 0, "CLA: not a class byte of TS 102 221");
     }
-    if ((cla & 0x40) != 0) {   // table 10.4a: '01x0 xxxx' and '11x0 xxxx' (b5 was refused above)
-        const auto coding = (cla & 0x80) != 0 ? ClaInfo::Coding::uicc : ClaInfo::Coding::interindustry;
+    if ((cla & 0x40) != 0) {   // table 10.4a: channels 4-19, SM in b6
         return ClaInfo{coding, static_cast<std::uint8_t>((cla & 0x0F) + 4), static_cast<std::uint8_t>((cla >> 5) & 0x01)};
     }
-    return err(Errc::malformed, 0, "CLA: not a class byte of TS 102 221");
+    return ClaInfo{coding, static_cast<std::uint8_t>(cla & 0x03), static_cast<std::uint8_t>((cla >> 2) & 0x03)};
 }
 
 const char* command_name(std::uint8_t cla, std::uint8_t ins) noexcept {
-    auto info = decode_cla(cla);
-    if (!info) {
+    ClaInfo::Coding coding{};
+    if (!cla_coding(cla, coding)) {
         return nullptr;
     }
-    const bool iso = info->coding == ClaInfo::Coding::interindustry;
-    const bool uicc = info->coding == ClaInfo::Coding::uicc;
+    const bool iso = coding == ClaInfo::Coding::interindustry;
+    const bool uicc = coding == ClaInfo::Coding::uicc;
     switch (ins) {
     case 0xA4: return iso ? "SELECT FILE" : nullptr;
     case 0xF2: return uicc ? "STATUS" : nullptr;
@@ -309,6 +325,16 @@ Bytes encode_auth_success(ByteView res, ByteView ck, ByteView ik, ByteView kc) {
     put_lv(out, ik);
     if (!kc.empty()) {
         put_lv(out, kc);
+    }
+    return out;
+}
+
+Bytes redact_keys(ByteView data, const AuthResult& r) {
+    Bytes out(data.begin(), data.end());
+    for (const Span& s : {r.ck, r.ik, r.kc}) {
+        for (std::size_t i = s.at; i < s.at + s.len && i < out.size(); ++i) {
+            out[i] = 0;
+        }
     }
     return out;
 }

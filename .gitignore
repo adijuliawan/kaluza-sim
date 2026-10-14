@@ -38,3 +38,9 @@ out/
 compile_commands.json
 __pycache__/
 .venv*/
+
+# libFuzzer artifacts from runs outside tools/fuzz.sh
+/crash-*
+/leak-*
+/timeout-*
+/oom-*

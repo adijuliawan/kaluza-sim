@@ -129,7 +129,7 @@ Result<Bytes> encode(const Pdu& p) {
         w.u8(p.e() ? (p.ext.empty() ? std::uint8_t{ext_none} : p.ext.front().type) : p.next_type);
         for (std::size_t i = 0; i < p.ext.size(); ++i) {
             const Bytes& c = p.ext[i].content;
-            if ((c.size() + 2) % 4 != 0 || c.size() + 2 > 4 * 255) {
+            if ((c.size() + 2) % 4 != 0 || c.size() + 2 > std::size_t{4} * 255) {
                 return err(Errc::invalid_argument, w.size(), "GTP-U: extension header content is not 4n-2 octets");
             }
             w.u8(static_cast<std::uint8_t>((c.size() + 2) / 4));

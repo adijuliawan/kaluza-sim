@@ -226,6 +226,47 @@ bool m12_protocol(std::string_view proto) {
     return proto == "gtpu" || proto == "psc" || proto == "nru" || proto == "apdu" || proto == "fcp";
 }
 
+/// A reply on one line of valid UTF-8: asn1c's JER copies a character
+/// string's octets as they are, so on hostile input a control character is
+/// escaped and an octet that is not UTF-8 becomes U+FFFD (found by M14's
+/// fuzz corpora). The two tabs that separate the fields stay.
+std::string one_line(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    int tabs = 0;
+    for (std::size_t i = 0; i < in.size();) {
+        const auto c = static_cast<unsigned char>(in[i]);
+        if (c == '\t' && tabs < 2) {
+            out += '\t';
+            ++tabs;
+            ++i;
+        } else if (c < 0x20) {
+            static constexpr char kHex[] = "0123456789abcdef";
+            out += "\\u00";
+            out += kHex[c >> 4];
+            out += kHex[c & 0xF];
+            ++i;
+        } else if (c < 0x80) {
+            out += static_cast<char>(c);
+            ++i;
+        } else {
+            const std::size_t n = c >= 0xF0 && c < 0xF5 ? 4 : c >= 0xE0 ? 3 : c >= 0xC2 && c < 0xE0 ? 2 : 0;
+            bool ok = n != 0 && i + n <= in.size();
+            for (std::size_t k = 1; ok && k < n; ++k) {
+                ok = (static_cast<unsigned char>(in[i + k]) & 0xC0) == 0x80;
+            }
+            if (ok) {
+                out.append(in, i, n);
+                i += n;
+            } else {
+                out += "\xEF\xBF\xBD";
+                ++i;
+            }
+        }
+    }
+    return out;
+}
+
 int batch() {
     std::string line;
     while (std::getline(std::cin, line)) {
@@ -249,7 +290,7 @@ int batch() {
         } else {
             out = "ERR\trequest\tunknown op " + f[0];
         }
-        std::cout << out << '\n' << std::flush;
+        std::cout << one_line(out) << '\n' << std::flush;
     }
     return 0;
 }

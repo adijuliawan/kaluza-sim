@@ -112,7 +112,8 @@ std::uint64_t number(const Bytes& b) {
 } // namespace
 
 bool Tlv::constructed() const noexcept {
-    const auto first = static_cast<std::uint8_t>(tag >> (8 * (tag_octets - 1)));
+    const int shift = tag_octets > 0 ? 8 * (tag_octets - 1) : 0;   // a hand-built Tlv may leave it 0
+    const auto first = static_cast<std::uint8_t>(tag >> shift);
     return (first & 0x20) != 0;
 }
 
@@ -259,7 +260,7 @@ std::string to_json(const Fcp& f) {
     if (auto d = f.file_descriptor(); d) {
         s += ",\"descriptor\":" + std::to_string(d->descriptor) + ",\"file_type\":\"" + d->file_type() +
              "\",\"structure\":\"" + d->structure() + "\",\"shareable\":" + (d->shareable() ? "true" : "false");
-        if (d->record_length) {
+        if (d->record_length && d->records) {
             s += ",\"record_length\":" + std::to_string(*d->record_length) + ",\"records\":" + std::to_string(*d->records);
         }
     }

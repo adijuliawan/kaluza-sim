@@ -1,0 +1,41 @@
+SPDX-FileCopyrightText: 2026 Adi Juliawan
+SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+asn1c 18e56503 runtime, APER: discarding the octets of an open type whose type
+the decoder does not know (OPEN_TYPE_aper_unknown_type_discard_bytes, which
+SEQUENCE decoding calls) did not check its length read, so on a short or broken
+input it shifted -1 left by three (undefined behaviour) and asked for a negative
+number of bits, and it ignored a starved bit read. Either is now a decode
+failure. Found by the M14 fuzz smoke (UBSan) on an OCUDU vector pycrate also
+cannot decode. Row KS-PLAT-D5.
+
+--- a/OPEN_TYPE_aper.c
++++ b/OPEN_TYPE_aper.c
+@@ -148,7 +148,7 @@
+ 
+     do {
+         bytes = aper_get_length(pd, -1, -1, -1, &repeat);
+-        if (bytes > 10 * ASN_DUMMY_BYTES)
++        if (bytes < 0 || bytes > 10 * ASN_DUMMY_BYTES)
+         {
+             return rv;
+         }
+@@ -159,13 +159,17 @@
+                 return rv;
+         }
+ 
+-        per_get_many_bits(pd, (dummy_ptr ? dummy_ptr : dummy), 0, bytes << 3);
++        int starved = per_get_many_bits(pd, (dummy_ptr ? dummy_ptr : dummy), 0, bytes << 3);
+ 
+         if (dummy_ptr)
+         {
+             FREEMEM(dummy_ptr);
+             dummy_ptr = NULL;
+         }
++        if (starved)
++        {
++            return rv;
++        }
+     } while (repeat);
+ 
+      rv.code = RC_OK;

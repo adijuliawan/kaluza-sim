@@ -93,7 +93,7 @@ private:
     std::size_t live_ = 0;
     std::vector<Node> nodes_;
     std::vector<std::int32_t> free_;
-    std::array<std::int32_t, kLevels * kSlots> slots_{};
+    std::array<std::int32_t, static_cast<std::size_t>(kLevels) * kSlots> slots_{};
     std::int32_t due_ = kNone;
     std::int32_t overflow_ = kNone;
 };

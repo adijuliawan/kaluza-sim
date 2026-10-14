@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+# Trees the provenance scan fingerprints (tools/provenance.py, plan M14). paths: ';'-separated, ~ and globs
+# expanded; a tree not on a machine is recorded as absent. policy: forbidden (no shared code anywhere)
+# or third-party-only (shared code only under third_party/, vendored with its NOTICE).
+name	paths	licence	policy	note
+ueransim	~/Development/UERANSIM;~/Development/UERANSIM-f3;~/Development/UERANSIM-w17fix;~/Development/UERANSIM-w27b;~/Development/UERANSIM-w38b	AGPL-3.0	forbidden	UERANSIM and the user's forks of it
+duranta	~/Development/ran/duranta-ran	CSSL-1.0	forbidden	Duranta RAN
+onomondo	~/Development/ran/onomondo-uicc;~/Development/onomondo-uicc	GPL (onomondo's SoftSIM)	forbidden	not on the dev PC at M14
+open5gs	~/Development/open5gs	AGPL-3.0	forbidden	Open5GS
+wireshark	~/Development/wireshark;~/Development/ref/wireshark	GPL-2.0-or-later	forbidden	not on the dev PC at M14 (tshark is used as a program only)
+pysim	~/Development/ran/usim/pysim-src	GPL-2.0-or-later	forbidden	used out of process as an oracle (M12)
+pycrate	~/Development/kaluza-sim/.venv/lib/python3*/site-packages/pycrate_*	LGPL-2.1-or-later	forbidden	the pinned oracle (M1)
+kaluza-core	~/Development/kaluza-core	the user's (ADR 0005)	forbidden	independence from the core under test
+ocudu	~/Development/ran/ocudu	BSD-3-Clause-Open-MPI	third-party-only	SNOW 3G is vendored under third_party/ocudu-security (M9)

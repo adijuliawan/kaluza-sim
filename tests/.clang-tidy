@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# Tests: as the tree, except unchecked-optional-access, which does not see a
+# GoogleTest ASSERT_TRUE(x) guarding the *x after it.
+InheritParentConfig: true
+Checks: -bugprone-unchecked-optional-access

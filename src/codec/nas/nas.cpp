@@ -338,6 +338,7 @@ Result<Protected> decode_protected(ByteView in) {
     }
     Protected p;
     p.security_header_type = static_cast<std::uint8_t>(in[1] & 0x0F);
+    p.spare = static_cast<std::uint8_t>(in[1] >> 4);
     p.mac = (std::uint32_t{in[2]} << 24) | (std::uint32_t{in[3]} << 16) | (std::uint32_t{in[4]} << 8) | in[5];
     p.sequence_number = in[6];
     p.payload.assign(in.begin() + 7, in.end());
@@ -347,7 +348,7 @@ Result<Protected> decode_protected(ByteView in) {
 Bytes encode_protected(const Protected& p) {
     ByteWriter w(7 + p.payload.size());
     w.u8(static_cast<std::uint8_t>(Epd::mm));
-    w.u8(static_cast<std::uint8_t>(p.security_header_type & 0x0F));
+    w.u8(static_cast<std::uint8_t>((p.spare << 4) | (p.security_header_type & 0x0F)));
     w.u32(p.mac);
     w.u8(p.sequence_number);
     w.bytes(p.payload);

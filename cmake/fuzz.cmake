@@ -14,6 +14,12 @@ if(KSIM_FUZZ AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     message(FATAL_ERROR "KSIM_FUZZ=ON needs clang (use the fuzz preset)")
 endif()
 
+# Every library the targets link is coverage-instrumented too, or libFuzzer
+# sees only the harness (plan M14).
+if(KSIM_FUZZ)
+    add_compile_options(-fsanitize=fuzzer-no-link)
+endif()
+
 function(ksim_add_fuzzer name)
     cmake_parse_arguments(F "" "CORPUS" "SOURCES;LIBS" ${ARGN})
     add_executable(${name} ${F_SOURCES})

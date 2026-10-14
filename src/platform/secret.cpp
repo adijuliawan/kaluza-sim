@@ -38,7 +38,7 @@ SecretBytes::SecretBytes(std::size_t n) : p_(n ? new std::uint8_t[n]() : nullptr
 
 SecretBytes SecretBytes::copy_of(ByteView v) {
     SecretBytes s(v.size());
-    if (!v.empty()) {
+    if (!v.empty() && s.p_ != nullptr) {
         std::memcpy(s.p_, v.data(), v.size());
     }
     return s;

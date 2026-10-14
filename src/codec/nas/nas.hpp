@@ -60,6 +60,7 @@ Result<Bytes> encode(const Message& m);
 /// and the octets it protects (a plain NAS message when not ciphered).
 struct Protected {
     std::uint8_t security_header_type = 0;  // 1..4
+    std::uint8_t spare = 0;                 // bits 8-5 of octet 2, kept as received (9.3)
     std::uint32_t mac = 0;
     std::uint8_t sequence_number = 0;
     Bytes payload;

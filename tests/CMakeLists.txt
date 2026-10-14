@@ -6,4 +6,5 @@
 # independent of our C++).
 
 add_subdirectory(fuzz)
+add_subdirectory(canary)
 add_subdirectory(unit)

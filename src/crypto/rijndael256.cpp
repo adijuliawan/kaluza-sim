@@ -105,7 +105,7 @@ Block32 Rijndael256::encrypt(const Block32& in) const {
             }
         }
         if (r != 14) {
-            for (unsigned j = 0; j < 8; ++j) {
+            for (std::size_t j = 0; j < 8; ++j) {
                 const std::uint8_t a0 = b[4 * j];
                 const std::uint8_t a1 = b[4 * j + 1];
                 const std::uint8_t a2 = b[4 * j + 2];
