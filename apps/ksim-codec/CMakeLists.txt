@@ -5,4 +5,4 @@
 # oracle harness drives its batch mode (plan M10).
 
 add_executable(ksim-codec main.cpp)
-target_link_libraries(ksim-codec PRIVATE ksim::asn1_registry ksim::codec_nas ksim::warnings)
+target_link_libraries(ksim-codec PRIVATE ksim::asn1_registry ksim::codec_nas ksim::codec_up ksim::codec_uicc ksim::warnings)

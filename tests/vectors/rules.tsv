@@ -34,6 +34,8 @@ ocudu-e1ap	ocudu-cpp	ocudu/tests/unittests	asn1/asn1_e1ap_test.cpp	e1ap	OCUDU as
 ocudu-rrc	ocudu-cpp	ocudu/tests/unittests	asn1/asn1_rrc_nr_test.cpp	rrc	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD)
 ocudu-nru	ocudu-cpp	ocudu/tests/unittests	nru/nru_packing_test.cpp	nru	OCUDU NR-U packer (489ed15c5c)	any	in	no	an independent implementation's packing vectors (BSD)
 ocudu-psup	ocudu-cpp	ocudu/tests/unittests	psup/psup_packing_test.cpp	psc	OCUDU PDU Session Container packer (489ed15c5c)	any	in	no	an independent implementation's packing vectors (BSD)
+ocudu-gtpu	ocudu-cpp	ocudu/tests/unittests	gtpu/gtpu_test_shared.h	gtpu	OCUDU GTP-U packer (489ed15c5c)	any	in	no	an independent implementation's GTP-U test vectors (BSD); arrays that are not a GTP-U PDU (the inner IP packet) are excluded by shape
+ocudu-gtpu-nru	ocudu-cpp	ocudu/tests/unittests	gtpu/gtpu_tunnel_nru_test.cpp	gtpu	OCUDU GTP-U packer (489ed15c5c)	any	in	no	an independent implementation's G-PDUs with an NR RAN Container (BSD); arrays that are not a GTP-U PDU are excluded by shape
 ocudu-rrc-msgs	ocudu-cpp	ocudu/tests/unittests	rrc/rrc_ue_test_messages.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
 ocudu-f1ap-cu	ocudu-cpp	ocudu/tests/unittests	f1ap/cu_cp/f1ap_cu_test_helpers.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode
 ocudu-f1ap-ctxmod	ocudu-cpp	ocudu/tests/unittests	f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	auto	OCUDU asn1 library (489ed15c5c)	any	in	no	an independent encoder's unit-test vectors (BSD); protocol found by exact decode

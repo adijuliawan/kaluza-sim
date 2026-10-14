@@ -266,6 +266,91 @@ def cmd_l3roundtrip(a) -> int:
     return 0 if not fails else 1
 
 
+def cmd_m12roundtrip(a) -> int:
+    """The M12 check: every v1 GTP-U, PSC, NR-U and APDU type, and FCP templates."""
+    from ksimoracle import m12rt
+    report = ROOT / "build" / "oracle" / "m12roundtrip.tsv"
+    report.parent.mkdir(parents=True, exist_ok=True)
+    rows, totals = [], collections.Counter()
+    pysim = m12rt.PySim() if m12rt.PySim.available() else None
+    if pysim is None:
+        print(f"M12ROUNDTRIP note: no pySim at {m12rt.PYSIM_DIR}; APDU and FCP checked by tshark only")
+    try:
+        with Codec(Path(a.codec) if a.codec else None) as codec:
+            if a.selftest:
+                results = m12rt.selftest(codec, pysim)
+                for name, caught in results:
+                    print(f"M12SELFTEST {'CAUGHT' if caught else 'MISSED'} {name}")
+                ok = all(c for _, c in results)
+                print(f"M12SELFTEST={'PASS' if ok else 'FAIL'} cases={len(results)}")
+                return 0 if ok else 1
+            fields = 0
+            for proto in ("gtpu", "psc", "nru", "apdu", "fcp"):
+                c = collections.Counter()
+                types = v1_types(proto) if proto != "fcp" else list(m12rt.gen_fcps())
+                by_type = collections.defaultdict(list)
+                for row in corpus(proto) if proto in ("gtpu", "psc", "nru") else []:
+                    by_type[row["pdu"]].append(row)
+                outside = sum(len(v) for k, v in by_type.items() if k not in types
+                              and not any("expects refusal" in r["locator"] for r in v))
+                no_indep = 0
+                cases = []
+                for name in types:
+                    corp = [(name, r["id"], bytes.fromhex(r["hex"]), False, "expects refusal" in r["locator"])
+                            for r in by_type.get(name, [])]
+                    if not [x for x in corp if not x[4]]:
+                        no_indep += 1
+                    cases += corp
+                    if proto == "gtpu":
+                        cases += [(name, f"gen-{m}", m12rt.gen_gtpu(name, m), True, False) for m in ("min", "max")]
+                    elif proto in ("psc", "nru"):
+                        t = m12rt.FRAME_TYPES[proto][name]
+                        cases += [(name, f"gen-{m}", m12rt.gen_frame(proto, t, m), True, False) for m in ("min", "max")]
+                if proto in ("psc", "nru"):   # the producer's refused vectors that name no v1 type
+                    cases += [(r["pdu"], r["id"], bytes.fromhex(r["hex"]), False, True)
+                              for k, v in by_type.items() if k not in types for r in v if "expects refusal" in r["locator"]]
+                if proto == "apdu":
+                    cases = [(n, f"gen: {label}", (cmd, rsp), True, False) for n, label, cmd, rsp in m12rt.gen_apdus()
+                             if not a.pdu or n in a.pdu]
+                    no_indep = len(types)
+                if proto == "fcp":
+                    cases = [(n, "gen", f, True, False) for n, f in m12rt.gen_fcps().items()]
+                    no_indep = len(types)
+                for name, src, data, gen, refused in cases:
+                    if a.pdu and name not in a.pdu:
+                        continue
+                    if proto == "gtpu":
+                        r = m12rt.check_gtpu(codec, data, gen)
+                    elif proto in ("psc", "nru"):
+                        r = m12rt.check_frame(codec, proto, data, gen, refused)
+                    elif proto == "apdu":
+                        r = m12rt.check_apdu(codec, pysim, *data)
+                    else:
+                        r = m12rt.check_fcp(codec, pysim, data)
+                    c[r.status] += 1
+                    fields += r.fields
+                    rows.append([proto, name, src, r.status, int(r.ours), "" if r.second is None else int(r.second),
+                                 int(r.tshark_clean), r.fields, "; ".join(dict.fromkeys(r.notes))[:400]])
+                totals += c
+                print(f"M12ROUNDTRIP proto={proto} types={len(types)} without_independent_vector={no_indep}"
+                      + (f" outside_v1={outside}" if outside else "") + " "
+                      + " ".join(f"{k}={n}" for k, n in sorted(c.items())))
+    finally:
+        if pysim is not None:
+            pysim.__exit__()
+    with report.open("w") as f:
+        f.write("# tests/oracles/oracle.py m12roundtrip (plan M12). Generated; not committed.\n")
+        f.write("protocol\tpdu\tsource\tstatus\tours_roundtrip\tsecond_reader\ttshark_clean\tfields\tnotes\n")
+        for r in rows:
+            f.write("\t".join(str(x) for x in r) + "\n")
+    fails = [r for r in rows if r[3] == "FAIL"]
+    for r in fails[: a.show]:
+        print(f"FAILURE {r[0]} {r[1]} {r[2]} {r[8][:220]}")
+    print("M12ROUNDTRIP_TOTAL " + " ".join(f"{k}={n}" for k, n in sorted(totals.items()))
+          + f" fields_compared={fields} report={report.relative_to(ROOT)}")
+    return 0 if not fails else 1
+
+
 def cmd_allowlists(a) -> int:
     import io
     out = ROOT / "spec" / "oracle"
@@ -342,6 +427,11 @@ def main() -> None:
     l3.add_argument("--codec")
     l3.add_argument("--show", type=int, default=40)
     l3.add_argument("--selftest", action="store_true", help="the must-fail mutations only")
+    m12 = sub.add_parser("m12roundtrip")
+    m12.add_argument("--pdu", action="append")
+    m12.add_argument("--codec")
+    m12.add_argument("--show", type=int, default=40)
+    m12.add_argument("--selftest", action="store_true", help="the must-fail mutations only")
     pr = sub.add_parser("probes")
     pr.add_argument("--codec")
     lo = sub.add_parser("localize")
@@ -353,7 +443,7 @@ def main() -> None:
     al.add_argument("--check", action="store_true")
     sub.add_parser("selftest")
     a = ap.parse_args()
-    sys.exit({"gen": cmd_gen, "check": cmd_check, "sweep": cmd_sweep, "roundtrip": cmd_roundtrip, "localize": cmd_localize, "probes": cmd_probes, "l3roundtrip": cmd_l3roundtrip,
+    sys.exit({"gen": cmd_gen, "check": cmd_check, "sweep": cmd_sweep, "roundtrip": cmd_roundtrip, "localize": cmd_localize, "probes": cmd_probes, "l3roundtrip": cmd_l3roundtrip, "m12roundtrip": cmd_m12roundtrip,
               "allowlists": cmd_allowlists, "selftest": cmd_selftest}[a.cmd](a))
 
 

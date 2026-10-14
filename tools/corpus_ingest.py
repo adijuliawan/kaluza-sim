@@ -70,20 +70,36 @@ _BRACES = re.compile(r"\{([^{}]*)\}")
 _HEXSTR = re.compile(r"make_byte_buffer\(\s*((?:\"[0-9a-fA-F\s]*\"\s*)+)\)")
 
 
+_TEST = re.compile(r"\bTEST(?:_F|_P)?\(\s*\w+\s*,\s*(\w+)\s*\)")
+_REFUSES = re.compile(r"\b(?:EXPECT|ASSERT)_FALSE\(\s*[\w.>-]*unpack\w*\(")
+
+
 def ocudu_arrays(path: Path):
     """Byte vectors in an OCUDU C++ test: brace lists of 0x.. literals (named arrays,
     byte_buffer::create({...}), inline initialisers) and make_byte_buffer("hex")."""
     text = _strip_comments(path.read_text(errors="replace"))
+    tests = [(m.start(), m.group(1)) for m in _TEST.finditer(text)]
+    ends = [s for s, _ in tests[1:]] + [len(text)]
+
+    def where(at: int) -> str:
+        """file:line, with the enclosing test's name, and a mark when that test
+        asserts its own unpacker refuses the vector (the producer's word that
+        it is malformed)."""
+        line = text.count("\n", 0, at) + 1
+        for (start, name), end in zip(reversed(tests), reversed(ends)):
+            if start < at:
+                negative = _REFUSES.search(text, start, end) is not None
+                return f"{path.name}:{line} ({name}{'; its test expects refusal' if negative else ''})"
+        return f"{path.name}:{line}"
+
     for m in _BRACES.finditer(text):
         tokens = [t.strip() for t in m.group(1).split(",") if t.strip()]
         if len(tokens) >= 4 and all(re.fullmatch(r"0x[0-9a-fA-F]{1,2}", t) for t in tokens):
-            line = text.count("\n", 0, m.start()) + 1
-            yield f"{path.name}:{line}", bytes(int(t, 16) for t in tokens)
+            yield where(m.start()), bytes(int(t, 16) for t in tokens)
     for m in _HEXSTR.finditer(text):
         hexes = "".join(re.findall(r"[0-9a-fA-F]", "".join(re.findall(r'"([^"]*)"', m.group(1)))))
         if len(hexes) >= 8 and len(hexes) % 2 == 0:
-            line = text.count("\n", 0, m.start()) + 1
-            yield f"{path.name}:{line}", bytes.fromhex(hexes)
+            yield where(m.start()), bytes.fromhex(hexes)
 
 
 ROW_PROTO: dict[tuple[str, str], str] = {}   # (file, locator) -> protocol named in a tsv source
@@ -160,10 +176,32 @@ def auto_proto(data: bytes) -> str | None:
     return "rrc" if not rrc_name(data).startswith("(") else None
 
 
+GTPU_TYPES = {1: "Echo Request", 2: "Echo Response", 26: "Error Indication",
+              31: "Supported Extension Headers Notification", 253: "Tunnel Status", 254: "End Marker", 255: "G-PDU"}
+FRAME_TYPES = {"psc": {0: "DL PDU SESSION INFORMATION", 1: "UL PDU SESSION INFORMATION"},
+               "nru": {0: "DL USER DATA", 1: "DL DATA DELIVERY STATUS", 2: "ASSISTANCE INFORMATION DATA"}}
+
+
+def gtpu_shape(data: bytes) -> str | None:
+    """Why the octets are not one GTP-U PDU (TS 29.281 5.1), or None if they are:
+    version 1, PT 1, and a Length that covers exactly the rest."""
+    if len(data) < 8:
+        return "shorter than a GTP-U header"
+    if data[0] >> 4 not in (0x3,):
+        return f"first octet {data[0]:#04x} is not version 1, PT 1"
+    if int.from_bytes(data[2:4], "big") != len(data) - 8:
+        return "the Length field does not cover the rest"
+    return None
+
+
 def pdu_name(proto: str, data: bytes) -> str:
     """The message type pycrate reads, or '' when it cannot tell."""
     if proto == "rrc":
         return rrc_name(data)
+    if proto == "gtpu":
+        return GTPU_TYPES.get(data[1], f"(message type {data[1]})")
+    if proto in FRAME_TYPES:
+        return FRAME_TYPES[proto].get(data[0] >> 4, f"(PDU type {data[0] >> 4})") if data else ""
     if proto not in ("ngap", "f1ap", "e1ap", "xnap"):
         return ""
     try:
@@ -200,6 +238,9 @@ def build() -> tuple[dict[str, list[dict]], list[dict]]:
                 excluded.append({"source": f"{base}:{rel}", "locator": loc,
                                  "reason": f"{r['source']}: not a whole PDU of any known protocol"})
                 continue
+        if proto == "gtpu" and (why := gtpu_shape(data)) is not None:
+            excluded.append({"source": f"{base}:{rel}", "locator": loc, "reason": f"{r['source']}: not a GTP-U PDU ({why})"})
+            continue
         rows = by_proto.setdefault(proto, [])
         rows.append({
             "id": f"{proto}-{r['source']}-{len(rows) + 1:03d}", "proto": proto, "pdu": pdu_name(proto, data),

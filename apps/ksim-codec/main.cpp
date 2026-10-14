@@ -15,7 +15,8 @@
 //   (failure)                 ->  ERR <stage> <message>
 //
 // <proto> is rrc (UPER) or ngap, f1ap, e1ap, xnap (APER), or for dec only nas,
-// sms-cp, sms-rp, sms-tpdu-mo, sms-tpdu-mt (plan M11). ASN.1 encoding is
+// sms-cp, sms-rp, sms-tpdu-mo, sms-tpdu-mt (plan M11), gtpu, psc, nru, apdu
+// (<payload> is the command, then '/' and the response) and fcp (plan M12). ASN.1 encoding is
 // asn1::Check::relay: what decodes re-encodes, extension values included.
 
 #include <cstdio>
@@ -28,6 +29,10 @@
 #include "codec/asn1/registry.hpp"
 #include "codec/nas/nas.hpp"
 #include "codec/nas/sms.hpp"
+#include "codec/uicc/apdu.hpp"
+#include "codec/uicc/fcp.hpp"
+#include "codec/up/frames.hpp"
+#include "codec/up/gtpu.hpp"
 #include "platform/buf.hpp"
 
 using namespace ksim;
@@ -152,9 +157,73 @@ std::string do_decode_l3(std::string_view proto, std::string_view type, std::str
     return t ? "OK\t" + to_hex(sms::encode_tpdu(*t)) + "\t" + sms::to_json(*t) : error_text(t.error(), "decode");
 }
 
+/// dec for the M12 codecs: gtpu, psc, nru, apdu ("<command hex>/<response hex>",
+/// the response optional) and fcp.
+std::string do_decode_m12(std::string_view proto, std::string_view hex) {
+    if (proto == "apdu") {
+        const auto slash = hex.find('/');
+        auto cmd = from_hex(hex.substr(0, slash));
+        if (!cmd) {
+            return error_text(cmd.error(), "hex");
+        }
+        auto c = uicc::decode_command(*cmd);
+        if (!c) {
+            return error_text(c.error(), "decode");
+        }
+        auto again = uicc::encode_command(*c);
+        if (!again) {
+            return error_text(again.error(), "reencode");
+        }
+        std::string out = "OK\t" + to_hex(*again);
+        if (slash == std::string_view::npos) {
+            return out + "\t" + uicc::to_json(*c, nullptr);
+        }
+        auto rsp = from_hex(hex.substr(slash + 1));
+        if (!rsp) {
+            return error_text(rsp.error(), "hex");
+        }
+        auto r = uicc::decode_response(*rsp);
+        if (!r) {
+            return error_text(r.error(), "decode");
+        }
+        return out + "/" + to_hex(uicc::encode_response(*r)) + "\t" + uicc::to_json(*c, &*r);
+    }
+    auto bytes = from_hex(hex);
+    if (!bytes) {
+        return error_text(bytes.error(), "hex");
+    }
+    if (proto == "gtpu") {
+        auto p = gtpu::decode(*bytes);
+        if (!p) {
+            return error_text(p.error(), "decode");
+        }
+        auto again = gtpu::encode(*p);
+        return again ? "OK\t" + to_hex(*again) + "\t" + gtpu::to_json(*p) : error_text(again.error(), "reencode");
+    }
+    if (proto == "fcp") {
+        auto f = uicc::decode_fcp(*bytes);
+        if (!f) {
+            return error_text(f.error(), "decode");
+        }
+        auto again = uicc::encode_fcp(*f);
+        return again ? "OK\t" + to_hex(*again) + "\t" + uicc::to_json(*f) : error_text(again.error(), "reencode");
+    }
+    const auto p = proto == "psc" ? up::Protocol::psc : up::Protocol::nru;
+    auto f = up::decode(p, *bytes);
+    if (!f) {
+        return error_text(f.error(), "decode");
+    }
+    auto again = up::encode(*f);
+    return again ? "OK\t" + to_hex(*again) + "\t" + up::to_json(*f) : error_text(again.error(), "reencode");
+}
+
 bool l3_protocol(std::string_view proto) {
     return proto == "nas" || proto == "sms-cp" || proto == "sms-rp" || proto == "sms-tpdu-mo" ||
            proto == "sms-tpdu-mt";
+}
+
+bool m12_protocol(std::string_view proto) {
+    return proto == "gtpu" || proto == "psc" || proto == "nru" || proto == "apdu" || proto == "fcp";
 }
 
 int batch() {
@@ -169,6 +238,8 @@ int batch() {
             out = "ERR\trequest\texpected <op> <proto> <type> <payload>";
         } else if (l3_protocol(f[1])) {
             out = f[0] == "dec" ? do_decode_l3(f[1], f[2], f[3]) : "ERR\trequest\tonly dec for " + f[1];
+        } else if (m12_protocol(f[1])) {
+            out = f[0] == "dec" ? do_decode_m12(f[1], f[3]) : "ERR\trequest\tonly dec for " + f[1];
         } else if (!asn1::known_protocol(f[1])) {
             out = "ERR\trequest\tunknown protocol " + f[1];
         } else if (f[0] == "dec") {

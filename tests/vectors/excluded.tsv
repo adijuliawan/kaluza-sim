@@ -12,6 +12,8 @@ ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.
 ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	f1ap_cu_ue_context_modification_procedure_test.cpp:51	ocudu-f1ap-ctxmod: not a whole PDU of any known protocol
 ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	f1ap_cu_ue_context_modification_procedure_test.cpp:58	ocudu-f1ap-ctxmod: not a whole PDU of any known protocol
 ocudu:tests/unittests/f1ap/cu_cp/f1ap_cu_ue_context_modification_procedure_test.cpp	f1ap_cu_ue_context_modification_procedure_test.cpp:64	ocudu-f1ap-ctxmod: not a whole PDU of any known protocol
+ocudu:tests/unittests/gtpu/gtpu_test_shared.h	gtpu_test_shared.h:11	ocudu-gtpu: not a GTP-U PDU (first octet 0x45 is not version 1, PT 1)
+ocudu:tests/unittests/gtpu/gtpu_tunnel_nru_test.cpp	gtpu_tunnel_nru_test.cpp:17	ocudu-gtpu-nru: not a GTP-U PDU (first octet 0x80 is not version 1, PT 1)
 ocudu:tests/unittests/rrc/rrc_ue_test_messages.cpp	rrc_ue_test_messages.cpp:172	ocudu-rrc-msgs: not a whole PDU of any known protocol
 ocudu:tests/unittests/xnap/xnap_test_messages.cpp	xnap_test_messages.cpp:116	ocudu-xnap-msgs: not a whole PDU of any known protocol
 ocudu:tests/unittests/xnap/xnap_test_messages.cpp	xnap_test_messages.cpp:71	ocudu-xnap-msgs: not a whole PDU of any known protocol
