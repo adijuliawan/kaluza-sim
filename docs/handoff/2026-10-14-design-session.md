@@ -29,6 +29,8 @@ The resume point for the next kaluza-sim session. The session that wrote it ran 
 | **Dedicated test subscriber range** (user, 2026-10-14). | Avoids colliding with the seed and the phones. Keys come from one master secret (`docs/sim-uicc.md` §8). |
 | **The P1 exit also runs against the Open5GS fork core**, the same control the gates use. | A brand-new sim needs a second core to tell which side is wrong, and to avoid being tuned to kaluza-core. |
 | **An optional AT port (P3c)** speaking TS 27.007/27.005 plus a Quectel subset. | The user's modem scripts and lpac's AT backend could drive simulated RM520N/RG255C personas. |
+| **Lab host: kaluza-uesim (VM 105) as it is.** kaluza-sim takes 172.30.30.30–.39, one ipvlan netns per RAN node. Builds run on the dev PC with an `x86-64-v3` + AES target and are deployed to the VM ([`../lab.md`](../lab.md)). | The gates already point there, and the VM has SCTP, TUN, AES and VAES. Its disk (11 GB free) is too small for build trees. P2 measures its performance before any resize. |
+| **Real cards through a card bridge on the dev PC.** | The OmniKey stays where pySim is set up, and K never leaves the card. |
 
 ## 3. kaluza-core context
 
@@ -53,7 +55,8 @@ kaluza-core is a Java 25 / Quarkus 5G core, Rel-19.
 - **VLAN 30 172.30.30.0/24:**
   - AMF N2 is .1:38412; the V-UPF N3 is .2; the OCUDU gNB N3 is .10.
   - **.11 is the N3IWF DNAT alias.** The phase-3 plan's example address for kaluza-gnb2 clashes with it; flagged to the user.
-  - kaluza-uesim is .20, where UERANSIM and n3iwue run. **kaluza-sim takes .21–.29.**
+  - kaluza-uesim is .20, where UERANSIM and n3iwue run. Its aliases .21–.23 carry n3iwue multi-UE runs and UERANSIM's handover-target gNB.
+  - **kaluza-sim takes .30–.39** (decided 2026-10-14, after the first draft's .21–.29 was found to collide). The full lab plan is [`../lab.md`](../lab.md).
 - **DN:** 172.30.61.1, the dev PC on VLAN 61, used for iperf3 and ping.
 - **IMS** sits on VLAN 63: P-CSCF at .10, RTPEngine at .11.
 - **UE host:** `kaluza-uesim`, Proxmox VM 105, Ubuntu 26.04, reached with `ssh kaluza-uesim`. Kernel, CPU and memory are to be measured at P0.
@@ -76,7 +79,9 @@ kaluza-core is a Java 25 / Quarkus 5G core, Rel-19.
 3. **The .11 address clash** in the phase-3 plan. The user was told; the core and RAN sessions still need to hear it.
 4. **O-RAN specs** (E2AP, E2SM-KPM/RC, O1, WG4/WG5) need the user's O-RAN registration. Only phase 2 needs them.
 5. **Side finding for the user:** `/home/amadeus/Development/ran/usim/2026-09-21-test-sims.md` (around line 172) holds an ADM1 PIN in clear text. Never print it.
-6. **To measure at P0:** kaluza-uesim's vCPUs, RAM and kernel, which calibrate the performance targets in `docs/requirements.md` §3.5.
+6. **Measured 2026-10-14:** kaluza-uesim has 4 vCPU, 8 GB and Linux 7.0.0-34 ([`../lab.md`](../lab.md) §2). P2 checks the performance targets there.
+7. **Recording 172.30.30.30–.39 (kaluza-sim) in kaluza-core's `lab-relayout.md`** is a kaluza-core session's job.
+8. **A second TAC served by the AMF**, for mobility-registration rows in P3, is a kaluza-core session's job.
 
 ## 6. First steps of P0 (only after the user's go)
 

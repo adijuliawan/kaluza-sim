@@ -53,12 +53,12 @@
 | CU-UP ↔ UPF (NG-U) | GTP-U with the PDU Session Container TS 38.415 | UDP, bound to an explicit address | 2152 |
 | CU-CP ↔ CU-CP (Xn-C) | XnAP TS 38.423 j40 | SCTP; both sides listen, the lower global gNB ID connects | 38422, PPID 61 |
 | CU-UP ↔ CU-UP (Xn-U) | GTP-U with NR-U; PDCP SN carried for AM DRBs | UDP | 2152 |
-| Nodes ↔ `ksim-radio` | Scene snapshot plus NDJSON deltas | HTTP | 9405 |
-| `ksim-ctl` ↔ nodes | HTTP/JSON, NDJSON events, `/metrics` | TCP on loopback or the management network | 9400–9405 |
+| Nodes ↔ `ksim-radio` | Scene snapshot plus NDJSON deltas | HTTP over the run's UNIX socket; TCP in all-in-one | 9405 (all-in-one) |
+| `ksim-ctl` ↔ nodes | HTTP/JSON, NDJSON events, `/metrics` | UNIX socket per node under `/run/ksim/<run>/` (split mode, per-node netns); TCP on loopback in all-in-one | 9400–9405 (all-in-one) |
 | Terminal ↔ card | APDUs (ETSI TS 102 221 / TS 31.102) | in-process, vpcd TCP 35963+n, or PC/SC | — |
 | Taps | GSMTAP-SIM on UDP 4729; Exported-PDU on UDP 4730 (kaluza-ue's live format) | UDP | — |
 
-Lab addresses on VLAN 30: kaluza-sim uses 172.30.30.21–.29 on kaluza-uesim, beside UERANSIM and n3iwue at .20.
+Lab addresses on VLAN 30: kaluza-sim uses **172.30.30.30–.39** on kaluza-uesim, one ipvlan netns per RAN node, clear of UERANSIM and n3iwue at .20–.23. F1 and E1 between the nodes of one gNB run on a host-internal bridge. In split mode, control APIs are UNIX sockets under `/run/ksim/<run>/`. Details: [`lab.md`](lab.md).
 
 ### 2.3 KAIR v1: the simulated Uu link
 
@@ -377,8 +377,8 @@ UeDevice (one actor, pinned to a shard)
   amf: [{addr: 172.30.30.1, port: 38412}]
   gnbs:
     - id: {value: 0x1A0, bits: 22}
-      cucp: {ng_bind: 172.30.30.21}
-      cuup: [{id: 1, n3: 172.30.30.22}]
+      cucp: {ng_bind: 172.30.30.30}
+      cuup: [{id: 1, n3: 172.30.30.31}]
       dus: [{id: 1, cells: [{pci: 101, ssb_arfcn: 632256, band: n78, tac: 1, site: s1, azimuth: 0, tx_dbm: 46}]}]
   radio: {model: uma, seed: 42, sites: {s1: [0, 0, 25], s2: [500, 0, 25]}}
   ues:

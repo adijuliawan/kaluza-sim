@@ -87,7 +87,8 @@ IApduTransport { reset(cb); transmit(capdu, cb); }
 |---|---|---|
 | `InProc` | Calls the soft card directly; still completes through the shard queue | 100 UEs (pcsc-lite's default is only 16 readers) |
 | `Vpcd` | vsmartcard protocol over TCP 35963+n. A 2-byte big-endian length frame; a 1-byte frame is a control code (0 off, 1 on, 2 reset, 4 ATR) | Card-side client: the soft card connects to pcscd's vpcd, so **pySim-shell sees it as a PC/SC reader**. Terminal-side server: a remote card connects without pcscd |
-| `Pcsc` | pcsc-lite on the blocking pool: SCardConnect (T0 or T1), SCardTransmit | Real sysmoISIM cards in the OmniKey 3x21 (setup: `/home/amadeus/.claude/projects/-home-amadeus-Development-ran/memory/pysim-setup-ran.md`); K stays in the card |
+| `Pcsc` | pcsc-lite on the blocking pool: SCardConnect (T0 or T1), SCardTransmit | Real sysmoISIM cards in the OmniKey 3x21 on the dev PC (setup: `/home/amadeus/.claude/projects/-home-amadeus-Development-ran/memory/pysim-setup-ran.md`); K stays in the card |
+| Card bridge | `ksim-sim serve --pcsc` on the dev PC exposes a real card over the vpcd framing. A UE in the lab VM connects with its `Vpcd` transport in the terminal role | Real cards for UEs running on kaluza-uesim, with no USB passthrough ([`lab.md`](lab.md) §7) |
 
 A card is attached to exactly one terminal at a time, as a physical card sits in one reader. `ksim-ctl ue <n> sim remove|insert|swap` models card removal and swap ([`cli.md`](cli.md)).
 

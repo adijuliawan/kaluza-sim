@@ -14,7 +14,7 @@ They never come from kaluza-core ([ADR 0005](adr/0005-independence-from-kaluza-c
 | T1 | Unit tests and golden vectors: codecs, entities, KATs, the card OS | Dev box; every commit |
 | T1b | Property and fuzz tests: round trips, "no input may crash a process", FSM tables against TS 24.501 §5.1.3 and §6.1.3 | Dev box; nightly |
 | T2 | Interop with independent peers (§3) | Dev box and lab |
-| T3 | Lab scenarios against kaluza-core on k3s | kaluza-uesim, in agreed windows |
+| T3 | Lab scenarios against kaluza-core on k3s | kaluza-uesim (VM 105, 172.30.30.30–.39; [`lab.md`](lab.md)), in agreed windows |
 | T4 | Gate parity with the UERANSIM-based gates (§4) | kaluza-uesim, in a kaluza-core session's set |
 | T5 | Behaviour compared with real-device captures (kaluza-ue `*_l3.pcap`, the core's `ngap.pcap`) | Dev box |
 

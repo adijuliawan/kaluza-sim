@@ -9,7 +9,7 @@ It is a **second implementation**. It shares no code, tables or reference output
 
 **Status (2026-10-14):** design done; no code yet. The next step is build phase **P0**.
 
-**Review page (private artifact):** https://claude.ai/artifact/DdYiFQqkbaC8kaMCn4ft95. It summarises these docs as of commit 15508d9. Where they differ, the repo wins. Republish the page when the docs change.
+**Review page (private artifact):** https://claude.ai/artifact/DdYiFQqkbaC8kaMCn4ft95. It summarises these docs as of the commit named in its header. Where they differ, the repo wins. Republish the page when the docs change.
 
 ## Start here (new session)
 
@@ -64,6 +64,7 @@ kaluza-sim targets:
 | [`docs/verification.md`](docs/verification.md) | Test tiers, oracles, interop matrix, parity crosswalk, the gate contract offered to kaluza-core |
 | [`docs/traceability.md`](docs/traceability.md) | Mapping to kaluza-core's gate families, phase-3 waves, and the defects UERANSIM missed |
 | [`docs/roadmap.md`](docs/roadmap.md) | P0–P5, exit criteria, risks |
+| [`docs/lab.md`](docs/lab.md) | Where it runs: the dev PC for builds and tier 1; kaluza-uesim (VM 105) for runs against the core on 172.30.30.30–.39; the card bridge |
 | [`docs/specs.md`](docs/specs.md) | Pinned spec index: local or to fetch, with versions |
 | [`docs/adr/`](docs/adr/) | Decision records 0001–0007 |
 | [`docs/research/`](docs/research/) | OCUDU, duranta-ran (OAI), UERANSIM fork, PacketRusher, SIM tooling, Quectel material |

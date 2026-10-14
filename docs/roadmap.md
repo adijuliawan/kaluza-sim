@@ -59,7 +59,7 @@
 | Effort: two stacks plus a card | No feature ahead of a kaluza-core consumer that can measure it; parity (P4) deferred until after v1 |
 | PDCP COUNT/HFN mistakes at handover | Spec-row tests, randomized loss/reorder properties, a decipher-sanity metric |
 | The ideal L2 hides MAC/RLC-dependent behaviour | `docs/abstraction-ledger.md`; the phase-2 seams are fixed in v1 |
-| Shared lab (the kaluza-uesim VM, W5 freezes, B220 sessions, the .11 address clash) | Own addresses (.21–.29); agreed windows; read-only on kaluza-core; an ID-collision check at start |
+| Shared lab (the kaluza-uesim VM, W5 freezes, B220 sessions, the .11 address clash) | Own addresses (.30–.39, [`lab.md`](lab.md)); agreed windows; read-only on kaluza-core; an ID-collision check at start |
 | O-RAN specs need registration to download | The user fetches them; they stay outside the repo; only phase 2 needs them |
 | The GSMA SAGE undertaking for SNOW 3G | Held as kaluza-core already holds it |
 | Both implementations read a clause the same wrong way | Independent oracles, Open5GS as a control, phone captures, separate sessions for sim and core |
