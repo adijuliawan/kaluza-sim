@@ -43,21 +43,69 @@ row_text() {
     awk -F '\t' -v id="$1" '$1 == id { print $4; found = 1; exit } END { if (!found) exit 1 }' "$ROWS_SET"
 }
 
-# allow_id ID: the allow entry for the row on this core, if any.
+# allow_id ID: the allow entry for the row on this core, if any; on an interop run
+# (P2 Q5, ADR 0012 point 7) also the peer's for the run's mode: a gate sets
+# PEER_ALLOW (gates/allow/<peer>.tsv, whose third column lists the modes) and
+# PEER_MODE (C3, C4 or C5).
 allow_id() {
-    [ -f "$ALLOW" ] || return 1
-    awk -F '\t' -v id="$1" '$1 !~ /^#/ && $2 == id { print $1; found = 1; exit } END { if (!found) exit 1 }' "$ALLOW"
+    if [ -f "$ALLOW" ] &&
+        awk -F '\t' -v id="$1" '$1 !~ /^#/ && $2 == id { print $1; found = 1; exit } END { if (!found) exit 1 }' "$ALLOW"; then
+        return 0
+    fi
+    [ -n "${PEER_ALLOW:-}" ] && [ -f "$PEER_ALLOW" ] && [ -n "${PEER_MODE:-}" ] || return 1
+    awk -F '\t' -v id="$1" -v mode="$PEER_MODE" \
+        '$1 !~ /^#/ && $2 == id && index("," $3 ",", "," mode ",") { print $1; found = 1; exit } END { if (!found) exit 1 }' "$PEER_ALLOW"
 }
 
 record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$CORE" "$3" >> "$ROWS_TSV"; }
 
-# row ID WANT GOT: PASS when GOT matches the extended regex WANT.
+# The run's mode for gates/rows/p2.tsv's modes column (P2 Q5): aio, split, or the
+# interop combination the topology's peers make (C3: OCUDU's CU-CP and CU-UP; C4:
+# its CU-UP; C5: its CU-CP). Set once, in KSIM_RUN_MODE.
+set_run_mode() {
+    _info=$(ctl info 2>/dev/null)
+    _pcp=$(printf '%s\n' "$_info" | kv PEER_CUCP)
+    _pup=$(printf '%s\n' "$_info" | kv PEER_CUUP)
+    KSIM_RUN_MODE=aio
+    [ "$(printf '%s\n' "$_info" | kv ROLE)" = split ] && KSIM_RUN_MODE=split
+    if [ -n "$_pcp" ] && [ -n "$_pup" ]; then
+        KSIM_RUN_MODE=C3
+    elif [ -n "$_pcp" ]; then
+        KSIM_RUN_MODE=C5
+    elif [ -n "$_pup" ]; then
+        KSIM_RUN_MODE=C4
+    fi
+}
+# row_modes ID: the row's modes ("aio,split,C3"), empty in a row set without a modes
+# column (p1.tsv): the column is found by the header row's name.
+row_modes() {
+    awk -F '\t' -v id="$1" '
+        $1 ~ /^#/ { next }
+        !col { for (i = 1; i <= NF; i++) if ($i == "modes") col = i; if (!col) exit; next }
+        $1 == id { print $col; exit }' "$ROWS_SET"
+}
+
+# row ID WANT GOT: PASS when GOT matches the extended regex WANT. A row whose modes
+# do not hold the run's is skipped instead (P2 Q5). With ROW_NO_ALLOW=1
+# a FAIL is not looked up in the allow-lists (the gate saw it fail for another reason).
 row() {
     _id="$1"; _want="$2"; _got="$3"
     _text=$(row_text "$_id") || abort "row $_id is not in $(basename "$ROWS_SET")"
+    _modes=$(row_modes "$_id")
+    if [ -n "$_modes" ] && [ "$_modes" != - ]; then
+        [ -n "${KSIM_RUN_MODE:-}" ] || set_run_mode
+        case ",$_modes," in
+            *",$KSIM_RUN_MODE,"*) ;;
+            *)
+                skip=$((skip + 1)); printf '  SKIP  %-66s %s\n' "$_text" "not a $KSIM_RUN_MODE row (modes $_modes)"
+                record "$_id" SKIP "not a $KSIM_RUN_MODE row (modes $_modes)"
+                return 0
+                ;;
+        esac
+    fi
     if printf '%s\n' "$_got" | grep -Eq -- "$_want"; then
         pass=$((pass + 1)); printf '  PASS  %-66s got=%s\n' "$_text" "$_got"; record "$_id" PASS "$_got"
-    elif _allow=$(allow_id "$_id"); then
+    elif [ "${ROW_NO_ALLOW:-0}" != 1 ] && _allow=$(allow_id "$_id"); then
         allowed=$((allowed + 1)); printf '  ALLOW %-66s got=%s (%s)\n' "$_text" "$_got" "$_allow"
         record "$_id" ALLOWED "$_got ($_allow)"
     else

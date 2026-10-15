@@ -25,7 +25,7 @@ inline std::vector<Sample> all() {
     s.push_back({"GNB-CU-UP-E1SetupRequest", E1SetupRequest{1, 0x1A0, "ksim-cuup1", {{plmn, {slice}}}}});
     s.push_back({"GNB-CU-UP-E1SetupResponse", E1SetupResponse{1, "ksim-gnb1"}});
     s.push_back({"GNB-CU-UP-E1SetupFailure", E1SetupFailure{1, Cause{"misc", "unspecified"}}});
-    const DrbToSetup drb{1, true, true, true, 18, {QosFlow{1, 9, 8, false, true}}};
+    const DrbToSetup drb{1, true, true, true, 18, {QosFlow{1, 9, 8, false, true}}, "ms100", 40};   // P2 Q5: the PDCP timers
     const SessionToSetup sess{1, "ipv4", slice, SecurityIndication{"preferred", "required"},
                               GtpTunnel{{172, 30, 50, 2}, 0x101}, {drb}};
     BearerContextSetupRequest req;
@@ -62,6 +62,7 @@ inline std::vector<Sample> all() {
     s.push_back({"BearerContextReleaseCommand", BearerContextReleaseCommand{1, 1, Cause{"radioNetwork", "normal-release"}}});
     s.push_back({"BearerContextReleaseComplete", BearerContextReleaseComplete{1, 1}});
     s.push_back({"ErrorIndication", ErrorIndication{0, 1, std::nullopt, Cause{"protocol", "abstract-syntax-error-reject"}}});
+    s.push_back({"BearerContextInactivityNotification", BearerContextInactivityNotification{1, 2, false}});   // P2 Q5
     return s;
 }
 

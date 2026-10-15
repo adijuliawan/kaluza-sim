@@ -54,6 +54,7 @@ struct CuUpStats {
     std::uint64_t ul_packets = 0;      // F1-U to N3
     std::uint64_t dropped = 0;         // no DRB for the flow, no F1-U DL end yet, …
     std::uint64_t ddds_rx = 0;         // P2 Q4: the DU's DL DATA DELIVERY STATUS frames
+    std::uint64_t inactivity_reports = 0;   // P2 Q5: BEARER CONTEXT INACTIVITY NOTIFICATIONs sent
     std::uint64_t e1_errors = 0;
 };
 
@@ -100,6 +101,10 @@ private:
         SecretBytes k_enc;
         SecretBytes k_int;
         std::map<std::uint8_t, Session> sessions;
+        // P2 Q5 (TS 37.483 8.3.1.2, 8.6.3): inactivity monitoring at activity level "ue".
+        std::optional<Millis> inactivity;     // the UE Inactivity Timer
+        Millis last_activity = 0;             // the last UL or DL user data
+        bool reported_inactive = false;
     };
 
     void on_e1_event(LinkEvent e);
@@ -110,6 +115,8 @@ private:
     void handle(const e1ap::BearerContextSetupRequest& m);
     void handle(const e1ap::BearerContextModificationRequest& m);
     void handle(const e1ap::BearerContextReleaseCommand& m);
+    void activity(Context& c);                        // user data passed: the UE is active
+    void watch_inactivity(std::uint32_t cu_up_ue);    // arms the check at last_activity + the timer
 
     Result<e1ap::SessionSetup> setup_session(Context& c, const e1ap::SessionToSetup& s);
     void release_session(Session& s);

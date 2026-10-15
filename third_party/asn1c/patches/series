@@ -13,3 +13,4 @@ runtime/0004-jer-open-type-variant-constraints.patch
 runtime/0005-jer-integer-beyond-intmax.patch
 runtime/0006-aper-open-type-discard-length-check.patch
 runtime/0007-aper-sequence-extension-bitmap-leak.patch
+runtime/0008-jer-sequence-member-out-of-order.patch

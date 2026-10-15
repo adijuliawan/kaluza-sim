@@ -61,6 +61,9 @@ public:
     const std::vector<std::string>& received() const noexcept { return received_; }
     std::size_t count(std::string_view message) const;
     std::uint64_t error_indications() const noexcept { return error_indications_; }
+    /// The cause of the last UE CONTEXT RELEASE REQUEST, "" before one (P2 Q5: a peer
+    /// CU-CP's release is seen here only).
+    const std::string& last_release_cause() const noexcept { return last_release_cause_; }
     std::optional<ngap::Cause> last_error_cause() const { return last_error_; }
 
     /// Downlink NGAP as a test scripts it (raw octets).
@@ -133,6 +136,7 @@ private:
     std::vector<Verdict> verdicts_;
     std::vector<std::string> received_;
     std::uint64_t error_indications_ = 0;
+    std::string last_release_cause_;
     std::optional<ngap::Cause> last_error_;
     std::size_t pagings_ = 0;
 };

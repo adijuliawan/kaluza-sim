@@ -12,7 +12,7 @@
 #   5. the canary over the run directory, the gates' ksim-ctl output and
 #      ksim-sim's output (derive, a kaluza dry run) included.
 # The run directory (no keys in it) is kept as build/component/last; the split run (P2 Q3) as
-# build/component/split-last.
+# build/component/split-last; the split E1 run (P2 Q5) as build/component/e1-last.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 B="$ROOT/build/dev/apps"
@@ -83,6 +83,25 @@ if [[ -n "$SRUN" && -d "$SRUN" ]]; then
     find "$ROOT/build/component/split-last" -name kair.sock -delete
 else
     echo "COMPONENT: no split run directory"; rc=1
+fi
+
+# P2 Q5: the E1 gate in split mode (topologies/split-stub-e1.yaml, a 15 s UE
+# Inactivity Timer): the CU-UP's inactivity report and the release it leads to.
+echo "-- the split E1 run"
+KSIM_RUNS="$T/runs-e1" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
+    KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE="$ROOT/topologies/split-stub-e1.yaml" \
+    sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p2-e1.sh" > "$T/e1.out" 2>&1 || rc=1
+cat "$T/e1.out"
+ERUN="$(sed -n 's/^RUN_DIR=//p' "$T/e1.out")"
+if [[ -n "$ERUN" && -d "$ERUN" ]]; then
+    "$PY" -I "$ROOT/tools/pcap_check.py" "$ERUN" | tee "$T/e1-pcap.out" || rc=1
+    "$PY" -I "$ROOT/tools/secret_canary.py" --run-dir "$ERUN" --master "$T/keys/master.key" --block "$BLOCK" \
+        | tee "$T/e1-canary.out" || rc=1
+    rm -rf "$ROOT/build/component/e1-last"
+    cp -r "$ERUN" "$ROOT/build/component/e1-last"
+    find "$ROOT/build/component/e1-last" \( -name ctl.sock -o -name kair.sock \) -delete
+else
+    echo "COMPONENT: no split E1 run directory"; rc=1
 fi
 echo "COMPONENT=$([[ $rc -eq 0 ]] && echo PASS || echo FAIL) RUN=build/component/last"
 exit "$rc"

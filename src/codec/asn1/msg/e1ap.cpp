@@ -30,6 +30,7 @@ constexpr int kE1Setup = 3;
 constexpr int kBearerContextSetup = 8;
 constexpr int kBearerContextModification = 9;
 constexpr int kBearerContextRelease = 11;
+constexpr int kBearerContextInactivityNotification = 13;
 
 // Protocol IE identifiers.
 constexpr int kCause = 0;
@@ -47,6 +48,7 @@ constexpr int kSystemBcSetupResponse = 16;
 constexpr int kSystemBcModificationRequest = 18;
 constexpr int kSystemBcModificationResponse = 19;
 constexpr int kActivityNotificationLevel = 23;
+constexpr int kActivityInformation = 24;
 constexpr int kToSetupList = 42;
 constexpr int kToModifyList = 43;
 constexpr int kToRemoveList = 44;
@@ -178,12 +180,18 @@ json drb_to_setup(const DrbToSetup& d, const char* flows_field) {
         flows.push_back(flow(f));
     }
     const std::string sn = d.sn_bits == 12 ? "s-12" : "s-18";
+    // In ASN.1 order: asn1c's JER decoder reads members in that order only (KS-PLAT-D7).
+    json pdcp = {{"pDCP-SN-Size-UL", sn}, {"pDCP-SN-Size-DL", sn}, {"rLC-Mode", "rlc-am"}};
+    if (d.t_reordering_ms) {
+        pdcp["t-ReorderingTimer"] = {{"t-Reordering", "ms" + std::to_string(*d.t_reordering_ms)}};
+    }
+    pdcp["discardTimer"] = d.discard_timer;
     return {{"dRB-ID", d.drb_id},
             {"sDAP-Configuration",
              {{"defaultDRB", d.default_drb ? "true" : "false"},
               {"sDAP-Header-UL", d.sdap_ul ? "present" : "absent"},
               {"sDAP-Header-DL", d.sdap_dl ? "present" : "absent"}}},
-            {"pDCP-Configuration", {{"pDCP-SN-Size-UL", sn}, {"pDCP-SN-Size-DL", sn}, {"rLC-Mode", "rlc-am"}}},
+            {"pDCP-Configuration", pdcp},
             {"cell-Group-Information", json::array({{{"cell-Group-ID", 0}}})},
             {flows_field, flows}};
 }
@@ -199,6 +207,11 @@ DrbToSetup read_drb_to_setup(const json& j, const char* flows_field) {
         throw jer::NotP1("a PDCP SN size other than 12 or 18 bits");
     }
     d.sn_bits = sn == "s-12" ? 12 : 18;
+    const json& pc = j.at("pDCP-Configuration");
+    d.discard_timer = pc.value("discardTimer", std::string("infinity"));   // absent: no discard
+    if (pc.contains("t-ReorderingTimer")) {
+        d.t_reordering_ms = std::stoi(pc.at("t-ReorderingTimer").at("t-Reordering").get<std::string>().substr(2));
+    }
     for (const auto& f : j.at(flows_field)) {
         d.flows.push_back(read_flow(f));
     }
@@ -483,6 +496,12 @@ Result<Bytes> build(const BearerContextReleaseComplete& m) {
     return per(pdu("successfulOutcome", kBearerContextRelease, "reject", "BearerContextReleaseComplete", ue_ids(m.cu_cp_ue, m.cu_up_ue)));
 }
 
+Result<Bytes> build(const BearerContextInactivityNotification& m) {
+    json ies = ue_ids(m.cu_cp_ue, m.cu_up_ue);
+    ies.push_back(ie(kActivityInformation, "reject", "ActivityInformation", {{"uE-Activity", m.active ? "active" : "not-active"}}));
+    return per(pdu("initiatingMessage", kBearerContextInactivityNotification, "ignore", "BearerContextInactivityNotification", ies));
+}
+
 Result<Bytes> build(const ErrorIndication& m) {
     json ies = json::array({ie(kTransactionId, "reject", "TransactionID", m.transaction)});
     if (m.cu_cp_ue) {
@@ -685,6 +704,13 @@ Result<Pdu> read(const std::string& kind, int code, const Ies& ies) {
             return Pdu{BearerContextReleaseCommand{cp_id(ies), up_id(ies), read_cause(need(ies, kCause))}};
         }
         return Pdu{BearerContextReleaseComplete{cp_id(ies), up_id(ies)}};
+    case kBearerContextInactivityNotification: {
+        auto [kind_name, v] = arm(need(ies, kActivityInformation));
+        if (kind_name != "uE-Activity") {
+            throw jer::NotP1("DRB or PDU session activity lists");
+        }
+        return Pdu{BearerContextInactivityNotification{cp_id(ies), up_id(ies), v->get<std::string>() == "active"}};
+    }
     case kErrorIndication: {
         ErrorIndication m;
         m.transaction = need(ies, kTransactionId).get<std::uint8_t>();

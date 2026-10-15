@@ -121,6 +121,33 @@ TEST(Session, Ts38425_5_4_2_1_TheDuReportsDownlinkDeliveryStatus) {
     EXPECT_EQ(n.failures(), "");
 }
 
+// P2 Q5 (TS 37.483 8.6.3; row ksim-p2.e1-inactivity): with no user data for the UE Inactivity
+// Timer the CU-UP reports the UE not active, and the CU-CP asks the AMF to release it with
+// user-inactivity; the UE ends in CM-IDLE with its session kept. Data before the timer runs
+// out keeps it connected.
+TEST(Session, Ts37483_8_6_3_TheCuUpsInactivityReportReleasesTheUe) {
+    const ScopedInactivity five(5);
+    Net n;
+    n.register_ue();
+    n.establish();
+    node::PingRequest p;
+    p.dst = {10, 60, 0, 1};
+    p.count = 3;
+    p.interval = 2'000;
+    ASSERT_TRUE(n.ue->ping(p));
+    n.loop.run_for(4'500);   // pings every 2 s: active all along
+    EXPECT_EQ(n.cuup.stats().inactivity_reports, 0u);
+    ASSERT_TRUE(n.loop.run_until([&] { return n.cuup.stats().inactivity_reports == 1; }, n.loop.now() + 8'000));
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("nas.mm.cm_idle").empty(); }, n.loop.now() + 2'000));
+    EXPECT_EQ(n.amf.count("UEContextReleaseRequest"), 1u);
+    const auto req = n.named("ran.ue.release_request");
+    ASSERT_FALSE(req.empty());
+    EXPECT_EQ(*req.back().find("cause"), "user-inactivity");
+    const auto at_cucp = n.named("ran.e1.inactivity");
+    ASSERT_EQ(at_cucp.size(), 2u);   // the CU-UP's report and the CU-CP's taking it
+    EXPECT_EQ(n.failures(), "");
+}
+
 TEST(Session, ADnPingToTheUeIsAnswered) {
     Net n;
     n.register_ue();

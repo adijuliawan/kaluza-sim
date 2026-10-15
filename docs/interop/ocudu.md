@@ -65,8 +65,66 @@ Our UE farm and DU, OCUDU's `ocucp` and `ocuup`, `ksim-corestub`, all on
   - It matters in C4 (OCUDU's CU-UP with our CU-CP, Q5), where our decoder sees
     the same octets.
 
+## C4 and C5 on the dev PC (P2 Q5, 2026-10-16)
+
+- **C4:** OCUDU's `ocuup` with our CU-CP, DU and UEs (`topologies/ocudu-c4-stub.yaml`).
+- **C5:** OCUDU's `ocucp` with our CU-UP, DU and UEs (`ocudu-c5-stub.yaml`).
+
+Both run against `ksim-corestub` with the E1 gate (`ksim-p2-e1.sh`) and the P1 session and data-plane gates, in hook 58. The result is 21 PASS, 1 ALLOWED, 0 FAIL (KS-PLAT-T51).
+
+- **C5 works end to end.** OCUDU's CU-CP sets our CU-UP's bearer contexts up and releases them, a ping passes 3/3, and our CU-UP's inactivity report leads OCUDU's CU-CP to release the UE.
+  - OCUDU's E1 Setup Response carries no gNB-CU-CP Name. The IE is optional, so that is not a difference.
+- **C4's control plane works:**
+  - E1 Setup from OCUDU's CU-UP;
+  - bearer context setup, modification and release;
+  - OCUDU's inactivity report releasing the UE through our CU-CP;
+  - the P1 session rows.
+- **C4's user plane does not work:** no user data passes, for two reasons in OCUDU's CU-UP (O-4, O-5), which the allow entry `O-4/O-5` covers.
+
+### Sim defects, fixed
+
+| Row | What the C4/C5 runs showed |
+|---|---|
+| KS-PLAT-D7 | Building the PDCP timers into E1: asn1c's JER decoder dropped a member written out of ASN.1 order without an error (runtime patch 0008 makes it fail) |
+| KS-E1AP-B3 | Our CU-CP gave the CU-UP no DL discard timer. E1 makes it optional, but it is the one the UE gets in RRC; now sent |
+
+### Spec ambiguity
+
+- **KS-E1AP-S2:** the UP keys' length in E1.
+  - Our CU-CP sends the 128-bit algorithm key (TS 33.501 A.8); OCUDU's sends the 256-bit KDF output.
+  - Our CU-UP now takes either.
+
+### Leads for OCUDU (not fixed here)
+
+- **O-3: OCUDU's CU-UP accepts a bearer context it cannot serve.**
+  - Seen: with no Discard Timer in the DRB's PDCP Configuration (optional in TS 37.483 9.3.1.38), it answered BEARER CONTEXT SETUP RESPONSE. Its log said `DRB1 DL: Invalid DRB config, discard_timer is not configured`, and the DRB never carried downlink data.
+  - Expected: a value it requires should be refused with a cause, or a default applied.
+  - We now send the timer.
+- **O-4: OCUDU's PDCP ciphers the SDAP header.**
+  - TS 38.323 5.8 excludes it: the ciphered unit is "the data part of the PDCP Data PDU ... except the SDAP header and the SDAP Control PDU".
+  - Seen: `pdcp_entity_tx.cpp` and `pdcp_entity_rx.cpp` quote that text, but cipher from the end of the PDCP header (`hdr_size` only).
+  - It never shows with OCUDU's own CU-CP, which configures both SDAP headers absent (`lib/cu_cp/up_resource_manager/up_resource_manager_helpers.cpp`, lines 515-516). Our CU-CP configures them present.
+- **O-5: OCUDU's CU-UP reads a 128-bit UP key as the first half of a 256-bit one.**
+  - Seen: `fill_sec_as_config` copies the E1 key into a 32-octet buffer from its start, and `truncate_key` then takes the 128 least significant bits. With our 16-octet key, those are zeros.
+  - Expected: a 16-octet key is the algorithm key itself (TS 33.501 A.8; KS-E1AP-S2).
+
+**How O-4 and O-5 were told apart** (local runs, not committed; C4 with the stub):
+
+| Run | Keys sent | SDAP headers | Ping |
+|---|---|---|---|
+| as built | 128-bit | present | 0/3 |
+| 256-bit keys | 256-bit (ours in the 128 LSBs) | present | 0/3 |
+| no SDAP headers | 128-bit | absent | 0/3 |
+| both worked around | 256-bit | absent | 3/3 |
+
+Each alone blocks all user data.
+
+### Notes
+
+- O-2's CU-UP name `ocuup_0` reaches our CU-CP intact: our asn1c decoder does not check PrintableString's alphabet. TS 37.483 10.3.4 would ignore the IE (criticality ignore), and the name is only for humans, so nothing differs.
+
 ## Evidence
 
-- `build/ocudu/last/` holds the hook's last run: the summary, our F1AP and F1-U
-  captures, and the peer's files with its NGAP and E1AP redacted.
+- `build/ocudu/last/` holds the hook's last runs (`c3/`, `c4/`, `c5/`): the summary, our
+  captures and rows, and the peer's files with its NGAP and E1AP redacted.
 - The gate's run directories carry everything under `peer/`, owner-only.

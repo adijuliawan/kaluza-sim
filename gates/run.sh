@@ -63,25 +63,35 @@ switch_off_left() {
         _i=$((_i + 1))
     done
 }
+stop_peers() {
+    "$ROOT/tools/ocudu-peer.sh" stop > "$peer_dir/stop.out" 2>&1 || echo "CLEANUP: an OCUDU process is left" >&2
+    # The peer's NGAP and E1AP captures hold K_gNB and the UP keys in clear:
+    # redacted, or without the oracle venv removed (tools/peer_redact.py).
+    if [ -x "$ROOT/.venv/bin/python" ] &&
+        "$ROOT/.venv/bin/python" -I "$ROOT/tools/peer_redact.py" "$peer_dir" > "$peer_dir/redact.out" 2>&1; then
+        :
+    else
+        rm -f "$peer_dir"/*ngap.pcap "$peer_dir"/*e1ap.pcap
+        echo "PEER_REDACTED=removed" >> "$peer_dir/redact.out"
+    fi
+}
 cleanup() {
-    [ -n "$ksim_pid" ] && { switch_off_left; "$KSIM_CTL" --run "$RUN" stop >/dev/null 2>&1; wait "$ksim_pid" 2>/dev/null; }
+    [ -n "$ksim_pid" ] && switch_off_left
+    # C4: OCUDU's CU-UP goes before our CU-CP, or it retries E1 Setup, fails fatally
+    # and writes no captures.
+    peers_stopped=0
+    if [ -n "$peer_dir" ] && [ "$peer_cuup" = 1 ] && [ "$peer_cucp" = 0 ]; then
+        stop_peers; peers_stopped=1
+    fi
+    [ -n "$ksim_pid" ] && { "$KSIM_CTL" --run "$RUN" stop >/dev/null 2>&1; wait "$ksim_pid" 2>/dev/null; }
     if [ -n "$peer_dir" ]; then
-        "$ROOT/tools/ocudu-peer.sh" stop > "$peer_dir/stop.out" 2>&1 || echo "CLEANUP: an OCUDU process is left" >&2
-        # The peer's NGAP and E1AP captures hold K_gNB and the UP keys in clear:
-        # redacted, or without the oracle venv removed (tools/peer_redact.py).
-        if [ -x "$ROOT/.venv/bin/python" ] &&
-            "$ROOT/.venv/bin/python" -I "$ROOT/tools/peer_redact.py" "$peer_dir" > "$peer_dir/redact.out" 2>&1; then
-            :
-        else
-            rm -f "$peer_dir"/*ngap.pcap "$peer_dir"/*e1ap.pcap
-            echo "PEER_REDACTED=removed" >> "$peer_dir/redact.out"
-        fi
+        [ "$peers_stopped" = 1 ] || stop_peers
         [ -d "$RUN" ] && mv "$peer_dir" "$RUN/peer" 2>/dev/null
         peer_dir=""
     fi
     [ -n "$stub_pid" ] && { kill "$stub_pid" 2>/dev/null; wait "$stub_pid" 2>/dev/null; }
 }
-peer_dir=""
+peer_dir=""; peer_cucp=0; peer_cuup=0
 trap cleanup EXIT INT TERM
 
 if [ "${STUB:-0}" = 1 ]; then
@@ -97,32 +107,51 @@ if [ "${STUB:-0}" = 1 ]; then
     done
 fi
 
-# P2 Q4 (ADR 0012): a gNB whose peers name OCUDU gets OCUDU's CU-CP, then its
-# CU-UP once the CU-CP listens for E1, before ksim starts its DU and UEs. Their
-# configs, logs and captures are in <run>-peer meanwhile, <run>/peer after (ksim
-# wants its run directory new).
+# P2 Q4, Q5 (ADR 0012): a gNB whose peers name OCUDU gets OCUDU's roles around
+# ksim's. Its CU-CP first, before ksim's DU dials F1 (and our CU-UP E1, C5). Its
+# CU-UP then once a CU-CP listens for E1: OCUDU's (C3) before ksim, ours (C4)
+# after ksim, since an OCUDU CU-UP refused E1 at start gives up. Their configs,
+# logs and captures are in <run>-peer meanwhile, <run>/peer after (ksim wants
+# its run directory new).
 topo="${KSIM_TOPOLOGY_FILE:-$ROOT/$KSIM_TOPOLOGY}"
-if grep -q '^ *peers: *{.*ocudu' "$topo"; then
+peer_line=$(grep -m 1 '^ *peers: *{' "$topo" 2>/dev/null)
+peer_cucp=0; peer_cuup=0
+case "$peer_line" in *"cucp: ocudu"*) peer_cucp=1 ;; esac
+case "$peer_line" in *"cuup: ocudu"*) peer_cuup=1 ;; esac
+lab=""; [ "${KSIM_LAB:-0}" = 1 ] && lab="--lab"
+wait_e1() {   # $1 = listen|established, $2 = what failed
+    _i=0
+    if [ "$1" = listen ]; then
+        until ss -Sln 2>/dev/null | grep -q ':38462'; do
+            _i=$((_i + 1)); [ "$_i" -gt 100 ] && { echo "$2" >&2; return 1; }
+            sleep 0.1
+        done
+    else
+        until ss -Sn state established 2>/dev/null | grep -q ':38462'; do
+            _i=$((_i + 1)); [ "$_i" -gt 100 ] && { echo "$2" >&2; return 1; }
+            sleep 0.1
+        done
+    fi
+}
+start_peer_cuup() {
+    # shellcheck disable=SC2086
+    "$ROOT/tools/ocudu-peer.sh" run --cuup --run-dir "$peer_dir" $lab > "$peer_dir/start-cuup.out" 2>&1 ||
+        { cat "$peer_dir/start-cuup.out" >&2; return 1; }
+    wait_e1 established "OCUDU's CU-UP did not set E1 up" || { tail -20 "$peer_dir/ocudu-cuup.out" >&2; return 1; }
+}
+if [ "$peer_cucp" = 1 ] || [ "$peer_cuup" = 1 ]; then
     peer_dir="$RUN-peer"
     mkdir -p "$peer_dir"
+fi
+if [ "$peer_cucp" = 1 ]; then
     amf=${STUB_LISTEN:-$(sed -n 's/^amf: *\[{addr: *\([0-9.]*\), *port: *\([0-9]*\)}.*/\1:\2/p' "$topo")}
-    lab=""; [ "${KSIM_LAB:-0}" = 1 ] && lab="--lab"
     # shellcheck disable=SC2086
     "$ROOT/tools/ocudu-peer.sh" run --cucp --run-dir "$peer_dir" --amf "$amf" $lab > "$peer_dir/start-cucp.out" 2>&1 ||
         { cat "$peer_dir/start-cucp.out" >&2; exit 1; }
-    i=0
-    until ss -Sln 2>/dev/null | grep -q ':38462'; do
-        i=$((i + 1)); [ "$i" -gt 100 ] && { echo "OCUDU's CU-CP does not listen for E1" >&2; tail -20 "$peer_dir/ocudu-cucp.out" >&2; exit 1; }
-        sleep 0.1
-    done
-    # shellcheck disable=SC2086
-    "$ROOT/tools/ocudu-peer.sh" run --cuup --run-dir "$peer_dir" $lab > "$peer_dir/start-cuup.out" 2>&1 ||
-        { cat "$peer_dir/start-cuup.out" >&2; exit 1; }
-    i=0
-    until ss -Sn state established 2>/dev/null | grep -q ':38462'; do
-        i=$((i + 1)); [ "$i" -gt 100 ] && { echo "OCUDU's CU-UP did not set E1 up" >&2; tail -20 "$peer_dir/ocudu-cuup.out" >&2; exit 1; }
-        sleep 0.1
-    done
+    wait_e1 listen "OCUDU's CU-CP does not listen for E1" || { tail -20 "$peer_dir/ocudu-cucp.out" >&2; exit 1; }
+    if [ "$peer_cuup" = 1 ]; then
+        start_peer_cuup || exit 1
+    fi
 fi
 
 # The gates read NAS in clear (the IMEISV row), so they ask for it (KS-CTL-004).
@@ -142,6 +171,10 @@ until grep -q '^CTL=' "$KSIM_RUNS/$core-ksim.out" 2>/dev/null; do
     sleep 0.1
 done
 export RUN
+if [ "$peer_cuup" = 1 ] && [ "$peer_cucp" = 0 ]; then
+    wait_e1 listen "our CU-CP does not listen for E1" || exit 1
+    start_peer_cuup || exit 1
+fi
 
 # KSIM_SIM_TRACE=1: every UE's card trace on from the start (N14): sim.pcapng,
 # GSMTAP-SIM, redacted (sim-uicc.md 6). The component run asks for it.

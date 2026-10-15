@@ -37,6 +37,22 @@ inline std::unique_ptr<IDatagram> port(MemNet& net, SimLoop& loop, std::uint8_t 
     return p ? std::move(*p) : nullptr;
 }
 
+// P2 Q5: the UE Inactivity Timer the rig's CU-CP gives the CU-UP. A test that wants it
+// short holds a ScopedInactivity while it builds its Net.
+inline std::uint16_t rig_ue_inactivity_s = 7200;
+struct ScopedInactivity {
+    explicit ScopedInactivity(std::uint16_t s) { rig_ue_inactivity_s = s; }
+    ~ScopedInactivity() { rig_ue_inactivity_s = 7200; }
+    ScopedInactivity(const ScopedInactivity&) = delete;
+    ScopedInactivity& operator=(const ScopedInactivity&) = delete;
+};
+
+inline proc::ran::CuCpConfig cucp_config() {
+    proc::ran::CuCpConfig c;
+    c.ue_inactivity_s = rig_ue_inactivity_s;
+    return c;
+}
+
 inline proc::ran::CuUpConfig cuup_config() {
     proc::ran::CuUpConfig c;
     c.n3_addr = {127, 0, 0, 31};
@@ -196,7 +212,7 @@ struct Net {
     std::unique_ptr<IDatagram> cuup_f1u = port(net, loop, 32);
     std::unique_ptr<IDatagram> du_f1u = port(net, loop, 33);
     corestub::NgapAmf amf;
-    proc::ran::CuCp cucp{loop, events, proc::ran::CuCpConfig{}, ng.a(), f1.b(), &e1.b()};
+    proc::ran::CuCp cucp{loop, events, cucp_config(), ng.a(), f1.b(), &e1.b()};
     proc::ran::CuUp cuup{loop, events, cuup_config(), e1.a(), *cuup_n3, *cuup_f1u};
     proc::ran::Du du{loop, events, du_config(), f1.a(),
                      [this](const air::Frame& f) {

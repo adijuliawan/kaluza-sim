@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# Interop combination C5 on the dev PC (P2 Q5; ADR 0012): our UE farm and DU,
+# OCUDU's CU-CP, our CU-UP (E1 with OCUDU as the CU-CP), ksim-corestub, all on 127.0.0.x. The addresses are ocudu-c3-stub.yaml's.
+plmn: "00101"
+seed: 42
+mode: split
+amf: [{addr: 127.0.0.1, port: 39412}]
+gnbs:
+  - id: {value: 0x1A1, bits: 22}
+    name: ocudu-gnb
+    peers: {cucp: ocudu}
+    cuup: {n3_bind: 127.0.0.4}
+    dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
+    split: {f1c: 127.0.10.1, e1: 127.0.20.1, du: 127.0.10.2, cuup: 127.0.10.3, cuup_e1: 127.0.20.2, streams: 16}
+ues:
+  - {group: s22, count: 6, range: "001010000300001", card: {template: ../cards/usim-5g.yaml}, nssai: [1],
+     imeisv_tac: "86000000", persona: ../personas/s22plus.yaml}
+  - {group: op9, count: 6, range: "001010000300007", card: {template: ../cards/usim-5g.yaml}, nssai: [1],
+     imeisv_tac: "86000000", persona: ../personas/oneplus9pro.yaml}
+secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
+peer: {name: ksim-corestub}

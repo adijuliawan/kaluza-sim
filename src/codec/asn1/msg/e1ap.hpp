@@ -75,6 +75,12 @@ struct DrbToSetup {
     bool sdap_dl = true;
     std::uint8_t sn_bits = 18;      // 12 or 18
     std::vector<QosFlow> flows;
+    // The timers the CU-UP's PDCP entity runs with (P2 Q5; TS 37.483 9.3.1.38):
+    // the DL discard timer, "infinity" or "msN" as the CU-CP gives the UE in RRC
+    // (OCUDU's CU-UP builds no DL entity without it), and t-Reordering in ms when
+    // set (absent: infinity, as in RRC).
+    std::string discard_timer = "infinity";
+    std::optional<int> t_reordering_ms;
     friend bool operator==(const DrbToSetup&, const DrbToSetup&) = default;
 };
 struct SessionToSetup {
@@ -198,10 +204,19 @@ struct ErrorIndication {
     friend bool operator==(const ErrorIndication&, const ErrorIndication&) = default;
 };
 
+// P2 Q5 (TS 37.483 8.6.3, 9.3.1.66): the CU-UP's report at activity level "ue";
+// the DRB and PDU session activity lists are not read (no peer sends them at "ue").
+struct BearerContextInactivityNotification {
+    std::uint32_t cu_cp_ue = 0;
+    std::uint32_t cu_up_ue = 0;
+    bool active = false;   // UE-Activity: active or not-active
+    friend bool operator==(const BearerContextInactivityNotification&, const BearerContextInactivityNotification&) = default;
+};
+
 using Pdu = std::variant<E1SetupRequest, E1SetupResponse, E1SetupFailure, BearerContextSetupRequest,
                          BearerContextSetupResponse, BearerContextSetupFailure, BearerContextModificationRequest,
                          BearerContextModificationResponse, BearerContextModificationFailure, BearerContextReleaseCommand,
-                         BearerContextReleaseComplete, ErrorIndication>;
+                         BearerContextReleaseComplete, ErrorIndication, BearerContextInactivityNotification>;
 
 namespace detail {
 template <class T>

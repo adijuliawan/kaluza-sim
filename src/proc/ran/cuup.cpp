@@ -6,6 +6,7 @@
 #include <variant>
 
 #include "codec/sdap/sdap.hpp"
+#include "platform/mutation.hpp"
 
 namespace ksim::proc::ran {
 
@@ -189,6 +190,7 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                 const auto u = entity::gtpu::UserData::nru(r.f1u_dl->teid, r.nru_sn, std::move(pdu));
                 r.nru_sn = (r.nru_sn + 1) & 0xFFFFFF;
                 ++stats_.dl_packets;
+                activity(*cx);
                 (void)f1u_.send(at(*r.f1u_dl, cfg_.gtpu_port), u);
             },
             [this, alive = alive_, up_id, psi, drb_id](Bytes sdu) {
@@ -216,6 +218,7 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                     sdu.erase(sdu.begin());
                 }
                 ++stats_.ul_packets;
+                activity(*cx);
                 (void)n3_.send(at(ss.ng_ul, cfg_.gtpu_port),
                                entity::gtpu::UserData::ul_psc(ss.ng_ul.teid, qfi, std::move(sdu)));
             });
@@ -255,9 +258,13 @@ void CuUp::handle(const e1ap::BearerContextSetupRequest& m) {
     c.cu_up_ue = id;
     c.nea = m.security.nea;
     c.nia = m.security.nia;
-    c.k_enc = SecretBytes::copy_of(m.security.enc_key);
+    // TS 33.501 A.8: a 128-bit algorithm's key is the 128 least significant bits of the
+    // KDF output. TS 37.483 9.3.1.32 does not say which the IE carries; we send the
+    // algorithm key, a CU-CP may send the whole output (OCUDU's does; KS-E1AP-S2).
+    const auto alg_key = [](const Bytes& k) { return k.size() == 32 ? ByteView(k).subspan(16) : ByteView(k); };
+    c.k_enc = SecretBytes::copy_of(alg_key(m.security.enc_key));
     if (m.security.int_key) {
-        c.k_int = SecretBytes::copy_of(*m.security.int_key);
+        c.k_int = SecretBytes::copy_of(alg_key(*m.security.int_key));
     }
     e1ap::BearerContextSetupResponse r;
     r.cu_cp_ue = m.cu_cp_ue;
@@ -276,6 +283,48 @@ void CuUp::handle(const e1ap::BearerContextSetupRequest& m) {
     }
     ++stats_.contexts_setup;
     send_e1(r, true);
+    // TS 37.483 8.3.1.2: the UE Inactivity Timer, taken into account for inactivity monitoring.
+    if (m.activity_level == "ue" && m.ue_inactivity_s) {
+        c.inactivity = Millis{*m.ue_inactivity_s} * 1'000;
+        c.last_activity = ex_.now();
+        watch_inactivity(id);
+    }
+}
+
+void CuUp::activity(Context& c) {
+    c.last_activity = ex_.now();
+    if (c.reported_inactive) {
+        c.reported_inactive = false;   // active again: watched again
+        watch_inactivity(c.cu_up_ue);
+    }
+}
+
+void CuUp::watch_inactivity(std::uint32_t cu_up_ue) {
+    const Context* c = by_up(cu_up_ue);
+    if (c == nullptr || !c->inactivity) {
+        return;
+    }
+    ex_.start_timer_at(c->last_activity + *c->inactivity, [this, alive = alive_, cu_up_ue] {
+        if (!*alive) {
+            return;
+        }
+        Context* cx = by_up(cu_up_ue);
+        if (cx == nullptr || !cx->inactivity || cx->reported_inactive) {
+            return;
+        }
+        if (ex_.now() < cx->last_activity + *cx->inactivity) {
+            watch_inactivity(cu_up_ue);   // data came meanwhile
+            return;
+        }
+        // TS 37.483 8.6.3: no user data for the timer's length; reported once until data again.
+        cx->reported_inactive = true;
+        if (KSIM_MUTANT("no_inactivity_notification")) {
+            return;   // the mutant: the CU-CP never learns (row ksim-p2.e1-inactivity)
+        }
+        ++stats_.inactivity_reports;
+        events_.emit("ran.e1.inactivity", cfg_.id, {{"cu_up_ue", str(cu_up_ue)}, {"active", "0"}});
+        send_e1(e1ap::BearerContextInactivityNotification{cx->cu_cp_ue, cu_up_ue, false}, true);
+    });
 }
 
 void CuUp::handle(const e1ap::BearerContextModificationRequest& m) {

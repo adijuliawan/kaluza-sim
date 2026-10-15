@@ -924,6 +924,16 @@ void CuCp::on_e1(ByteView msg) {
                    },
                    [this](const e1ap::BearerContextSetupResponse& m) { handle(m); },
                    [this](const e1ap::BearerContextModificationResponse& m) { handle(m); },
+                   [this](const e1ap::BearerContextInactivityNotification& m) {
+                       // P2 Q5 (TS 37.483 8.6.3; architecture.md 7.2): the UE did nothing for the
+                       // UE Inactivity Timer, so the CU-CP asks the AMF to release it.
+                       Ue* ue = by_cu(m.cu_cp_ue);
+                       events_.emit("ran.e1.inactivity", cfg_.id,
+                                    {{"cu_cp_ue", str(m.cu_cp_ue)}, {"active", m.active ? "1" : "0"}});
+                       if (ue != nullptr && !m.active) {
+                           (void)request_release(ue->ran_ue, "user-inactivity");
+                       }
+                   },
                    [this](const e1ap::BearerContextSetupFailure& m) {
                        if (Ue* ue = by_cu(m.cu_cp_ue)) {
                            job_failed(*ue, "radioNetwork", "unspecified");
@@ -1080,6 +1090,10 @@ void CuCp::start_job(Ue& ue) {
         t.ng_ul = e1_tunnel(item.transfer.ul);
         e1ap::DrbToSetup d;
         d.drb_id = next_drb;
+        // The PDCP timers of the PDCP-Config the UE gets (rrc::PdcpSettings): the CU-UP's
+        // entity runs with the same (P2 Q5).
+        const rrc::PdcpSettings pdcp;
+        d.t_reordering_ms = pdcp.t_reordering_ms;
         for (const auto& f : item.transfer.flows) {
             d.flows.push_back(e1ap::QosFlow{f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable});
         }

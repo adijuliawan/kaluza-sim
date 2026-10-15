@@ -135,13 +135,17 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         t.gnb_name = g.get<std::string>("name", t.gnb_name);
         // A peer CU-CP (P2 Q4) has its own N2 and N3 addresses in its config, not here.
         if (t.peer_cucp.empty() || g.has("cucp")) {
-            g.at("cucp").only({"ng_bind", "ng_streams"});
+            g.at("cucp").only({"ng_bind", "ng_streams", "ue_inactivity_s"});
             auto bind = Endpoint::parse(g.at("cucp").at("ng_bind").as<std::string>(), 0);
             if (!bind || bind->family != t.amf.family) {
                 g.at("cucp").at("ng_bind").fail("a numeric address of the AMF's family");
             }
             t.ng_bind = *bind;
             t.ng_streams = g.at("cucp").get<std::uint16_t>("ng_streams", 2);
+            t.ue_inactivity_s = g.at("cucp").get<std::uint16_t>("ue_inactivity_s", t.ue_inactivity_s);
+            if (t.ue_inactivity_s < 1 || t.ue_inactivity_s > 7200) {
+                g.at("cucp").at("ue_inactivity_s").fail("1..7200 s (TS 37.483 9.3.1.54)");
+            }
         }
         // N3 (P1 N10): the CU-UP's address, GTP-U's port; by default the CU-CP's address.
         t.n3_bind = Endpoint::v4(t.ng_bind.addr[0], t.ng_bind.addr[1], t.ng_bind.addr[2], t.ng_bind.addr[3], 2152);

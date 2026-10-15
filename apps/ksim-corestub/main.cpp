@@ -130,6 +130,7 @@ Reply report(Stub& s) {
             }
             out.set("REGISTERED", registered);
             out.set("ERROR_INDICATIONS", static_cast<std::int64_t>(s.amf->error_indications()));
+            out.set("LAST_RELEASE_CAUSE", s.amf->last_release_cause().empty() ? std::string("-") : s.amf->last_release_cause());
             out.set("SESSIONS", static_cast<std::int64_t>(s.amf->smf().sessions()));
             out.set("SM_REQUESTS", static_cast<std::int64_t>(s.amf->smf().requests()));
             if (const auto* upf = s.amf->upf()) {

@@ -155,6 +155,7 @@ private:
     std::unique_ptr<TapAssoc> du_f1_tap_;   // P2 Q4: the DU's F1-C, captured when the CU-CP is a peer
     std::unique_ptr<MemAssocPair> e1_;
     std::unique_ptr<TapAssoc> e1_tap_;
+    std::unique_ptr<TapAssoc> cuup_e1_tap_;   // P2 Q5: the CU-UP's E1, captured when the CU-CP is a peer
     // P2 Q3, split: the real links of whichever roles this process hosts.
     std::unique_ptr<AssocSlot> f1_slot_;               // the CU-CP's F1-C
     std::unique_ptr<net::SctpListener> f1_listen_;

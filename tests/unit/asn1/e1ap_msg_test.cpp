@@ -52,7 +52,7 @@ TEST(E1apMsg, RedactionZeroesTheUpKeys) {
 TEST(E1apMsg, InputsOutOfRangeAreRefused) {
     BearerContextSetupRequest r;
     r.security = Security{2, 2, Bytes(15, 0), Bytes(16, 0)};   // a 120-bit key
-    r.sessions = {SessionToSetup{1, "ipv4", Snssai{}, {}, {}, {DrbToSetup{1, true, true, true, 18, {QosFlow{}}}}}};
+    r.sessions = {SessionToSetup{1, "ipv4", Snssai{}, {}, {}, {DrbToSetup{1, true, true, true, 18, {QosFlow{}}, "infinity", std::nullopt}}}};
     EXPECT_FALSE(encode(r));
     r.security.enc_key = Bytes(16, 0);
     r.sessions[0].drbs[0].flows.clear();   // a DRB without flows
@@ -65,7 +65,7 @@ TEST(E1apMsg, InputsOutOfRangeAreRefused) {
 TEST(E1apMsg, TheUeLevelCarriesTheUeInactivityTimer) {
     BearerContextSetupRequest r;
     r.security = Security{2, 2, Bytes(16, 0), Bytes(16, 0)};
-    r.sessions = {SessionToSetup{1, "ipv4", Snssai{}, {}, {}, {DrbToSetup{1, true, true, true, 18, {QosFlow{}}}}}};
+    r.sessions = {SessionToSetup{1, "ipv4", Snssai{}, {}, {}, {DrbToSetup{1, true, true, true, 18, {QosFlow{}}, "infinity", std::nullopt}}}};
     r.ue_inactivity_s = 15;
     auto w = encode(r);
     ASSERT_TRUE(w);

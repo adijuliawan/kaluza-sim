@@ -512,6 +512,7 @@ void NgapAmf::on_message(ByteView msg) {
                        }
                    },
                    [&](const ngap::UeContextReleaseRequest& m) {
+                       last_release_cause_ = m.cause.value;
                        if (Ue* ue = by_amf(m.amf)) {
                            ue->releasing = true;
                            send(ngap::UeContextReleaseCommand{ue->amf_ue, ue->ran_ue, m.cause}, stream_of(*ue));

@@ -12,7 +12,7 @@
 //   gnbs:
 //     - id: {value: 0x1A0, bits: 22}
 //       name: ksim-gnb1
-//       cucp: {ng_bind: 127.0.0.2}
+//       cucp: {ng_bind: 127.0.0.2}           # P2 Q5: ue_inactivity_s: N (1..7200, default 7200)
 //       cuup: {n3_bind: 127.0.0.2}          # N3 (GTP-U 2152); default: the ng_bind address
 //       dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
 //   ues:
@@ -121,6 +121,7 @@ struct Topology {
     std::map<std::string, std::string> peer;
     bool allow_null = false;
     std::uint16_t ng_streams = 2;
+    std::uint16_t ue_inactivity_s = 7200;   // P2 Q5: cucp: {ue_inactivity_s: N}, 1..7200
     /// NAS in clear in the Uu capture (KS-CTL-004: only when asked for; ksim
     /// run --plain-nas). Without it the Uu capture holds RRC, and the NAS
     /// inside it as it went over the air.

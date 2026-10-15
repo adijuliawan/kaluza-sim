@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# OCUDU's allow-list (P2 Q5; ADR 0012 point 7): a row FAIL in an interop mode an entry here names is
+# scored ALLOWED. Each entry is a lead in docs/interop/ocudu.md, an OCUDU defect against the spec,
+# never fixed here. Columns: allow id, row id, modes, reason, clause, OCUDU reference (d9d2263f4d).
+O-4/O-5	ksim-p2.ocudu-e1-cuup	C4	OCUDU's CU-UP passes no user data with our CU-CP, for two reasons, each shown alone by a local run without the other (docs/interop/ocudu.md). O-4: it ciphers the SDAP header with the data (it starts at the end of the PDCP header), where the spec keeps the SDAP header in clear, so with SDAP headers configured, as our CU-CP does, it disagrees with the UE. O-5: it reads a 128-bit UP key (the TS 33.501 algorithm key, which we send) as the first half of a 256-bit one and ciphers with the 128 least significant bits it then holds: zeros. Allowed only when E1 Setup and the bearer context setup, modification and release all passed (the gate checks)	TS 38.323 5.8; TS 33.501 A.8	lib/pdcp/pdcp_entity_rx.cpp, lib/pdcp/pdcp_entity_tx.cpp (hdr_size only); lib/cu_up/cu_up_manager_helpers.h fill_sec_as_config, include/ocudu/security/security.h truncate_key

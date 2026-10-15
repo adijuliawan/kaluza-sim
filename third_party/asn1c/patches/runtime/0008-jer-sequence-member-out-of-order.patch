@@ -1,0 +1,39 @@
+SPDX-FileCopyrightText: 2026 Adi Juliawan
+SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+asn1c 18e56503 runtime, JER: the SEQUENCE decoder looks for each key from the
+member after the last one decoded. A key naming an earlier member (members
+out of ASN.1 order) is not found there and, in an extensible SEQUENCE, is
+skipped as an unknown extension: the member is dropped without an error.
+Our builders then lose an optional member written after its successor
+(P2 Q5: E1AP PDCP-Configuration t-ReorderingTimer after discardTimer). The
+decoder now refuses such a value. Row KS-PLAT-D7. Applied by
+cmake/asn1c.cmake to a build-tree copy.
+
+--- a/constr_SEQUENCE_jer.c
++++ b/constr_SEQUENCE_jer.c
+@@ -265,6 +265,24 @@
+                           edx, td->elements_count);
+             }
+ 
++            /*
++             * A key that names a member before the one decoded last is a
++             * member out of order: the forward search above does not find
++             * it, and the extension skip below would drop it in silence.
++             * JSON object members are unordered (X.697), so this decoder,
++             * which reads them in ASN.1 order only, refuses the value.
++             */
++            {
++                size_t m;
++                for(m = 0; m < td->elements_count && m < (size_t)edx; m++) {
++                    if(jer_check_sym(ptr, ch_size, td->elements[m].name) == JCK_KEY) {
++                        ASN_DEBUG("JER/SEQUENCE: member %s out of ASN.1 order",
++                                  td->elements[m].name);
++                        RETURN(RC_FAIL);
++                    }
++                }
++            }
++
+             /* It is expected extension */
+             if(IN_EXTENSION_GROUP(specs,
+                 edx + (edx < td->elements_count

@@ -80,8 +80,11 @@ struct CuCpConfig {
     std::vector<std::uint8_t> nia_preference{2, 1};
     bool allow_null = false;            // D1: NIA0/NEA0 only as the bisect switch
     // The UE Inactivity Timer E1 Bearer Context Setup gives the CU-UP with
-    // ActivityNotificationLevel "ue" (P2 Q4, KS-E1AP-D1; Q5 acts on its report).
-    std::uint16_t ue_inactivity_s = 120;
+    // ActivityNotificationLevel "ue" (P2 Q4, KS-E1AP-D1). From Q5 the CU-UP's
+    // report releases the UE, so the default is the longest the IE allows: a run's
+    // UEs are released when a gate says, unless its topology sets a timer
+    // (cucp: {ue_inactivity_s: N}).
+    std::uint16_t ue_inactivity_s = 7200;
     std::string paging_drx = "v128";
 };
 

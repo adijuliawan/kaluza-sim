@@ -491,6 +491,10 @@ Result<void> AllInOne::build_gnb(std::string& why) {
     if (e1_cp != nullptr) {
         e1_tap_ = std::make_unique<TapAssoc>(*e1_cp, [cap](bool tx, ByteView m) { cap->e1ap(tx, m); });
     }
+    if (!all && e1_up != nullptr && !topo_.peer_cucp.empty()) {
+        cuup_e1_tap_ = std::make_unique<TapAssoc>(*e1_up, [cap](bool tx, ByteView m) { cap->e1ap(tx, m); });
+        e1_up = cuup_e1_tap_.get();   // P2 Q5: the peer's CU-CP captures for itself, not for us
+    }
 
     // F1-U: the CU-UP's end (captured, each datagram once) and the DU's.
     Endpoint cuup_f1u_addr = kCuUpF1u;
@@ -537,6 +541,7 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         cc.gnb_id = topo_.gnb_id;
         cc.gnb_id_bits = topo_.gnb_id_bits;
         cc.allow_null = topo_.allow_null;
+        cc.ue_inactivity_s = topo_.ue_inactivity_s;
         cc.slices.clear();
         for (const auto& s : slices) {
             cc.slices.push_back(ngap::Snssai{s.sst, s.sd});
@@ -600,6 +605,7 @@ void AllInOne::teardown_gnb() {
     cuup_f1u_.reset();
     f1u_net_.reset();
     e1_tap_.reset();
+    cuup_e1_tap_.reset();   // before the client it wraps
     e1_.reset();
     e1_client_.reset();
     e1_listen_.reset();
@@ -610,6 +616,7 @@ void AllInOne::teardown_gnb() {
     ng_tap_.reset();
     ng_.reset();
     f1_tap_.reset();
+    du_f1_tap_.reset();     // before the client it wraps
     f1_.reset();
     f1_client_.reset();
     f1_listen_.reset();
