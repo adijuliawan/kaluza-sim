@@ -28,6 +28,7 @@ using jer::read_octets;
 // Procedure codes (F1AP-Constants).
 constexpr int kF1Setup = 1;
 constexpr int kErrorIndication = 2;
+constexpr int kGnbCuConfigurationUpdate = 4;
 constexpr int kUeContextSetup = 5;
 constexpr int kUeContextRelease = 6;
 constexpr int kUeContextModification = 7;
@@ -39,8 +40,12 @@ constexpr int kPaging = 18;
 
 // Protocol IE identifiers.
 constexpr int kCause = 0;
+constexpr int kCellsFailedToBeActivatedList = 1;
+constexpr int kCellsFailedToBeActivatedItem = 2;
 constexpr int kCellsToBeActivatedList = 3;
 constexpr int kCellsToBeActivatedItem = 4;
+constexpr int kCellsToBeDeactivatedList = 5;
+constexpr int kCellsToBeDeactivatedItem = 6;
 constexpr int kCuToDuRrcInformation = 9;
 constexpr int kDuToCuRrcInformation = 39;
 constexpr int kCuUeId = 40;
@@ -83,6 +88,8 @@ constexpr int kDrbsToBeSetupList = 35;
 constexpr int kDrbsToBeSetupModItem = 36;
 constexpr int kDrbsToBeSetupModList = 37;
 constexpr int kDrbInformation = 164;
+constexpr int kDlPdcpSnLength = 161;
+constexpr int kUlPdcpSnLength = 192;
 
 const std::string kRrcVersion = bits(0x4, 3);   // latest-RRC-Version: the Rel-15 'version 15' bit
 
@@ -212,11 +219,20 @@ json drb_items(const std::vector<DrbToSetup>& l, int item_id, const char* item_t
             flows.push_back({{"qoSFlowIdentifier", f.qfi}, {"qoSFlowLevelQoSParameters", flow_qos(f)}});
         }
         json info = {{"dRB-QoS", flow_qos(d.flows.front())}, {"sNSSAI", snssai}, {"flows-Mapped-To-DRB-List", flows}};
+        const auto sn_length = [](int id, std::uint8_t bits) {
+            return json{{"id", id}, {"criticality", "ignore"},
+                        {"extensionValue", {{"PDCPSNLength", bits == 12 ? "twelve-bits" : "eighteen-bits"}}}};
+        };
+        json ext = json::array({sn_length(kDlPdcpSnLength, d.dl_pdcp_sn_bits)});
+        if (d.ul_pdcp_sn_bits.has_value()) {
+            ext.push_back(sn_length(kUlPdcpSnLength, d.ul_pdcp_sn_bits.value_or(18)));
+        }
         out.push_back(ie(item_id, "reject", item_type,
                          {{"dRBID", d.drb_id},
                           {"qoSInformation", {{"choice-extension", {{"id", kDrbInformation}, {"criticality", "ignore"}, {"value", {{"DRB-Information", info}}}}}}},
                           {"uLUPTNLInformation-ToBeSetup-List", json::array({{{"uLUPTNLInformation", f1_tunnel(d.ul)}}})},
-                          {"rLCMode", "rlc-am"}}));
+                          {"rLCMode", "rlc-am"},
+                          {"iE-Extensions", ext}}));
     }
     return out;
 }
@@ -236,6 +252,13 @@ json drb_setup_items(const std::vector<DrbSetup>& l, int item_id, const char* it
 
 bool srbs_ok(const std::vector<std::uint8_t>& srbs) {
     return std::all_of(srbs.begin(), srbs.end(), [](std::uint8_t s) { return s <= 3; });
+}
+
+bool sn_lengths_ok(const std::vector<DrbToSetup>& drbs) {
+    const auto ok = [](std::uint8_t b) { return b == 12 || b == 18; };
+    return std::all_of(drbs.begin(), drbs.end(), [&ok](const DrbToSetup& d) {
+        return ok(d.dl_pdcp_sn_bits) && (!d.ul_pdcp_sn_bits || ok(*d.ul_pdcp_sn_bits));
+    });
 }
 
 // ---- builders ---------------------------------------------------------------------------
@@ -342,8 +365,8 @@ Result<Bytes> build(const UlRrcMessageTransfer& m) {
 }
 
 Result<Bytes> build(const UeContextSetupRequest& m) {
-    if (!srbs_ok(m.srbs) || m.serv_cell_index > 31) {
-        return bad("F1AP: an SRB ID outside 0..3, or a serving cell index over 31");
+    if (!srbs_ok(m.srbs) || m.serv_cell_index > 31 || !sn_lengths_ok(m.drbs)) {
+        return bad("F1AP: an SRB ID outside 0..3, a serving cell index over 31, or a PDCP SN length not 12 or 18");
     }
     json ies = json::array({ie(kCuUeId, "reject", "GNB-CU-UE-F1AP-ID", m.cu_ue)});
     if (m.du_ue) {
@@ -401,8 +424,8 @@ Result<Bytes> build(const UeContextSetupFailure& m) {
 }
 
 Result<Bytes> build(const UeContextModificationRequest& m) {
-    if (!srbs_ok(m.srbs)) {
-        return bad("F1AP: an SRB ID outside 0..3");
+    if (!srbs_ok(m.srbs) || !sn_lengths_ok(m.drbs)) {
+        return bad("F1AP: an SRB ID outside 0..3, or a PDCP SN length not 12 or 18");
     }
     json ies = ue_ids(m.cu_ue, m.du_ue);
     if (m.rrc) {
@@ -496,6 +519,54 @@ Result<Bytes> build(const ErrorIndication& m) {
     return per(initiating(kErrorIndication, "ignore", "ErrorIndication", ies));
 }
 
+Result<Bytes> build(const GnbCuConfigurationUpdate& m) {
+    json ies = json::array({ie(kTransactionId, "reject", "TransactionID", m.transaction)});
+    const auto cells = [](const std::vector<NrCgi>& l, int item_id, const char* item_type) {
+        json out = json::array();
+        for (const auto& c : l) {
+            out.push_back(ie(item_id, "reject", item_type, {{"nRCGI", nr_cgi(c)}}));
+        }
+        return out;
+    };
+    if (!m.activate.empty()) {
+        ies.push_back(ie(kCellsToBeActivatedList, "reject", "Cells-to-be-Activated-List",
+                         cells(m.activate, kCellsToBeActivatedItem, "Cells-to-be-Activated-List-Item")));
+    }
+    if (!m.deactivate.empty()) {
+        ies.push_back(ie(kCellsToBeDeactivatedList, "reject", "Cells-to-be-Deactivated-List",
+                         cells(m.deactivate, kCellsToBeDeactivatedItem, "Cells-to-be-Deactivated-List-Item")));
+    }
+    return per(initiating(kGnbCuConfigurationUpdate, "reject", "GNBCUConfigurationUpdate", ies));
+}
+
+Result<Bytes> build(const GnbCuConfigurationUpdateAcknowledge& m) {
+    json ies = json::array({ie(kTransactionId, "reject", "TransactionID", m.transaction)});
+    if (!m.failed.empty()) {
+        json l = json::array();
+        for (const auto& f : m.failed) {
+            l.push_back(ie(kCellsFailedToBeActivatedItem, "reject", "Cells-Failed-to-be-Activated-List-Item",
+                           {{"nRCGI", nr_cgi(f.cgi)}, {"cause", cause(f.cause)}}));
+        }
+        ies.push_back(ie(kCellsFailedToBeActivatedList, "reject", "Cells-Failed-to-be-Activated-List", l));
+    }
+    return per(successful(kGnbCuConfigurationUpdate, "reject", "GNBCUConfigurationUpdateAcknowledge", ies));
+}
+
+Result<Bytes> build(const GnbCuConfigurationUpdateFailure& m) {
+    json ies = json::array({ie(kTransactionId, "reject", "TransactionID", m.transaction),
+                            ie(kCause, "ignore", "Cause", cause(m.cause))});
+    if (m.time_to_wait) {
+        ies.push_back(ie(kTimeToWait, "ignore", "TimeToWait", *m.time_to_wait));
+    }
+    return per(unsuccessful(kGnbCuConfigurationUpdate, "reject", "GNBCUConfigurationUpdateFailure", ies));
+}
+
+Result<Bytes> build(const UeContextModificationFailure& m) {
+    json ies = ue_ids(m.cu_ue, m.du_ue);
+    ies.push_back(ie(kCause, "ignore", "Cause", cause(m.cause)));
+    return per(unsuccessful(kUeContextModification, "reject", "UEContextModificationFailure", ies));
+}
+
 // ---- readers -----------------------------------------------------------------------------
 
 using Ies = std::map<int, const json*>;
@@ -545,6 +616,20 @@ std::vector<DrbToSetup> read_drbs(const json& list) {
             d.flows.push_back(read_flow_qos(f.at("qoSFlowIdentifier").get<std::uint8_t>(), f.at("qoSFlowLevelQoSParameters")));
         }
         d.ul = read_f1_tunnel(i->at("uLUPTNLInformation-ToBeSetup-List").at(0).at("uLUPTNLInformation"));
+        if (i->contains("iE-Extensions")) {
+            for (const auto& e : i->at("iE-Extensions")) {
+                const int id = e.at("id").get<int>();
+                if (id != kDlPdcpSnLength && id != kUlPdcpSnLength) {
+                    continue;
+                }
+                const std::uint8_t bits = e.at("extensionValue").at("PDCPSNLength").get<std::string>() == "twelve-bits" ? 12 : 18;
+                if (id == kDlPdcpSnLength) {
+                    d.dl_pdcp_sn_bits = bits;
+                } else {
+                    d.ul_pdcp_sn_bits = bits;
+                }
+            }
+        }
         out.push_back(std::move(d));
     }
     return out;
@@ -739,7 +824,42 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             }
             return Pdu{std::move(m)};
         }
-        break;
+        return Pdu{UeContextModificationFailure{cu_id(ies), du_id(ies), read_cause(need(ies, kCause))}};
+    case kGnbCuConfigurationUpdate:
+        if (kind == K::initiating) {
+            GnbCuConfigurationUpdate m;
+            m.transaction = need(ies, kTransactionId).get<std::uint8_t>();
+            if (const json* l = maybe(ies, kCellsToBeActivatedList)) {
+                for (const json* i : items(*l)) {
+                    m.activate.push_back(read_nr_cgi(i->at("nRCGI")));
+                }
+            }
+            if (const json* l = maybe(ies, kCellsToBeDeactivatedList)) {
+                for (const json* i : items(*l)) {
+                    m.deactivate.push_back(read_nr_cgi(i->at("nRCGI")));
+                }
+            }
+            return Pdu{std::move(m)};
+        }
+        if (kind == K::successful) {
+            GnbCuConfigurationUpdateAcknowledge m;
+            m.transaction = need(ies, kTransactionId).get<std::uint8_t>();
+            if (const json* l = maybe(ies, kCellsFailedToBeActivatedList)) {
+                for (const json* i : items(*l)) {
+                    m.failed.push_back(CellFailed{read_nr_cgi(i->at("nRCGI")), read_cause(i->at("cause"))});
+                }
+            }
+            return Pdu{std::move(m)};
+        }
+        {
+            GnbCuConfigurationUpdateFailure m;
+            m.transaction = need(ies, kTransactionId).get<std::uint8_t>();
+            m.cause = read_cause(need(ies, kCause));
+            if (const json* t = maybe(ies, kTimeToWait)) {
+                m.time_to_wait = t->get<std::string>();
+            }
+            return Pdu{std::move(m)};
+        }
     case kUeContextReleaseRequest:
         return Pdu{UeContextReleaseRequest{cu_id(ies), du_id(ies), read_cause(need(ies, kCause))}};
     case kUeContextRelease:

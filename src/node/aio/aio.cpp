@@ -442,6 +442,10 @@ Result<void> AllInOne::build_gnb(std::string& why) {
     if (f1_cu != nullptr) {
         f1_tap_ = std::make_unique<TapAssoc>(*f1_cu, [cap](bool tx, ByteView m) { cap->f1ap(tx, m); });
     }
+    if (!all && f1_du != nullptr && !topo_.peer_cucp.empty()) {
+        du_f1_tap_ = std::make_unique<TapAssoc>(*f1_du, [cap](bool tx, ByteView m) { cap->f1ap(tx, m); });
+        f1_du = du_f1_tap_.get();   // P2 Q4: the peer's CU-CP captures for itself, not for us
+    }
 
     // NG-C: the CU-CP's.
     if (hosts_cucp()) {
@@ -517,7 +521,11 @@ Result<void> AllInOne::build_gnb(std::string& why) {
                 why = "F1-U bind " + du_f1u_addr.to_string() + ": " + u.error().what;
                 return u.error();
             }
-            du_f1u_ = std::move(*u);
+            if (topo_.peer_cuup.empty()) {
+                du_f1u_ = std::move(*u);
+            } else {
+                du_f1u_ = std::make_unique<TapDatagram>(std::move(*u), gtpu_tap);   // P2 Q4: the peer's CU-UP is not ours
+            }
         }
     }
 
@@ -558,6 +566,7 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         dc.pci = topo_.pci;
         dc.tac = topo_.tac;
         dc.arfcn = topo_.arfcn;
+        dc.ssb_arfcn = topo_.ssb_arfcn;
         dc.f1u_addr = v4_of(du_f1u_addr);
         du_ = std::make_unique<proc::ran::Du>(*shard_, events_, dc, *f1_du, [this](const air::Frame& f) { du_to_air(f); },
                                               du_f1u_.get());

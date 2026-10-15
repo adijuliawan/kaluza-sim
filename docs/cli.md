@@ -137,7 +137,7 @@ EVENT_SEQ=48211
 | | `faults list\|set <rule>\|clear` | Fault injection ([`architecture.md`](architecture.md) §9); `FAULTS=0` when clean | v1 |
 | | `pcap start\|stop [--iface …]` | Captures per interface | v1 |
 
-**As built (P2 Q3):** `du <name>-du ue-list` answers `CELL_ACTIVE`, `UES`, `UL_SDUS`, `DL_SDUS` and `WRONG_PPID`. `cuup <name>-cuup bearers` answers `E1_READY`, `CONTEXTS`, `DL_PACKETS`, `UL_PACKETS` and `DROPPED`. `gnb <name> ue-list` adds `F1_UE_STREAMS` (the SCTP streams the DU's UE-associated F1AP came on) and `F1_UE_ON_STREAM0`. In a split run `nodes` lists the four roles with their `PID` and `UP`. `cell on|off`, `paging-stats`, `tunnels` and `gtpu-echo` are not built yet (exit 5).
+**As built (P2 Q3):** `du <name>-du ue-list` answers `CELL_ACTIVE`, `UES`, `UL_SDUS`, `DL_SDUS` and `WRONG_PPID`, and from P2 Q4 `DDDS_TX` (NR-U DL DATA DELIVERY STATUS frames sent) and `SI_TX` (MIBs and SIB1s on air). `cuup <name>-cuup bearers` answers `E1_READY`, `CONTEXTS`, `DL_PACKETS`, `UL_PACKETS` and `DROPPED`, and from P2 Q4 `DDDS_RX`. `gnb <name> ue-list` adds `F1_UE_STREAMS` (the SCTP streams the DU's UE-associated F1AP came on) and `F1_UE_ON_STREAM0`. In a split run `nodes` lists the four roles with their `PID` and `UP`. A role the interop peer runs (P2 Q4, the topology's `peers:`) is listed with `PEER=ocudu` instead, `info` adds `PEER_CUCP=` or `PEER_CUUP=`, and that role's verbs (`gnb <name> ue-list`, `amf-list`, `ue-release`, `cuup … bearers`, its `restart`) answer exit 5: the peer has no ksim control API. `cell on|off`, `paging-stats`, `tunnels` and `gtpu-echo` are not built yet (exit 5).
 
 ## 5. Moving a gate from nr-cli
 

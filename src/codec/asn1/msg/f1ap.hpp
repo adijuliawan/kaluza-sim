@@ -122,6 +122,10 @@ struct DrbToSetup {
     Snssai snssai;
     std::vector<Flow> flows;   // the DRB's own QoS is the first flow's
     GtpTunnel ul;              // the CU-UP's F1-U end
+    // PDCP SN lengths, 12 or 18 (TS 38.473 9.3.1.y; DL mandatory in UE Context
+    // Setup's DRB item; P2 Q4, KS-F1AP-D3: P1 sent neither).
+    std::uint8_t dl_pdcp_sn_bits = 18;
+    std::optional<std::uint8_t> ul_pdcp_sn_bits;
     friend bool operator==(const DrbToSetup&, const DrbToSetup&) = default;
 };
 struct DrbSetup {
@@ -206,11 +210,45 @@ struct ErrorIndication {
     friend bool operator==(const ErrorIndication&, const ErrorIndication&) = default;
 };
 
+// P2 Q4 (TS 38.473 8.2.5, 8.3.4.3): the gNB-CU's cell (de)activation, which the
+// DU answers, and the DU's refusal of a whole UE context modification. Of the
+// update's other IEs (TNL associations, barring, protected E-UTRA resources,
+// neighbour cells) none is read: the DU supports none, all "if supported".
+struct GnbCuConfigurationUpdate {
+    std::uint8_t transaction = 0;
+    std::vector<NrCgi> activate;      // Cells to be Activated
+    std::vector<NrCgi> deactivate;    // Cells to be Deactivated
+    friend bool operator==(const GnbCuConfigurationUpdate&, const GnbCuConfigurationUpdate&) = default;
+};
+struct CellFailed {
+    NrCgi cgi;
+    Cause cause;
+    friend bool operator==(const CellFailed&, const CellFailed&) = default;
+};
+struct GnbCuConfigurationUpdateAcknowledge {
+    std::uint8_t transaction = 0;
+    std::vector<CellFailed> failed;   // Cells Failed to be Activated
+    friend bool operator==(const GnbCuConfigurationUpdateAcknowledge&, const GnbCuConfigurationUpdateAcknowledge&) = default;
+};
+struct GnbCuConfigurationUpdateFailure {
+    std::uint8_t transaction = 0;
+    Cause cause;
+    std::optional<std::string> time_to_wait;
+    friend bool operator==(const GnbCuConfigurationUpdateFailure&, const GnbCuConfigurationUpdateFailure&) = default;
+};
+struct UeContextModificationFailure {
+    std::uint32_t cu_ue = 0;
+    std::uint32_t du_ue = 0;
+    Cause cause;
+    friend bool operator==(const UeContextModificationFailure&, const UeContextModificationFailure&) = default;
+};
+
 using Pdu = std::variant<F1SetupRequest, F1SetupResponse, F1SetupFailure, InitialUlRrcMessageTransfer,
                          DlRrcMessageTransfer, UlRrcMessageTransfer, UeContextSetupRequest, UeContextSetupResponse,
                          UeContextSetupFailure, UeContextModificationRequest, UeContextModificationResponse,
                          UeContextReleaseRequest, UeContextReleaseCommand, UeContextReleaseComplete, Paging,
-                         ErrorIndication>;
+                         ErrorIndication, GnbCuConfigurationUpdate, GnbCuConfigurationUpdateAcknowledge,
+                         GnbCuConfigurationUpdateFailure, UeContextModificationFailure>;
 
 namespace detail {
 template <class T>

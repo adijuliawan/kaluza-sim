@@ -126,6 +126,15 @@ bool CuCp::ppid_ok(const SctpMeta& m, std::uint32_t want, const char* link) {
     return false;
 }
 
+Result<void> CuCp::cu_configuration_update(std::vector<f1ap::NrCgi> activate, std::vector<f1ap::NrCgi> deactivate) {
+    if (!du_) {
+        return make_error(Errc::closed, 0, "no F1 with a DU");
+    }
+    f1_transaction_ = static_cast<std::uint8_t>(f1_transaction_ + 1);
+    send_f1(f1ap::GnbCuConfigurationUpdate{f1_transaction_, std::move(activate), std::move(deactivate)}, false);
+    return {};
+}
+
 void CuCp::send_f1(const f1ap::Pdu& p, bool ue_associated) {
     auto wire = f1ap::encode(p);
     if (!wire) {
@@ -230,6 +239,22 @@ void CuCp::on_f1(ByteView msg) {
                    [this](const f1ap::UeContextReleaseRequest& m) { handle(m); },
                    [this](const f1ap::UeContextReleaseComplete& m) { handle(m); },
                    [this](const f1ap::UeContextModificationResponse& m) { handle(m); },
+                   [this](const f1ap::UeContextModificationFailure& m) {
+                       // P2 Q4 (TS 38.473 8.3.4.3): the DU made none of it. The sessions fail
+                       // towards the AMF, a transport cause as one (TS 38.413 9.3.1.2).
+                       Ue* ue = by_cu(m.cu_ue);
+                       if (ue != nullptr && !ue->jobs.empty() && ue->jobs.front().stage == Ue::Job::Stage::f1) {
+                           if (m.cause.group == "transport") {
+                               job_failed(*ue, "transport", "transport-resource-unavailable");
+                           } else {
+                               job_failed(*ue, "radioNetwork", "unspecified");
+                           }
+                       }
+                   },
+                   [this](const f1ap::GnbCuConfigurationUpdateAcknowledge& m) {
+                       events_.emit("ran.f1.cu_config_update", cfg_.id,
+                                    {{"transaction", str(m.transaction)}, {"failed", str(static_cast<std::int64_t>(m.failed.size()))}});
+                   },
                    [this](const f1ap::ErrorIndication& m) {
                        events_.emit("ran.f1.error_indication", cfg_.id,
                                     {{"cause", m.cause ? m.cause->group + "/" + m.cause->value : ""}});
@@ -1086,6 +1111,8 @@ void CuCp::start_job(Ue& ue) {
                                 Bytes(ki->expose().begin(), ki->expose().end())};
     r.ue_dl_ambr = ue.ue_ambr ? ue.ue_ambr->dl : 1'000'000'000;
     r.serving_plmn = e1ap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc);
+    r.activity_level = "ue";
+    r.ue_inactivity_s = cfg_.ue_inactivity_s;
     r.sessions = std::move(up);
     send_e1(r, true);
     secure_zero(r.security.enc_key);
@@ -1141,6 +1168,9 @@ void CuCp::handle(const e1ap::BearerContextModificationResponse& m) {
             continue;
         }
         d.ul = f1_tunnel(up->drbs.front().f1u_ul);
+        const rrc::PdcpSettings pdcp;   // the DRB's PDCP-Config towards the UE
+        d.dl_pdcp_sn_bits = pdcp.sn18_dl ? 18 : 12;
+        d.ul_pdcp_sn_bits = static_cast<std::uint8_t>(pdcp.sn18_ul ? 18 : 12);
         r.drbs.push_back(std::move(d));
         ++it;
     }

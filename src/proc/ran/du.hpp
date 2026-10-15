@@ -57,12 +57,17 @@ struct DuConfig {
     std::uint16_t pci = 101;
     std::uint32_t tac = 1;
     std::uint32_t arfcn = 632628;      // n78, 3489.42 MHz
+    std::uint32_t ssb_arfcn = 632640;  // its SSB on the sync raster, 3489.6 MHz (P2 Q4, rrc::SsbTiming)
     std::optional<rrc::UeTimers> timers = rrc::UeTimers{};
     Millis mib_period = 80;
     Millis sib1_period = 160;
     std::array<std::uint8_t, 4> f1u_addr{};   // the F1-U tunnel address it advertises (N10)
     std::uint16_t gtpu_port = 2152;
     Millis rlf = 1000;                        // a connected UE silent this long is lost (N12)
+    // NR-U DL DATA DELIVERY STATUS (P2 Q4, TS 38.425 5.4.2): the buffer each DRB
+    // asks for, and how long after DL data (or a DRB's setup) the report follows.
+    std::uint32_t ddds_buffer = 8U << 20;     // bytes
+    Millis ddds_delay = 10;
     Millis supervision = 200;                 // how often the DU looks
 };
 
@@ -75,6 +80,8 @@ struct DuStats {
     std::uint64_t dl_sdus = 0;
     std::uint64_t ul_user = 0;         // DRB SDUs sent on F1-U
     std::uint64_t dl_user = 0;         // F1-U PDUs sent to a UE
+    std::uint64_t ddds_tx = 0;         // P2 Q4: DL DATA DELIVERY STATUS frames sent
+    std::uint64_t si_tx = 0;           // P2 Q4: MIBs and SIB1s put on air
     std::uint64_t f1_errors = 0;       // F1AP messages refused or for no UE
 };
 
@@ -108,6 +115,9 @@ private:
             std::uint8_t lcid = 4;
             f1ap::GtpTunnel ul;           // the CU-UP's F1-U end
             std::uint32_t dl_teid = 0;    // ours
+            std::uint8_t sn_bits = 18;    // the DL PDCP SN length F1AP gave (P2 Q4)
+            std::optional<std::uint32_t> highest_sn;   // of the DL PDCP PDUs sent to the UE
+            bool report_due = false;      // a DDDS is armed
         };
         std::map<std::uint8_t, Drb> drbs;   // by DRB ID
         Millis last_ul = 0;                 // the last frame from the UE
@@ -132,7 +142,12 @@ private:
     void handle(const f1ap::UeContextModificationRequest& m);
     void handle(const f1ap::UeContextReleaseCommand& m);
     void handle(const f1ap::Paging& m);
+    void handle(const f1ap::GnbCuConfigurationUpdate& m);
+    void set_active(bool on);   // the cell on or off the air
     void dl_sdu(const Ue& ue, std::uint8_t lcid, Bytes sdu);
+    void on_dl_user(std::uint32_t du_ue, std::uint8_t drb_id, const entity::gtpu::UserData& u);
+    void arm_ddds(std::uint32_t du_ue, std::uint8_t drb_id);
+    void send_ddds(Ue::Drb& d, std::optional<std::uint32_t> polling_nru_sn);
     void drop_drbs(Ue& ue);
     void supervise();
     Result<Bytes> cell_group(const std::set<std::uint8_t>& srbs, const std::vector<Ue::Drb>& drbs = {},

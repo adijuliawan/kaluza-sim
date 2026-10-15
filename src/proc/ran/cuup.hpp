@@ -53,6 +53,7 @@ struct CuUpStats {
     std::uint64_t dl_packets = 0;      // N3 to F1-U
     std::uint64_t ul_packets = 0;      // F1-U to N3
     std::uint64_t dropped = 0;         // no DRB for the flow, no F1-U DL end yet, …
+    std::uint64_t ddds_rx = 0;         // P2 Q4: the DU's DL DATA DELIVERY STATUS frames
     std::uint64_t e1_errors = 0;
 };
 
@@ -66,6 +67,8 @@ public:
     bool e1_ready() const noexcept { return e1_ready_; }
     std::size_t contexts() const noexcept { return ctx_.size(); }
     const CuUpStats& stats() const noexcept { return stats_; }
+    /// The DU's last DL DATA DELIVERY STATUS, any DRB (P2 Q4).
+    const std::optional<entity::gtpu::DeliveryStatus>& last_ddds() const noexcept { return last_ddds_; }
     entity::gtpu::Endpoint& n3() noexcept { return n3_; }
 
 private:
@@ -126,6 +129,7 @@ private:
     std::map<std::uint32_t, Context> ctx_;   // by gNB-CU-UP UE E1AP ID
     std::uint32_t next_ue_ = 1;
     CuUpStats stats_;
+    std::optional<entity::gtpu::DeliveryStatus> last_ddds_;
 };
 
 } // namespace ksim::proc::ran

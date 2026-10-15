@@ -137,6 +137,12 @@ struct BearerContextSetupRequest {
     Security security;
     std::uint64_t ue_dl_ambr = 0;   // bit/s
     PlmnId serving_plmn{};
+    // The level the CU-UP watches inactivity at (TS 37.483 9.3.1.67): drb,
+    // pdu-session or ue; "ue" carries the UE Inactivity Timer (9.2.2.1:
+    // "included if the Activity Notification Level is set to UE"; P2 Q4,
+    // KS-E1AP-D1: P1 sent "ue" without it, which OCUDU's CU-UP refuses).
+    std::string activity_level = "ue";
+    std::optional<std::uint16_t> ue_inactivity_s{120};   // 1..7200 s (9.3.1.54)
     std::vector<SessionToSetup> sessions;
     friend bool operator==(const BearerContextSetupRequest&, const BearerContextSetupRequest&) = default;
 };

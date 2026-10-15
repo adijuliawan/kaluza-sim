@@ -52,6 +52,8 @@ run.role.start	sim	P2 Q3: the supervisor started a role of a split run (role, pi
 run.role.exit	sim	P2 Q3: a role of a split run ended on its own, or its restart failed (role, status)
 ran.f1.error	38.473 10	an F1AP message refused (it did not decode, or a procedure outside P1); what
 ran.f1.error_indication	38.473 8.2.2	an F1AP ERROR INDICATION received; cause
+ran.f1.cu_config_update	38.473 8.2.5	gNB-CU Configuration Update answered (P2 Q4): at the DU (activate, deactivate, failed, cell_active), at the CU-CP the acknowledge (transaction, failed)
+ran.f1.ue_mod_failure	38.473 8.3.4.3	the DU made none of a UE Context Modification and refused it (P2 Q4); du_ue, cause
 ran.ng.setup	38.413 8.7.1.2	NG Setup done: NG SETUP RESPONSE taken; amf, capacity
 ran.ng.setup.failure	38.413 8.7.1.3	NG SETUP FAILURE taken, retried after its time to wait; cause, retry_ms
 ran.ng.reset	38.413 8.7.4.2.2	an NG RESET from the AMF: UE contexts released locally and acknowledged; all, released

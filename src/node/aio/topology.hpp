@@ -28,6 +28,10 @@
 //                                            # split only: the CU-CP's F1-C and E1 listening addresses,
 //                                            # the DU's F1-C and F1-U address, the CU-UP's F1-U address
 //                                            # and E1 address, the F1-C/E1 outbound streams asked for
+//   (in gnbs[0]) peers: {cucp: ocudu, cuup: ocudu}
+//                                            # P2 Q4, split only: roles the interop peer runs (ADR 0012);
+//                                            # with a peer CU-CP, cucp: may be left out
+//   (in a cell) ssb_arfcn: 632640            # P2 Q4: the SSB the MeasurementTimingConfiguration names
 //   netd: {socket: /run/ksim/netd.sock, netns: ksim-cucp, cuup_netns: ksim-cuup, parent: ens19, prefix: 24,
 //          nodes: true, ues: true}
 //                                            # with ksim-netd: NG-C from the CU-CP's own namespace,
@@ -110,6 +114,7 @@ struct Topology {
     std::uint16_t pci = 101;
     std::uint32_t tac = 1;
     std::uint32_t arfcn = 632628;
+    std::uint32_t ssb_arfcn = 632640;   // P2 Q4: the cell's MeasurementTimingConfiguration
     std::vector<UeGroup> ues;
     std::string sealed_dir;
     std::string kek_file;
@@ -123,6 +128,10 @@ struct Topology {
     NetdConfig netd;
     Mode mode = Mode::aio;
     SplitConfig split;
+    // P2 Q4 (ADR 0012): a role the interop peer runs instead of us, split only:
+    // "ocudu" or empty (ours). gnbs[0].peers: {cucp: ocudu, cuup: ocudu}.
+    std::string peer_cucp;
+    std::string peer_cuup;
     // Set at run time, not in the file (P2 Q3): the role this process runs and the
     // DU's KAIR socket (the supervisor's run directory).
     Role role = Role::all;

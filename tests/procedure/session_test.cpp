@@ -93,6 +93,34 @@ TEST(Session, APingCrossesTheWholeUserPlaneWithNea2OnTheDrb) {
     EXPECT_EQ(n.failures(), "");
 }
 
+// P2 Q4 (TS 38.425 5.4.2.1): the DU sends the initial DL DATA DELIVERY STATUS once the
+// DRB is up, and after DL data reports the highest PDCP SN sent to the UE, which RLC
+// AM over the ideal link delivered in sequence. The CU-UP takes it as feedback, not data.
+TEST(Session, Ts38425_5_4_2_1_TheDuReportsDownlinkDeliveryStatus) {
+    Net n;
+    n.register_ue();
+    n.establish();
+    n.loop.run_for(50);
+    ASSERT_GE(n.cuup.stats().ddds_rx, 1u);
+    ASSERT_TRUE(n.cuup.last_ddds());
+    EXPECT_EQ(n.cuup.last_ddds()->desired_buffer, 8U << 20);
+    EXPECT_FALSE(n.cuup.last_ddds()->highest_delivered);   // nothing sent yet
+    node::PingRequest p;
+    p.dst = {10, 60, 0, 1};
+    p.count = 3;
+    p.interval = 200;
+    ASSERT_TRUE(n.ue->ping(p));
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("ue.ping.done").empty(); }, n.loop.now() + 5'000));
+    n.loop.run_for(50);
+    ASSERT_TRUE(n.cuup.last_ddds());
+    EXPECT_EQ(n.cuup.last_ddds()->highest_delivered, std::optional<std::uint32_t>(2));   // SNs 0, 1, 2
+    EXPECT_EQ(n.cuup.last_ddds()->highest_transmitted, std::optional<std::uint32_t>(2));
+    EXPECT_GE(n.du.stats().ddds_tx, 2u);
+    EXPECT_EQ(n.cuup.stats().ddds_rx, n.du.stats().ddds_tx);
+    EXPECT_EQ(n.cuup.stats().ul_packets, 3u);   // the reports were not taken for user data
+    EXPECT_EQ(n.failures(), "");
+}
+
 TEST(Session, ADnPingToTheUeIsAnswered) {
     Net n;
     n.register_ue();
@@ -248,7 +276,7 @@ TEST(Session, Ts29281_7_3_1_AGpduToAnUnknownTeidIsAnsweredWithAnErrorIndication)
     entity::gtpu::Endpoint ep(*probe, 0x77);
     int errors = 0;
     ep.on_error_indication([&](std::uint32_t, const Endpoint&) { ++errors; });
-    ASSERT_TRUE(ep.send(Endpoint::v4(127, 0, 0, 31, 2152), entity::gtpu::UserData{0x31ABCDEF, 1, std::nullopt, std::nullopt, Bytes{0x45}}));
+    ASSERT_TRUE(ep.send(Endpoint::v4(127, 0, 0, 31, 2152), entity::gtpu::UserData::dl_psc(0x31ABCDEF, 1, Bytes{0x45})));
     bool echoed = false;
     ASSERT_TRUE(ep.echo(Endpoint::v4(127, 0, 0, 31, 2152), [&] { echoed = true; }));
     ASSERT_TRUE(n.loop.run_until([&] { return errors == 1 && echoed; }, n.loop.now() + 1'000));

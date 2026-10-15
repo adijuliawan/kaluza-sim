@@ -291,6 +291,17 @@ void NgapAmf::attach_nas(Ue& ue) {
     relink(ue);
 }
 
+// TS 38.413 8.2.1.2 (P2 Q4): "The UE Aggregate Maximum Bit Rate IE should be sent to the
+// NG-RAN node if the AMF has not sent it previously." P1 sent it only in an Initial
+// Context Setup with sessions; OCUDU's CU-CP passes 0 to its CU-UP, which refuses it.
+std::optional<ngap::Ambr> NgapAmf::first_ambr(Ue& u) {
+    if (u.ambr_sent) {
+        return std::nullopt;
+    }
+    u.ambr_sent = true;
+    return kUeAmbr;
+}
+
 void NgapAmf::send_ics(Ue& u, Bytes nas, SecretBytes kgnb, std::vector<ngap::SessionSetupItem> sessions) {
     const auto& caps = u.nas->ue_capabilities();
     ngap::InitialContextSetupRequest r;
@@ -307,8 +318,9 @@ void NgapAmf::send_ics(Ue& u, Bytes nas, SecretBytes kgnb, std::vector<ngap::Ses
     if (u.radio_capability) {
         r.ue_radio_capability = u.radio_capability;
     }
+    u.ambr_sent = !sessions.empty();   // a new context at the gNB
     if (!sessions.empty()) {
-        r.ue_ambr = ngap::Ambr{1'000'000'000, 1'000'000'000};   // mandatory with sessions (9.2.2.1)
+        r.ue_ambr = kUeAmbr;   // mandatory with sessions (9.2.2.1)
         for (const auto& item : sessions) {
             u.setups.push_back(item.psi);
         }
@@ -354,7 +366,7 @@ void NgapAmf::relink(Ue& ue) {
         for (const auto& it : items) {
             u->setups.push_back(it.psi);
         }
-        ngap::PduSessionResourceSetupRequest r{u->amf_ue, u->ran_ue, std::move(accept), std::move(items), std::nullopt};
+        ngap::PduSessionResourceSetupRequest r{u->amf_ue, u->ran_ue, std::move(accept), std::move(items), first_ambr(*u)};
         send(r, stream_of(*u));
     };
     link.session_setup = [this, id](Bytes nas, ngap::SessionSetupItem item) {
@@ -365,7 +377,7 @@ void NgapAmf::relink(Ue& ue) {
         // TS 38.413 9.2.1.1: the 5GSM accept as the session's NAS-PDU.
         item.nas = std::move(nas);
         u->setups.push_back(item.psi);
-        ngap::PduSessionResourceSetupRequest r{u->amf_ue, u->ran_ue, std::nullopt, {std::move(item)}, std::nullopt};
+        ngap::PduSessionResourceSetupRequest r{u->amf_ue, u->ran_ue, std::nullopt, {std::move(item)}, first_ambr(*u)};
         send(r, stream_of(*u));
     };
     link.session_release = [this, id](Bytes nas, std::uint8_t psi) {

@@ -152,6 +152,7 @@ private:
     std::unique_ptr<TapAssoc> ng_tap_;
     std::unique_ptr<MemAssocPair> f1_;
     std::unique_ptr<TapAssoc> f1_tap_;
+    std::unique_ptr<TapAssoc> du_f1_tap_;   // P2 Q4: the DU's F1-C, captured when the CU-CP is a peer
     std::unique_ptr<MemAssocPair> e1_;
     std::unique_ptr<TapAssoc> e1_tap_;
     // P2 Q3, split: the real links of whichever roles this process hosts.

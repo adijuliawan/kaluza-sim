@@ -73,7 +73,7 @@ void Upf::send_dl(Tunnel& t, Bytes packet) {
         return;
     }
     const auto& a = t.dl->addr;
-    entity::gtpu::UserData d{t.dl->teid, t.qfi, std::nullopt, std::nullopt, std::move(packet)};
+    const auto d = entity::gtpu::UserData::dl_psc(t.dl->teid, t.qfi, std::move(packet));
     if (gtpu_.send(ksim::Endpoint::v4(a[0], a[1], a[2], a[3], port_), d)) {
         ++stats_.dl_packets;
     }

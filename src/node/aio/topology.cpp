@@ -80,7 +80,7 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             gnbs.fail("P1 runs one gNB");
         }
         const Yaml g = gnbs.at(0);
-        g.only({"id", "name", "cucp", "cuup", "dus", "split"});
+        g.only({"id", "name", "cucp", "cuup", "dus", "split", "peers"});
         if (y.has("mode")) {
             const std::string m = y.at("mode").as<std::string>();
             if (m != "aio" && m != "split") {
@@ -111,6 +111,21 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
                 sp.at("streams").fail("at least 2: stream 0 and one for the UEs");
             }
         }
+        if (g.has("peers")) {
+            const Yaml p = g.at("peers");
+            p.only({"cucp", "cuup"});
+            for (const auto& [key, out] : {std::pair<const char*, std::string*>{"cucp", &t.peer_cucp}, {"cuup", &t.peer_cuup}}) {
+                if (p.has(key)) {
+                    *out = p.at(key).as<std::string>();
+                    if (*out != "ocudu") {
+                        p.at(key).fail("ocudu (ADR 0012)");
+                    }
+                }
+            }
+            if (t.mode != Mode::split) {
+                p.fail("peers run with mode: split");
+            }
+        }
         g.at("id").only({"value", "bits"});
         t.gnb_id = g.at("id").at("value").as<std::uint32_t>();
         t.gnb_id_bits = g.at("id").get<std::uint8_t>("bits", 22);
@@ -118,13 +133,16 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             g.at("id").fail("a gNB ID is 22 to 32 bits and fits them");
         }
         t.gnb_name = g.get<std::string>("name", t.gnb_name);
-        g.at("cucp").only({"ng_bind", "ng_streams"});
-        auto bind = Endpoint::parse(g.at("cucp").at("ng_bind").as<std::string>(), 0);
-        if (!bind || bind->family != t.amf.family) {
-            g.at("cucp").at("ng_bind").fail("a numeric address of the AMF's family");
+        // A peer CU-CP (P2 Q4) has its own N2 and N3 addresses in its config, not here.
+        if (t.peer_cucp.empty() || g.has("cucp")) {
+            g.at("cucp").only({"ng_bind", "ng_streams"});
+            auto bind = Endpoint::parse(g.at("cucp").at("ng_bind").as<std::string>(), 0);
+            if (!bind || bind->family != t.amf.family) {
+                g.at("cucp").at("ng_bind").fail("a numeric address of the AMF's family");
+            }
+            t.ng_bind = *bind;
+            t.ng_streams = g.at("cucp").get<std::uint16_t>("ng_streams", 2);
         }
-        t.ng_bind = *bind;
-        t.ng_streams = g.at("cucp").get<std::uint16_t>("ng_streams", 2);
         // N3 (P1 N10): the CU-UP's address, GTP-U's port; by default the CU-CP's address.
         t.n3_bind = Endpoint::v4(t.ng_bind.addr[0], t.ng_bind.addr[1], t.ng_bind.addr[2], t.ng_bind.addr[3], 2152);
         if (g.has("cuup")) {
@@ -142,10 +160,11 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         dus.at(0).only({"id", "cells"});
         t.du_id = dus.at(0).get<std::uint64_t>("id", 1);
         const Yaml cell = dus.at(0).at("cells").at(0);
-        cell.only({"pci", "tac", "arfcn"});
+        cell.only({"pci", "tac", "arfcn", "ssb_arfcn"});
         t.pci = cell.get<std::uint16_t>("pci", t.pci);
         t.tac = cell.get<std::uint32_t>("tac", t.tac);
         t.arfcn = cell.get<std::uint32_t>("arfcn", t.arfcn);
+        t.ssb_arfcn = cell.get<std::uint32_t>("ssb_arfcn", t.ssb_arfcn);
         if (t.pci > 1007 || t.tac > 0xFFFFFF) {
             cell.fail("PCI 0..1007, TAC 24 bits");
         }

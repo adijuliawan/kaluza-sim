@@ -95,6 +95,7 @@ private:
         std::unique_ptr<Amf> nas;
         bool ics_sent = false;
         bool ics_answered = false;
+        bool ambr_sent = false;                // the UE AMBR went in this UE's NG connection (P2 Q4)
         bool releasing = false;
         std::optional<Bytes> radio_capability;
         std::vector<std::uint8_t> setups;      // PSIs with a resource setup awaiting its response
@@ -110,6 +111,8 @@ private:
     void relink(Ue& ue);
     Ue* returning(const ngap::InitialUeMessage& m);
     void send_ics(Ue& ue, Bytes nas, SecretBytes kgnb, std::vector<ngap::SessionSetupItem> sessions);
+    static std::optional<ngap::Ambr> first_ambr(Ue& u);
+    static constexpr ngap::Ambr kUeAmbr{1'000'000'000, 1'000'000'000};   // bit/s DL, UL
     void page(const std::string& supi);
     void drop_n2(Ue& ue);
     std::uint16_t stream_of(const Ue& ue) const;

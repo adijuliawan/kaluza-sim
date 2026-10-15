@@ -102,6 +102,12 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 - **Secrets** (sealed card secrets, the range master secret) are streamed separately into a 0600 path, never printed, and verified by checksum. That is kaluza-core's practice for lab secrets.
 - **The provisioning credentials** (the Keycloak client `kaluza-sim-key-entry`'s secret and its mTLS client certificate, [ADR 0008](adr/0008-subscriber-provisioning-api.md)) stay on the dev PC in `~/.config/kaluza-sim/provisioning/` (0700/0600). They are never deployed to the VM. The 999/70 seed file (`~/.config/kaluza-sim/seed/`) stays there too. Provisioning runs from the dev PC only ([`sim-uicc.md`](sim-uicc.md) §8).
 - **Run directories** (`~/kaluza-sim-runs/<ts>/`: logs, pcaps, manifest) are pruned by age, because of the small disk.
+- **The OCUDU peer (P2 Q4, ADR 0012):** `tools/ocudu-peer.sh build` on the dev PC. It exports `d9d2263f4d` from `ran/ocudu-fork` with `git archive` (the fork is never written to) into `~/kaluza-sim-peers/ocudu-d9d2263f4d/` and builds only `ocucp` and `ocuup`, Release, `-march=x86-64-v3`.
+  - Built 2026-10-16: `ocucp` sha256 `0765349bbee1181696d9148f0f5ceb746fd6167429b6f40297eecee570de4551`, `ocuup` `43856373603eaf0256109aab10396c11373df5cabcf3ee8aa1875379fbf64d40`, recorded in the build's `PIN` file and copied into every run. Neither binary holds an AVX-512 instruction, so both run on the VM's Zen 3.
+  - Beyond glibc and libstdc++, they need `libmbedcrypto.so.16`, `libsctp.so.1` and `libyaml-cpp.so.0.8`. These are the libraries D7 allows on the VM, once deploy v3's ldd check names them there (Q6).
+  - On the dev PC the peers run only on 127.0.0.x and never while a `gnb` or `odu` process runs (the script and hook 58 refuse). `gates/run.sh` starts and stops them from a topology's `peers:`.
+  - The peer's files go to `<run>/peer/`, owner-only. Its NGAP and E1AP captures hold K_gNB and the UP keys in clear, so `tools/peer_redact.py` zeroes those keys when the run ends.
+  - The interop record is [`interop/ocudu.md`](interop/ocudu.md).
 
 ## 6. Running alongside UERANSIM and the core's gates
 

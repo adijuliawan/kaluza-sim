@@ -186,7 +186,7 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                     ++stats_.dropped;   // the DU's end is not known yet
                     return;
                 }
-                entity::gtpu::UserData u{r.f1u_dl->teid, std::nullopt, std::nullopt, r.nru_sn, std::move(pdu)};
+                const auto u = entity::gtpu::UserData::nru(r.f1u_dl->teid, r.nru_sn, std::move(pdu));
                 r.nru_sn = (r.nru_sn + 1) & 0xFFFFFF;
                 ++stats_.dl_packets;
                 (void)f1u_.send(at(*r.f1u_dl, cfg_.gtpu_port), u);
@@ -217,7 +217,7 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                 }
                 ++stats_.ul_packets;
                 (void)n3_.send(at(ss.ng_ul, cfg_.gtpu_port),
-                               entity::gtpu::UserData{ss.ng_ul.teid, std::nullopt, qfi, std::nullopt, std::move(sdu)});
+                               entity::gtpu::UserData::ul_psc(ss.ng_ul.teid, qfi, std::move(sdu)));
             });
         const auto nea = static_cast<crypto::Nea>(sess.ciphering ? c.nea : 0);
         const auto nia = static_cast<crypto::Nia>(sess.integrity ? *c.nia : 0);
@@ -361,6 +361,15 @@ void CuUp::on_f1u(std::uint32_t cu_up_ue, std::uint8_t psi, std::uint8_t drb, co
     Context* c = by_up(cu_up_ue);
     if (c == nullptr || c->sessions.count(psi) == 0 || c->sessions.at(psi).drbs.count(drb) == 0) {
         return;
+    }
+    if (d.ddds) {
+        // The DU's feedback (TS 38.425 5.4.2). P2 sends DL data regardless: the
+        // DU's buffer is ideal (ledger), so the report is counted, not obeyed.
+        ++stats_.ddds_rx;
+        last_ddds_ = d.ddds;
+        if (d.payload.empty()) {
+            return;
+        }
     }
     c->sessions.at(psi).drbs.at(drb).pdcp->on_pdu(d.payload);
 }

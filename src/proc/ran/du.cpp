@@ -150,7 +150,10 @@ void Du::f1_setup() {
     sib1.timers = cfg_.timers;
     auto mib = rrc::mib_ie(rrc::Mib{});
     auto sib = rrc::sib1_ie(sib1);
-    auto mtc = rrc::measurement_timing_configuration();
+    rrc::SsbTiming ssb;
+    ssb.ssb_arfcn = cfg_.ssb_arfcn;
+    ssb.pci = cfg_.pci;
+    auto mtc = rrc::measurement_timing_configuration(ssb);
     auto sib_frame = rrc::encode(sib1);
     if (!mib || !sib || !mtc || !sib_frame) {
         events_.emit("ran.encode_error", cfg_.id, {{"what", "the cell's system information"}});
@@ -193,6 +196,7 @@ void Du::on_f1(ByteView msg) {
                    [this](const f1ap::UeContextModificationRequest& m) { handle(m); },
                    [this](const f1ap::UeContextReleaseCommand& m) { handle(m); },
                    [this](const f1ap::Paging& m) { handle(m); },
+                   [this](const f1ap::GnbCuConfigurationUpdate& m) { handle(m); },
                    [this](const f1ap::ErrorIndication& m) {
                        events_.emit("ran.f1.error_indication", cfg_.id,
                                     {{"cause", m.cause ? m.cause->group + "/" + m.cause->value : ""}});
@@ -210,16 +214,55 @@ void Du::handle(const f1ap::F1SetupResponse& m) {
         ex_.stop_timer(*setup_retry_);
         setup_retry_.reset();
     }
-    active_ = std::find(m.activate.begin(), m.activate.end(), cgi()) != m.activate.end();
+    active_ = false;   // a new F1: the cell is on air only if this setup activates it
+    set_active(std::find(m.activate.begin(), m.activate.end(), cgi()) != m.activate.end());
     events_.emit("ran.f1.setup", cfg_.id, {{"cu", m.cu_name}, {"cell_active", active_ ? "1" : "0"}});
-    if (active_) {
+}
+
+void Du::set_active(bool on) {
+    if (on == active_) {
+        return;
+    }
+    active_ = on;
+    if (on) {
         broadcast();
         schedule_si(cfg_.mib_period, true);
         schedule_si(cfg_.sib1_period, false);
         if (!supervision_) {
             supervise();
         }
+        return;
     }
+    for (auto* t : {&mib_timer_, &sib1_timer_}) {   // off the air: no MIB, no SIB1, no paging
+        if (*t) {
+            ex_.stop_timer(**t);
+            t->reset();
+        }
+    }
+}
+
+// TS 38.473 8.2.5.2 (P2 Q4): the cells to be activated go on air, those to be deactivated
+// off; a cell that is not this DU's cannot be activated and is listed as failed.
+void Du::handle(const f1ap::GnbCuConfigurationUpdate& m) {
+    f1ap::GnbCuConfigurationUpdateAcknowledge a;
+    a.transaction = m.transaction;
+    for (const auto& c : m.activate) {
+        if (c == cgi()) {
+            set_active(true);
+        } else {
+            a.failed.push_back(f1ap::CellFailed{c, f1ap::Cause{"radioNetwork", "cell-not-available"}});
+        }
+    }
+    for (const auto& c : m.deactivate) {
+        if (c == cgi()) {
+            set_active(false);
+        }
+    }
+    events_.emit("ran.f1.cu_config_update", cfg_.id,
+                 {{"activate", str(static_cast<std::int64_t>(m.activate.size()))},
+                  {"deactivate", str(static_cast<std::int64_t>(m.deactivate.size()))},
+                  {"failed", str(static_cast<std::int64_t>(a.failed.size()))}, {"cell_active", active_ ? "1" : "0"}});
+    send_f1(a, false);
 }
 
 void Du::handle(const f1ap::F1SetupFailure& m) {
@@ -243,6 +286,7 @@ void Du::send_mib() {
         air::Frame b = frame(air::FrameType::bch, 0);
         b.sdus.push_back({0, air::RlcMode::tm, std::move(*wire)});
         b.seq = seq_++;
+        ++stats_.si_tx;
         to_air_(std::move(b));
     }
 }
@@ -251,6 +295,7 @@ void Du::send_sib1() {
     air::Frame si = frame(air::FrameType::si, 0);
     si.sdus.push_back({0, air::RlcMode::tm, sib1_frame_});
     si.seq = seq_++;
+    ++stats_.si_tx;
     to_air_(std::move(si));
 }
 
@@ -393,22 +438,103 @@ std::vector<f1ap::DrbSetup> Du::drbs_change(Ue& ue, const std::vector<f1ap::DrbT
         drb.id = d.drb_id;
         drb.lcid = lcid_of_drb(d.drb_id);
         drb.ul = d.ul;
+        drb.sn_bits = d.dl_pdcp_sn_bits;
         const std::uint32_t du_ue = ue.du_ue;
-        const std::uint8_t lcid = drb.lcid;
-        drb.dl_teid = f1u_->bind([this, alive = alive_, du_ue, lcid](const entity::gtpu::UserData& u, const ksim::Endpoint&) {
-            if (!*alive) {
-                return;
-            }
-            if (const Ue* target = by_du(du_ue)) {
-                ++stats_.dl_user;
-                dl_sdu(*target, lcid, u.payload);
+        const std::uint8_t drb_id = drb.id;
+        drb.dl_teid = f1u_->bind([this, alive = alive_, du_ue, drb_id](const entity::gtpu::UserData& u, const ksim::Endpoint&) {
+            if (*alive) {
+                on_dl_user(du_ue, drb_id, u);
             }
         });
         out.push_back(f1ap::DrbSetup{drb.id, drb.lcid, f1ap::GtpTunnel{cfg_.f1u_addr, drb.dl_teid}});
         added.push_back(drb);
         ue.drbs.emplace(drb.id, drb);
+        // The initial DL DATA DELIVERY STATUS (TS 38.425 5.4.2.1, "as soon as the
+        // corresponding node detects the successful RACH access by the UE"): the UE
+        // is on the cell already, so now. A CU-UP may hold DL data until it has a
+        // buffer size (OCUDU's does), and the core sends its buffered DL data the
+        // moment the session's tunnel is up, so a later report would lose it.
+        send_ddds(ue.drbs.at(drb_id), std::nullopt);
     }
     return out;
+}
+
+namespace {
+
+// A PDCP data PDU's SN (TS 38.323 6.2.2.2, 6.2.2.3): D/C 1, then 12 or 18 bits.
+std::optional<std::uint32_t> pdcp_sn(ByteView pdu, std::uint8_t bits) {
+    if (pdu.empty() || (pdu[0] & 0x80U) == 0) {
+        return std::nullopt;   // a control PDU
+    }
+    if (bits == 12) {
+        if (pdu.size() < 2) {
+            return std::nullopt;
+        }
+        return static_cast<std::uint32_t>(((pdu[0] & 0x0FU) << 8) | pdu[1]);
+    }
+    if (pdu.size() < 3) {
+        return std::nullopt;
+    }
+    return static_cast<std::uint32_t>(((pdu[0] & 0x03U) << 16) | (static_cast<std::uint32_t>(pdu[1]) << 8) | pdu[2]);
+}
+
+} // namespace
+
+void Du::on_dl_user(std::uint32_t du_ue, std::uint8_t drb_id, const entity::gtpu::UserData& u) {
+    Ue* ue = by_du(du_ue);
+    if (ue == nullptr) {
+        return;
+    }
+    auto it = ue->drbs.find(drb_id);
+    if (it == ue->drbs.end()) {
+        return;
+    }
+    Ue::Drb& d = it->second;
+    ++stats_.dl_user;
+    if (const auto sn = pdcp_sn(u.payload, d.sn_bits)) {
+        d.highest_sn = sn;   // the ideal link keeps F1-U's order
+    }
+    dl_sdu(*ue, d.lcid, u.payload);
+    if (u.report_polling) {
+        send_ddds(d, u.nru_sn);   // TS 38.425 5.4.2.1: polled, the report goes now
+        return;
+    }
+    arm_ddds(du_ue, drb_id);
+}
+
+void Du::arm_ddds(std::uint32_t du_ue, std::uint8_t drb_id) {
+    Ue* ue = by_du(du_ue);
+    if (ue == nullptr || ue->drbs.count(drb_id) == 0 || ue->drbs.at(drb_id).report_due) {
+        return;
+    }
+    ue->drbs.at(drb_id).report_due = true;
+    ex_.start_timer(cfg_.ddds_delay, [this, alive = alive_, du_ue, drb_id] {
+        if (!*alive) {
+            return;
+        }
+        if (Ue* u = by_du(du_ue); u != nullptr && u->drbs.count(drb_id) != 0) {
+            send_ddds(u->drbs.at(drb_id), std::nullopt);
+        }
+    });
+}
+
+void Du::send_ddds(Ue::Drb& d, std::optional<std::uint32_t> polling_nru_sn) {
+    d.report_due = false;
+    if (!f1u_ || KSIM_MUTANT("no_ddds")) {
+        return;   // the mutant: no feedback, so OCUDU's CU-UP sends no DL data (row ksim-p2.ocudu-ddds)
+    }
+    entity::gtpu::DeliveryStatus s;
+    s.desired_buffer = cfg_.ddds_buffer;
+    // RLC AM over the ideal link: a PDU sent to the UE arrives, in sequence.
+    s.highest_delivered = d.highest_sn;
+    s.highest_transmitted = d.highest_sn;
+    s.polling_nru_sn = polling_nru_sn;
+    entity::gtpu::UserData g;
+    g.teid = d.ul.teid;
+    g.ddds = s;
+    const auto& a = d.ul.addr;
+    ++stats_.ddds_tx;
+    (void)f1u_->send(ksim::Endpoint::v4(a[0], a[1], a[2], a[3], cfg_.gtpu_port), g);
 }
 
 void Du::drop_drbs(Ue& ue) {
@@ -465,7 +591,7 @@ void Du::on_ul_sdu(const air::Frame& f) {
                 ++stats_.ul_user;
                 const auto& a = d.ul.addr;
                 (void)f1u_->send(ksim::Endpoint::v4(a[0], a[1], a[2], a[3], cfg_.gtpu_port),
-                                 entity::gtpu::UserData{d.ul.teid, std::nullopt, std::nullopt, std::nullopt, s.data});
+                                 entity::gtpu::UserData::plain(d.ul.teid, s.data));
             }
         }
     }
@@ -544,6 +670,8 @@ void Du::handle(const f1ap::UeContextModificationRequest& m) {
     Ue* ue = by_du(m.du_ue);
     if (ue == nullptr) {
         ++stats_.f1_errors;
+        send_f1(f1ap::ErrorIndication{0, m.cu_ue, m.du_ue, f1ap::Cause{"radioNetwork", "unknown-or-already-allocated-gnb-du-ue-f1ap-id"}},
+                true);
         return;
     }
     std::set<std::uint8_t> added(m.srbs.begin(), m.srbs.end());
@@ -552,6 +680,16 @@ void Du::handle(const f1ap::UeContextModificationRequest& m) {
     std::vector<Ue::Drb> new_drbs;
     std::vector<std::uint8_t> released;
     auto drbs = drbs_change(*ue, m.drbs, m.release_drbs, new_drbs, released);
+    // TS 38.473 8.3.4.3 (P2 Q4): when none of the requested modifications can be made.
+    const bool asked = !m.drbs.empty() || !m.release_drbs.empty() || !added.empty() || m.rrc.has_value();
+    const bool made = !drbs.empty() || !released.empty() || !added.empty() || m.rrc.has_value();
+    if (asked && !made) {
+        const f1ap::Cause why = f1u_ ? f1ap::Cause{"radioNetwork", "unspecified"}
+                                     : f1ap::Cause{"transport", "transport-resource-unavailable"};
+        events_.emit("ran.f1.ue_mod_failure", cfg_.id, {{"du_ue", str(ue->du_ue)}, {"cause", why.group + "/" + why.value}});
+        send_f1(f1ap::UeContextModificationFailure{m.cu_ue, ue->du_ue, why}, true);
+        return;
+    }
     std::optional<Bytes> cg;
     if (!added.empty() || !new_drbs.empty() || !released.empty()) {
         if (auto c = cell_group(added, new_drbs, released)) {

@@ -45,6 +45,25 @@ TEST(F1apMsg, InputsOutOfRangeAreRefused) {
     EXPECT_FALSE(encode(UeContextReleaseCommand{1, 1, Cause{}, Bytes{0x00}, std::nullopt}));   // a container without its SRB
     EXPECT_FALSE(encode(Paging{1024, 1, {samples::kCgi}, std::nullopt}));
     EXPECT_FALSE(encode(UeContextSetupResponse{1, 1, {}, {}, {}}));
+    UeContextModificationRequest m;
+    m.cu_ue = 1;
+    m.du_ue = 1;
+    m.drbs = {DrbToSetup{1, Snssai{1, std::nullopt}, {Flow{1, 9, 8, false, true}}, GtpTunnel{{127, 0, 0, 4}, 1}, 13, std::nullopt}};
+    EXPECT_FALSE(encode(m));   // P2 Q4: a PDCP SN is 12 or 18 bits
+}
+
+// P2 Q4 (KS-F1AP-D3): the DRB item's DL PDCP SN Length, mandatory in UE Context
+// Setup (TS 38.473 DRBs-ToBeSetup-ItemExtIEs), crosses the wire with the UL one.
+TEST(F1apMsg, TheDrbItemCarriesItsPdcpSnLengths) {
+    UeContextModificationRequest m;
+    m.cu_ue = 1;
+    m.du_ue = 2;
+    m.drbs = {DrbToSetup{4, Snssai{1, 0x000001}, {Flow{1, 9, 8, false, true}}, GtpTunnel{{127, 0, 0, 4}, 7}, 12, 18}};
+    auto back = decode(*encode(m));
+    ASSERT_TRUE(back);
+    const auto& d = std::get<UeContextModificationRequest>(*back).drbs.at(0);
+    EXPECT_EQ(d.dl_pdcp_sn_bits, 12);
+    EXPECT_EQ(d.ul_pdcp_sn_bits, std::optional<std::uint8_t>(18));
 }
 
 TEST(F1apMsg, IndependentProducersVectorsReadOrAreOutsideTheP1Set) {

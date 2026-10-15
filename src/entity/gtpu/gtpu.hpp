@@ -23,13 +23,51 @@
 
 namespace ksim::entity::gtpu {
 
+/// An NR-U DL DATA DELIVERY STATUS (TS 38.425 5.5.2.2), the DU's feedback
+/// to the node hosting PDCP (P2 Q4). The NR PDCP SNs are those of PDUs that
+/// came on F1-U, retransmissions excluded.
+struct DeliveryStatus {
+    std::uint32_t desired_buffer = 0;                  // bytes for the DRB; 0: stop sending
+    std::optional<std::uint32_t> highest_delivered;    // in sequence to the UE (RLC AM)
+    std::optional<std::uint32_t> highest_transmitted;  // to the lower layers
+    std::optional<std::uint32_t> polling_nru_sn;       // the DL USER DATA whose Report Polling asked
+    bool final_frame = false;
+    friend bool operator==(const DeliveryStatus&, const DeliveryStatus&) = default;
+};
+
 /// The extension a G-PDU carries.
 struct UserData {
     std::uint32_t teid = 0;
     std::optional<std::uint8_t> dl_qfi;   // a DL PDU SESSION INFORMATION frame
     std::optional<std::uint8_t> ul_qfi;   // a UL PDU SESSION INFORMATION frame
     std::optional<std::uint32_t> nru_sn;  // an NR-U DL USER DATA frame
-    Bytes payload;                        // the T-PDU
+    Bytes payload;                        // the T-PDU; none with a DDDS of its own
+    bool report_polling = false;          // the DL USER DATA's Report Polling flag (P2 Q4)
+    std::optional<DeliveryStatus> ddds;   // an NR-U DL DATA DELIVERY STATUS frame (P2 Q4)
+
+    /// A G-PDU with no frame (an NR-U UL T-PDU), with a PDU SESSION INFORMATION
+    /// frame, or with a DL USER DATA frame.
+    static UserData plain(std::uint32_t teid, Bytes payload) {
+        UserData d;
+        d.teid = teid;
+        d.payload = std::move(payload);
+        return d;
+    }
+    static UserData dl_psc(std::uint32_t teid, std::uint8_t qfi, Bytes payload) {
+        UserData d = plain(teid, std::move(payload));
+        d.dl_qfi = qfi;
+        return d;
+    }
+    static UserData ul_psc(std::uint32_t teid, std::uint8_t qfi, Bytes payload) {
+        UserData d = plain(teid, std::move(payload));
+        d.ul_qfi = qfi;
+        return d;
+    }
+    static UserData nru(std::uint32_t teid, std::uint32_t sn, Bytes payload) {
+        UserData d = plain(teid, std::move(payload));
+        d.nru_sn = sn;
+        return d;
+    }
 };
 
 Result<Bytes> encode(const UserData& d);

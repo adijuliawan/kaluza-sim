@@ -108,6 +108,29 @@ TEST(RrcMsg, InputsOutOfRangeAreRefusedBeforeEncoding) {
     EXPECT_FALSE(encode(Reconfiguration{0, b, std::nullopt, {}}));
 }
 
+// P2 Q4 (KS-F1AP-D2): the served cell's MeasurementTimingConfiguration names its SSB.
+// The octets were read back by pycrate (NR-InterNodeDefinitions) as carrierFreq
+// 632640, kHz30, sf20 : 0, duration sf5, physCellId 101, and re-encoded the same.
+TEST(RrcMsg, MeasurementTimingConfigurationCarriesTheCellsSsb) {
+    SsbTiming s;
+    s.pci = 101;
+    auto m = measurement_timing_configuration(s);
+    ASSERT_TRUE(m);
+    EXPECT_EQ(*m, (Bytes{0x10, 0x31, 0x34, 0xe8, 0x05, 0x02, 0x00, 0x81, 0x23, 0x28, 0x00}));
+    SsbTiming bad = s;
+    bad.offset = 20;   // not below the period
+    EXPECT_FALSE(measurement_timing_configuration(bad));
+    bad = s;
+    bad.duration = 6;
+    EXPECT_FALSE(measurement_timing_configuration(bad));
+    bad = s;
+    bad.period_ms = 30;
+    EXPECT_FALSE(measurement_timing_configuration(bad));
+    bad = s;
+    bad.pci = 1008;
+    EXPECT_FALSE(measurement_timing_configuration(bad));
+}
+
 TEST(RrcMsg, GarbageAndTheWrongChannelAreErrorsNotCrashes) {
     EXPECT_FALSE(decode_dl_dcch(*from_hex("ff")));
     EXPECT_FALSE(decode_ul_ccch({}));

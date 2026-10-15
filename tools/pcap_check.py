@@ -24,6 +24,12 @@ Run it with the oracle venv:
 It prints PCAP_FRAMES, PCAP_MALFORMED (tshark), PYCRATE_FAILED and
 PCAP_CHECK=PASS|FAIL, with one PCAP_BAD line per failed frame. A capture
 without frames is a failure: a run that captured nothing proves nothing.
+
+A run with an interop peer (P2 Q4, <run>/peer/ from gates/run.sh) has no NGAP
+or E1AP capture of ours: the peer's CU-CP holds those links. The peer's own
+captures (peer/*.pcap) go through tshark alone and are reported apart, as
+PEER_PCAP_FRAMES and PEER_PCAP_MALFORMED: they are the peer's encodings, not a
+verdict on ours.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from ksimoracle import asn, pcap, tshark  # noqa: E402
 CAPTURES = ("ngap.pcapng", "f1ap.pcapng", "e1ap.pcapng", "uu.pcapng")
 RAW_CAPTURES = ("gtpu.pcapng",)   # raw IPv4 frames: tshark only (pycrate has no GTP-U)
 SIM_CAPTURE = "sim.pcapng"        # GSMTAP-SIM (N14): tshark's gsm_sim; frames only while a trace was on
+PEER_HELD = ("ngap.pcapng", "e1ap.pcapng")   # with a peer CU-CP: its links, its captures
 RRC = {
     "nr-rrc.bcch.bch": "BCCH_BCH_Message",
     "nr-rrc.bcch.dl.sch": "BCCH_DL_SCH_Message",
@@ -80,7 +87,9 @@ def main() -> int:
     run = Path(sys.argv[1])
     frames = malformed = pyfail = 0
     bad: list[str] = []
-    for cap in CAPTURES:
+    peer = run / "peer"
+    ours = tuple(c for c in CAPTURES if not (peer.is_dir() and c in PEER_HELD))
+    for cap in ours:
         f = run / cap
         if not f.is_file():
             bad.append(f"{cap}: missing")
@@ -128,6 +137,17 @@ def main() -> int:
                 malformed += 1
                 bad.append(f"{SIM_CAPTURE} frame {i}: tshark: {'; '.join(errs)[:160]}")
     print(f"PCAP_SIM_FRAMES={sim_frames}")
+    if peer.is_dir():
+        peer_frames = peer_malformed = 0
+        for f in sorted(peer.glob("*.pcap")):
+            packets = tshark.decode(f.read_bytes(), prefs=["pdcp-nr.verify_integrity:FALSE"])
+            peer_frames += len(packets)
+            for i, p in enumerate(packets, start=1):
+                errs = tshark.errors(p)
+                if errs:
+                    peer_malformed += 1
+                    print(f"PEER_PCAP_BAD {f.name} frame {i}: tshark: {'; '.join(errs)[:160]}")
+        print(f"PEER_PCAP_FRAMES={peer_frames}\nPEER_PCAP_MALFORMED={peer_malformed}")
     for b in bad:
         print(f"PCAP_BAD {b}")
     ok = not bad and frames > 0

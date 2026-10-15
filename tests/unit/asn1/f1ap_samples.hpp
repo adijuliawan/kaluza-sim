@@ -59,7 +59,7 @@ inline std::vector<Sample> all() {
     s.push_back({"UEContextSetupRequest", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {}, std::nullopt}});
     s.push_back({"UEContextSetupResponse", UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {}}});
     // P1 N10: DRBs, the CU-UP's F1-U end up, the DU's down.
-    const DrbToSetup drb{1, Snssai{1, 0x000001}, {Flow{1, 9, 8, false, true}}, GtpTunnel{{127, 0, 0, 4}, 0x20000001}};
+    const DrbToSetup drb{1, Snssai{1, 0x000001}, {Flow{1, 9, 8, false, true}}, GtpTunnel{{127, 0, 0, 4}, 0x20000001}, 18, 12};
     s.push_back({"UEContextSetupRequest.drbs", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {drb}, std::nullopt}});
     s.push_back({"UEContextSetupResponse.drbs",
                  UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {DrbSetup{1, 4, GtpTunnel{{127, 0, 0, 3}, 0x30000001}}}}});
@@ -78,6 +78,13 @@ inline std::vector<Sample> all() {
     s.push_back({"UEContextReleaseComplete", UeContextReleaseComplete{7, 1}});
     s.push_back({"Paging", Paging{0x0CA040000001ULL % 1024, 0x0CA040000001ULL, {kCgi}, "v128"}});
     s.push_back({"ErrorIndication", ErrorIndication{0, 7, 1, Cause{"protocol", "abstract-syntax-error-reject"}}});
+    // P2 Q4 (TS 38.473 8.2.5, 8.3.4.3).
+    s.push_back({"GNBCUConfigurationUpdate", GnbCuConfigurationUpdate{3, {kCgi}, {kCgi}}});
+    s.push_back({"GNBCUConfigurationUpdateAcknowledge",
+                 GnbCuConfigurationUpdateAcknowledge{3, {CellFailed{kCgi, Cause{"radioNetwork", "cell-not-available"}}}}});
+    s.push_back({"GNBCUConfigurationUpdateFailure", GnbCuConfigurationUpdateFailure{3, Cause{"misc", "unspecified"}, "v10s"}});
+    s.push_back({"UEContextModificationFailure",
+                 UeContextModificationFailure{7, 1, Cause{"transport", "transport-resource-unavailable"}}});
     return s;
 }
 

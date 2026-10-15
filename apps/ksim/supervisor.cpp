@@ -20,6 +20,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -96,8 +97,12 @@ public:
         : t_(t), topology_file_(std::move(topology_file)), run_(std::move(run)), args_(std::move(a)),
           events_(1U << 16, clock_) {
         // EventRing's constructor (platform/event.cpp) sets every field; the analyzer does not see into it.
+        // A role the topology gives the interop peer (ADR 0012) is not ours to run.
+        peers_ = {{"cucp", t.peer_cucp}, {"cuup", t.peer_cuup}};
         for (const char* r : {"cucp", "cuup", "du", "ue"}) {   // NOLINT(clang-analyzer-optin.cplusplus.UninitializedObject)
-            children_.push_back(std::make_unique<Child>(r, run_));
+            if (peer_of(r).empty()) {
+                children_.push_back(std::make_unique<Child>(r, run_));
+            }
         }
     }
     ~Supervisor() {
@@ -110,13 +115,22 @@ public:
     Supervisor(const Supervisor&) = delete;
     Supervisor& operator=(const Supervisor&) = delete;
 
-    Child& child(const std::string& role) {
+    /// Our process for the role, or nullptr when the peer runs it.
+    Child* child(const std::string& role) {
         for (auto& c : children_) {
             if (c->role == role) {
-                return *c;
+                return c.get();
             }
         }
-        return *children_.front();
+        return nullptr;
+    }
+    std::string peer_of(const std::string& role) const {
+        const auto it = peers_.find(role);
+        return it == peers_.end() ? std::string() : it->second;
+    }
+    /// The answer for a verb of a role the peer runs: it has no ksim control API.
+    Reply peer_reply(const std::string& role) const {
+        return Reply::fail(Exit::capability, "the " + role + " is " + peer_of(role) + "'s (topology peers): no ksim verbs");
     }
 
     bool start(std::string& why) {
@@ -167,6 +181,7 @@ private:
     EventRing events_;
     std::unique_ptr<node::EventFile> event_file_;
     std::vector<std::unique_ptr<Child>> children_;
+    std::map<std::string, std::string> peers_;   // role to peer ("ocudu"), empty: ours
     std::vector<std::thread> relays_;
     std::thread reaper_;
     std::thread restarter_;
@@ -343,12 +358,19 @@ void Supervisor::relay(Child& c) {
 }
 
 void Supervisor::link_captures() {
-    const std::pair<const char*, const char*> links[] = {{"ngap.pcapng", "cucp"}, {"f1ap.pcapng", "cucp"},
-                                                         {"e1ap.pcapng", "cucp"}, {"gtpu.pcapng", "cuup"},
-                                                         {"uu.pcapng", "ue"},     {"sim.pcapng", "ue"}};
+    // With a peer CU-CP or CU-UP our DU captures F1AP or F1-U itself; the peer's NGAP
+    // and E1AP are in its own captures (tools/ocudu-peer.sh writes them in the run).
+    const bool own_cucp = child("cucp") != nullptr;
+    const bool own_cuup = child("cuup") != nullptr;
+    const std::pair<const char*, const char*> links[] = {
+        {"ngap.pcapng", own_cucp ? "cucp" : nullptr}, {"f1ap.pcapng", own_cucp ? "cucp" : "du"},
+        {"e1ap.pcapng", own_cucp ? "cucp" : (own_cuup ? "cuup" : nullptr)}, {"gtpu.pcapng", own_cuup ? "cuup" : "du"},
+        {"uu.pcapng", "ue"}, {"sim.pcapng", "ue"}};
     for (const auto& [file, role] : links) {
-        std::error_code ec;
-        std::filesystem::create_symlink(std::string(role) + "/" + file, run_ + "/" + file, ec);
+        if (role != nullptr) {
+            std::error_code ec;
+            std::filesystem::create_symlink(std::string(role) + "/" + file, run_ + "/" + file, ec);
+        }
     }
 }
 
@@ -383,11 +405,14 @@ void Supervisor::restart_gnb() {
     restarting_ = true;
     events_.emit("ran.gnb.restart", "gnb:" + t_.gnb_name, {{"mode", "split"}});
     for (const char* r : {"du", "cuup", "cucp"}) {
-        stop_child(child(r));
+        if (Child* c = child(r)) {
+            stop_child(*c);
+        }
     }
     std::string why;
     for (const char* r : {"cucp", "cuup", "du"}) {
-        if (!spawn(child(r), why)) {
+        Child* c = child(r);
+        if (c != nullptr && !spawn(*c, why)) {
             log::warn("ksim", "gNB restart: {}", why);
             events_.emit("run.role.exit", "run:" + std::string(r), {{"role", r}, {"status", "restart failed"}});
             break;
@@ -404,7 +429,9 @@ void Supervisor::shutdown() {
         restarter_.join();
     }
     for (const char* r : {"ue", "du", "cuup", "cucp"}) {
-        stop_child(child(r));
+        if (Child* c = child(r)) {
+            stop_child(*c);
+        }
     }
     for (auto& t : relays_) {
         if (t.joinable()) {
@@ -417,12 +444,12 @@ void Supervisor::shutdown() {
 }
 
 void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
-    Child& ue = child("ue");
-    Child& cucp = child("cucp");
-    Child& du = child("du");
-    Child& cuup = child("cuup");
-    auto to = [this, &server](const char* method, const std::string& pattern, Child& c) {
-        auto h = [this, &c](const Request& r) { return forward(c, r); };
+    Child& ue = *child("ue");
+    Child& du = *child("du");
+    Child* cucp = child("cucp");   // nullptr: the peer's (ADR 0012)
+    auto to = [this, &server](const char* method, const std::string& pattern, const char* role) {
+        Child* c = child(role);
+        auto h = [this, c, role = std::string(role)](const Request& r) { return c != nullptr ? forward(*c, r) : peer_reply(role); };
         if (std::string(method) == "GET") {
             server.get(pattern, h);
         } else {
@@ -430,21 +457,21 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
         }
     };
     // The UE farm's verbs.
-    to("GET", "/v1/ues", ue);
-    to("GET", "/v1/capabilities", ue);
+    to("GET", "/v1/ues", "ue");
+    to("GET", "/v1/capabilities", "ue");
     for (const char* p : {"status", "sim", "sim-read", "sms", "ps", "ifaces"}) {
-        to("GET", std::string("/v1/ue/:sel/") + p, ue);
+        to("GET", std::string("/v1/ue/:sel/") + p, "ue");
     }
     for (const char* p : {"power", "sim", "sim-trace", "airplane", "sms-send", "sms-memory", "service-request",
                           "register", "deregister", "ps-establish", "ps-release", "ping", "exec"}) {
-        to("POST", std::string("/v1/ue/:sel/") + p, ue);
+        to("POST", std::string("/v1/ue/:sel/") + p, "ue");
     }
     // The gNB's.
-    to("GET", "/v1/version", cucp);
-    to("GET", "/v1/gnb/:name/ue-list", cucp);
-    to("GET", "/v1/gnb/:name/amf-list", cucp);
-    to("GET", "/v1/du/:name/ue-list", du);
-    to("GET", "/v1/cuup/:name/bearers", cuup);
+    to("GET", "/v1/version", cucp != nullptr ? "cucp" : "du");
+    to("GET", "/v1/gnb/:name/ue-list", "cucp");
+    to("GET", "/v1/gnb/:name/amf-list", "cucp");
+    to("GET", "/v1/du/:name/ue-list", "du");
+    to("GET", "/v1/cuup/:name/bearers", "cuup");
     server.get("/v1/faults", [](const Request&) {
         Reply r;
         r.set("FAULTS", "0");   // fault injection is P3
@@ -452,19 +479,24 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
     });
     server.get("/v1/nodes", [this](const Request&) {
         Reply r;
-        r.set("NODES", static_cast<std::int64_t>(children_.size()));
         int n = 0;
-        for (const auto& c : children_) {
+        for (const char* role : {"cucp", "cuup", "du", "ue"}) {
             const std::string k = "NODE." + std::to_string(++n);
-            r.set(k + ".NAME", c->role == "ue" ? std::string("ue-farm") : t_.gnb_name + (c->role == "cucp" ? "" : "-" + c->role));
-            r.set(k + ".ROLE", c->role);
-            r.set(k + ".PID", static_cast<std::int64_t>(c->pid.load()));
-            r.set(k + ".UP", c->pid.load() > 0 ? "1" : "0");
+            const std::string rs(role);
+            r.set(k + ".NAME", rs == "ue" ? std::string("ue-farm") : t_.gnb_name + (rs == "cucp" ? "" : "-" + rs));
+            r.set(k + ".ROLE", rs);
+            if (const Child* c = child(rs)) {
+                r.set(k + ".PID", static_cast<std::int64_t>(c->pid.load()));
+                r.set(k + ".UP", c->pid.load() > 0 ? "1" : "0");
+            } else {
+                r.set(k + ".PEER", peer_of(rs));   // not ours: no PID, no UP
+            }
         }
+        r.set("NODES", static_cast<std::int64_t>(n));
         return r;
     });
-    server.get("/v1/info", [this, &ue, &cucp, &du](const Request&) {
-        const Reply a = call(cucp, "GET", "/v1/info");
+    server.get("/v1/info", [this, &ue, cucp, &du](const Request&) {
+        const Reply a = cucp != nullptr ? call(*cucp, "GET", "/v1/info") : peer_reply("cucp");
         const Reply b = call(du, "GET", "/v1/info");
         const Reply c = call(ue, "GET", "/v1/info");
         Reply r;
@@ -488,6 +520,12 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
             }
         }
         r.set("GNB", t_.gnb_name);
+        if (cucp == nullptr) {
+            r.set("PEER_CUCP", peer_of("cucp"));
+        }
+        if (child("cuup") == nullptr) {
+            r.set("PEER_CUUP", peer_of("cuup"));
+        }
         r.set("PLMN", t_.mcc + t_.mnc);
         r.set("AMF", t_.amf.to_string());
         r.set("RUN_DIR", run_);
@@ -541,9 +579,12 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
             (void)events_.wait(since, [](const Event&) { return true; }, std::chrono::milliseconds(1000));
         }
     });
-    server.post("/v1/gnb/:name/ue-release", [this, &ue, &cucp](const Request& req) {
+    server.post("/v1/gnb/:name/ue-release", [this, &ue, cucp](const Request& req) {
         if (req.params.at("name") != t_.gnb_name) {
             return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        if (cucp == nullptr) {
+            return peer_reply("cucp");
         }
         // The UE by its farm selector, found at the CU-CP by its C-RNTI, as in one process.
         Reply st = call(ue, "GET", "/v1/ue/" + encode(req.arg("ue")) + "/status");
@@ -556,7 +597,7 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
         }
         json body = {{"c_rnti", crnti}, {"cause", req.arg("cause", "user-inactivity")},
                      {"ue_label", st.kv.contains("UE") ? st.kv.at("UE").get<std::string>() : std::string()}};
-        return call(cucp, "POST", "/v1/gnb/" + encode(t_.gnb_name) + "/ue-release", body);
+        return call(*cucp, "POST", "/v1/gnb/" + encode(t_.gnb_name) + "/ue-release", body);
     });
     server.post("/v1/gnb/:name/restart", [this](const Request& req) {
         if (req.params.at("name") != t_.gnb_name) {
@@ -583,6 +624,9 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
             if (req.params.at("name") != name) {
                 return Reply::fail(Exit::unknown, "no such node");
             }
+            if (child(role) == nullptr) {
+                return peer_reply(role);
+            }
             if (restarting_.load()) {
                 return Reply::fail(Exit::wrong_state, "the gNB is restarting");
             }
@@ -593,7 +637,7 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
             restarter_ = std::thread([this, role] {
                 const std::lock_guard<std::mutex> lock(restart_mu_);
                 restarting_ = true;
-                Child& c = child(role);
+                Child& c = *child(role);
                 stop_child(c);
                 std::string why;
                 if (!spawn(c, why)) {

@@ -286,6 +286,50 @@ TEST(Ran, F1LossAsksTheAmfToReleaseTheUeAndTheReleaseCompletesWithoutTheDu) {
     EXPECT_TRUE(g.failures().empty()) << g.failures();
 }
 
+// P2 Q4 (TS 38.473 8.2.5.2): the gNB-CU takes the DU's cell off the air and puts it back; a cell that
+// is not the DU's cannot be activated and is listed so in the acknowledge.
+TEST(Ran, F1ap8_2_5_TheGnbCuDeactivatesAndActivatesTheCell) {
+    Gnb g;
+    g.start();
+    ASSERT_TRUE(g.du.cell_active());
+    const f1ap::NrCgi own = g.du.cgi();
+    f1ap::NrCgi other = own;
+    other.nci ^= 1;
+    ASSERT_TRUE(g.cucp.cu_configuration_update({}, {own}));
+    ASSERT_TRUE(g.loop.run_until([&] { return g.named("ran.f1.cu_config_update").size() == 2; }, g.loop.now() + 1'000));
+    EXPECT_FALSE(g.du.cell_active());
+    const std::uint64_t si = g.du.stats().si_tx;
+    g.loop.run_for(500);
+    EXPECT_EQ(g.du.stats().si_tx, si);   // nothing on air
+    ASSERT_TRUE(g.cucp.cu_configuration_update({own, other}, {}));
+    ASSERT_TRUE(g.loop.run_until([&] { return g.named("ran.f1.cu_config_update").size() == 4; }, g.loop.now() + 1'000));
+    EXPECT_TRUE(g.du.cell_active());
+    const auto acks = g.named("ran.f1.cu_config_update");
+    EXPECT_EQ(field(acks.back(), "failed"), "1");   // the other cell, at the CU-CP
+    g.loop.run_for(500);
+    EXPECT_GT(g.du.stats().si_tx, si);
+    EXPECT_TRUE(g.failures().empty()) << g.failures();
+}
+
+// P2 Q4 (TS 38.473 8.3.4.3): a modification the DU can make none of is refused with UE CONTEXT
+// MODIFICATION FAILURE; here DRBs without F1-U at the DU.
+TEST(Ran, F1ap8_3_4_3_AModificationTheDuCannotMakeIsRefused) {
+    Gnb g;
+    g.register_ue();
+    ASSERT_TRUE(g.loop.run_until([&] { return g.amf.nas() != nullptr && g.amf.nas()->registered(); }, g.loop.now() + 1'000));
+    f1ap::UeContextModificationRequest m;
+    m.cu_ue = 1;
+    m.du_ue = 1;
+    m.drbs = {f1ap::DrbToSetup{1, f1ap::Snssai{1, std::nullopt}, {f1ap::Flow{1, 9, 8, false, true}},
+                               f1ap::GtpTunnel{{127, 0, 0, 4}, 1}, 18, 18}};
+    auto wire = f1ap::encode(m);
+    ASSERT_TRUE(wire);
+    ASSERT_TRUE(g.f1.b().send(*wire, {62, ue_stream(4, 1)}));
+    ASSERT_TRUE(g.loop.run_until([&] { return !g.named("ran.f1.ue_mod_failure").empty(); }, g.loop.now() + 1'000));
+    EXPECT_EQ(field(g.named("ran.f1.ue_mod_failure").back(), "cause"), "transport/transport-resource-unavailable");
+    EXPECT_EQ(g.du.ues(), 1u);   // the UE context stays
+}
+
 // P2 Q2 (TS 38.472 §7): non-UE-associated F1AP on stream 0; a UE's on the one stream its ID picks, never 0.
 TEST(Ran, EachUeKeepsItsOwnF1StreamAndStreamZeroIsForTheRest) {
     Gnb g;

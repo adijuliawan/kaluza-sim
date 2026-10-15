@@ -260,9 +260,25 @@ Result<UlDcch> decode_ul_dcch(ByteView in);
 /// Rel-15, no ROHC, band n78.
 Result<Bytes> generic_nr_capability();
 
-/// A MeasurementTimingConfiguration (TS 38.331 §11.2.2) with no SMTC list:
-/// what F1 Setup's served cell carries (TS 38.473 §9.3.1.10).
-Result<Bytes> measurement_timing_configuration();
+/// The served cell's SSB as its MeasurementTimingConfiguration describes it
+/// (TS 38.331 §11.2.2 MeasTiming, SSB-MTC). P2 Q4 (KS-F1AP-D2): P1 sent no
+/// measTiming, which a CU-CP (OCUDU's) refuses. The defaults are our n78 cell:
+/// the SSB on the sync raster next to the carrier (NR-ARFCN 632640, 3489.6 MHz,
+/// GSCN 7839, TS 38.104 Table 5.4.3.1-1), 30 kHz, every 20 ms (the period a UE
+/// assumes at initial access, TS 38.213 §4.1), a 5-subframe window from
+/// subframe 0 (a burst lies in one half frame, TS 38.213 §4.1).
+struct SsbTiming {
+    std::uint32_t ssb_arfcn = 632640;   // carrierFreq
+    std::uint16_t scs_khz = 30;         // ssbSubcarrierSpacing: 15, 30, 120, 240
+    std::uint16_t period_ms = 20;       // 5, 10, 20, 40, 80, 160
+    std::uint8_t offset = 0;            // subframes, below the period
+    std::uint8_t duration = 5;          // subframes, 1..5
+    std::optional<std::uint16_t> pci;   // physCellId (the r15 extension)
+};
+
+/// A MeasurementTimingConfiguration with one measTiming for `s`: what F1
+/// Setup's served cell carries (TS 38.473 §9.3.1.10).
+Result<Bytes> measurement_timing_configuration(const SsbTiming& s = {});
 
 /// UERadioAccessCapabilityInformation (TS 38.331 §11.2.2) around an NR
 /// capability: what NGAP's UE Radio Capability IE carries (TS 38.413 §9.3.1.74).

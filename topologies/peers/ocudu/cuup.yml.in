@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# OCUDU's CU-UP as kaluza-sim's peer on the dev PC (P2 Q4; ADR 0012): E1 to the
+# CU-CP on loopback (ours or OCUDU's), F1-U where our split CU-UP would be, N3
+# from 127.0.0.4 to the UPF the session names. The option names are OCUDU's
+# (apps/units/o_cu_up).
+gnb_id: 417
+gnb_id_bit_length: 22
+
+cu_up:
+  plmn_list:
+    - "00101"
+  e1ap:
+    gateways:
+      - bind_addrs: 127.0.20.2
+        addrs: 127.0.20.1
+  ngu:
+    socket:
+      - bind_addr: 127.0.0.4
+  f1u:
+    socket:
+      - bind_addr: 127.0.10.3
+
+log:
+  filename: @RUN_DIR@/ocudu-cuup.log
+  all_level: warning
+
+pcap:
+  e1ap_enable: true
+  e1ap_filename: @RUN_DIR@/ocudu-cuup-e1ap.pcap
+  f1u_enable: true
+  f1u_filename: @RUN_DIR@/ocudu-cuup-f1u.pcap
+  n3_enable: true
+  n3_filename: @RUN_DIR@/ocudu-cuup-n3.pcap

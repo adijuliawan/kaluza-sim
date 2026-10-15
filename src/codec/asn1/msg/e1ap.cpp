@@ -56,6 +56,7 @@ constexpr int kSetupModList = 54;
 constexpr int kToSetupModList = 56;
 constexpr int kTransactionId = 57;
 constexpr int kServingPlmn = 58;
+constexpr int kUeInactivityTimer = 59;
 
 constexpr std::array<const char*, 4> kNea{"nEA0", "c-128-NEA1", "c-128-NEA2", "c-128-NEA3"};
 constexpr std::array<const char*, 4> kNia{"nIA0", "i-128-NIA1", "i-128-NIA2", "i-128-NIA3"};
@@ -339,6 +340,12 @@ Result<Bytes> build(const BearerContextSetupRequest& m) {
         (m.security.nia && (*m.security.nia > 3 || !m.security.int_key || m.security.int_key->size() != 16))) {
         return bad("E1AP: BEARER CONTEXT SETUP REQUEST needs sessions with DRBs and flows, and 128-bit UP keys");
     }
+    if ((m.activity_level != "drb" && m.activity_level != "pdu-session" && m.activity_level != "ue") ||
+        (m.activity_level == "ue") != m.ue_inactivity_s.has_value() ||
+        (m.ue_inactivity_s && (*m.ue_inactivity_s < 1 || *m.ue_inactivity_s > 7200))) {
+        return bad("E1AP: the activity notification level is drb, pdu-session or ue, and ue comes with a "
+                   "UE Inactivity Timer of 1..7200 s (TS 37.483 9.2.2.1)");
+    }
     json alg = {{"cipheringAlgorithm", kNea[m.security.nea]}};
     if (m.security.nia) {
         alg["integrityProtectionAlgorithm"] = kNia[*m.security.nia];
@@ -355,10 +362,13 @@ Result<Bytes> build(const BearerContextSetupRequest& m) {
                             ie(kSecurityInformation, "reject", "SecurityInformation", {{"securityAlgorithm", alg}, {"uPSecuritykey", keys}}),
                             ie(kUeDlAmbr, "reject", "BitRate", m.ue_dl_ambr),
                             ie(kServingPlmn, "ignore", "PLMN-Identity", hex(m.serving_plmn)),
-                            ie(kActivityNotificationLevel, "reject", "ActivityNotificationLevel", "ue"),
-                            ie(kSystemBcSetupRequest, "reject", "System-BearerContextSetupRequest",
-                               {{"nG-RAN-BearerContextSetupRequest",
-                                 json::array({ie(kToSetupList, "reject", "PDU-Session-Resource-To-Setup-List", sessions)})}})});
+                            ie(kActivityNotificationLevel, "reject", "ActivityNotificationLevel", m.activity_level)});
+    if (m.ue_inactivity_s) {
+        ies.push_back(ie(kUeInactivityTimer, "reject", "Inactivity-Timer", *m.ue_inactivity_s));
+    }
+    ies.push_back(ie(kSystemBcSetupRequest, "reject", "System-BearerContextSetupRequest",
+                     {{"nG-RAN-BearerContextSetupRequest",
+                       json::array({ie(kToSetupList, "reject", "PDU-Session-Resource-To-Setup-List", sessions)})}}));
     return per(pdu("initiatingMessage", kBearerContextSetup, "reject", "BearerContextSetupRequest", ies));
 }
 
@@ -573,6 +583,11 @@ Result<Pdu> read(const std::string& kind, int code, const Ies& ies) {
             m.ue_dl_ambr = need(ies, kUeDlAmbr).get<std::uint64_t>();
             if (const json* p = maybe(ies, kServingPlmn)) {
                 m.serving_plmn = read_plmn(*p);
+            }
+            m.activity_level = need(ies, kActivityNotificationLevel).get<std::string>();
+            m.ue_inactivity_s.reset();
+            if (const json* t = maybe(ies, kUeInactivityTimer)) {
+                m.ue_inactivity_s = t->get<std::uint16_t>();
             }
             const Ies ng = ng_ran(need(ies, kSystemBcSetupRequest), "nG-RAN-BearerContextSetupRequest");
             for (const auto& s : need(ng, kToSetupList)) {

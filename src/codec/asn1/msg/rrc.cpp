@@ -866,9 +866,27 @@ Result<Bytes> generic_nr_capability() {
     return to_uper(asn_DEF_RRC_UE_NR_Capability, cap);
 }
 
-Result<Bytes> measurement_timing_configuration() {
+Result<Bytes> measurement_timing_configuration(const SsbTiming& s) {
+    const bool period_ok = s.period_ms == 5 || s.period_ms == 10 || s.period_ms == 20 || s.period_ms == 40 ||
+                           s.period_ms == 80 || s.period_ms == 160;
+    const bool scs_ok = s.scs_khz == 15 || s.scs_khz == 30 || s.scs_khz == 120 || s.scs_khz == 240;
+    if (!period_ok || !scs_ok || s.offset >= s.period_ms || s.duration < 1 || s.duration > 5 ||
+        s.ssb_arfcn > 3279165 || (s.pci && *s.pci > 1007)) {
+        return bad("RRC: an SSB timing needs a period of 5..160 ms, an offset below it, a 1..5 subframe window, "
+                   "an NR-ARFCN, an SSB subcarrier spacing and a PCI 0..1007");
+    }
+    json timing = {
+        {"frequencyAndTiming",
+         {{"carrierFreq", s.ssb_arfcn},
+          {"ssbSubcarrierSpacing", "kHz" + std::to_string(s.scs_khz)},
+          {"ssb-MeasurementTimingConfiguration",
+           {{"periodicityAndOffset", {{"sf" + std::to_string(s.period_ms), s.offset}}},
+            {"duration", "sf" + std::to_string(s.duration)}}}}}};
+    if (s.pci) {
+        timing["ext1"] = {{"physCellId", *s.pci}};   // asn1c's JER names the [[ ]] group ext1
+    }
     return to_uper(asn_DEF_RRC_MeasurementTimingConfiguration,
-                   {{"criticalExtensions", {{"c1", {{"measTimingConf", json::object()}}}}}});
+                   {{"criticalExtensions", {{"c1", {{"measTimingConf", {{"measTiming", json::array({timing})}}}}}}}});
 }
 
 Result<Bytes> radio_access_capability(const Bytes& nr_capability) {

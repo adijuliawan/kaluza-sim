@@ -20,3 +20,4 @@ bridge_admin_open	ksim-p2.bridge-refuses-admin	the card bridge lets VERIFY ADM1 
 f1_loss_silent	ksim-p2.f1-loss-release	the CU-CP drops its UEs when F1 is lost and tells the AMF nothing (P2 Q2; tests/procedure Ran.Mutant_f1_loss_silent_*; row ksim-p2.f1-loss-release from Q3)
 single_ue_stream	ksim-p2.per-ue-stream	the DU sends every UE's F1AP on stream 1 (P2 Q2; tests/procedure Ran.Mutant_single_ue_stream_*; row ksim-p2.per-ue-stream from Q3)
 f1_no_reassociation	ksim-p2.f1-reassociation	the DU sends no F1 SETUP REQUEST on a new F1 association, so after a CU-CP restart its cell stays off (P2 Q3)
+no_ddds	ksim-p2.ocudu-ddds	the DU sends no NR-U DL DATA DELIVERY STATUS, so a CU-UP that waits for a desired buffer size (OCUDU's) sends no DL data (P2 Q4)

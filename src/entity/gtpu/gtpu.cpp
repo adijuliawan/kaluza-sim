@@ -12,16 +12,43 @@ namespace {
 
 namespace codec = ksim::gtpu;
 
-Result<Bytes> frame(up::Protocol p, std::uint8_t type, std::uint8_t octet2, std::optional<std::uint32_t> sn) {
+Result<Bytes> frame(up::Protocol p, std::uint8_t type, std::uint8_t octet2, std::optional<std::uint32_t> sn,
+                    std::uint8_t octet1_flags = 0) {
     auto f = up::make(p, type);
     if (!f) {
         return f.error();
     }
+    f->flags[0] = static_cast<std::uint8_t>(f->flags[0] | (octet1_flags & 0x0F));
     f->flags[1] = octet2;
     if (sn) {
         if (auto r = up::set(*f, "NR-U Sequence Number", *sn); !r) {
             return r.error();
         }
+    }
+    return up::encode(*f);
+}
+
+// TS 38.425 5.5.2.2: the frame's fields come with their flags (frames.cpp).
+Result<Bytes> ddds_frame(const DeliveryStatus& s) {
+    auto f = up::make(up::Protocol::nru, 1);
+    if (!f) {
+        return f.error();
+    }
+    Result<void> r = up::set(*f, "Desired buffer size for the data radio bearer", s.desired_buffer);
+    if (r && s.highest_delivered) {
+        r = up::set(*f, "Highest successfully delivered NR PDCP Sequence Number", *s.highest_delivered);
+    }
+    if (r && s.highest_transmitted) {
+        r = up::set(*f, "Highest transmitted NR PDCP Sequence Number", *s.highest_transmitted);
+    }
+    if (r && s.polling_nru_sn) {
+        r = up::set(*f, "NR-U Sequence Number of Polling Frame", *s.polling_nru_sn);
+    }
+    if (r && s.final_frame) {
+        r = up::set_flag(*f, 0, 1);   // Final Frame Ind.
+    }
+    if (!r) {
+        return r.error();
     }
     return up::encode(*f);
 }
@@ -39,8 +66,11 @@ Result<Bytes> encode(const UserData& d) {
         const bool dl = d.dl_qfi.has_value();
         ext = frame(up::Protocol::psc, dl ? 0 : 1, static_cast<std::uint8_t>((dl ? *d.dl_qfi : *d.ul_qfi) & 0x3F), std::nullopt);
         ext_type = codec::ext_pdu_session_container;
+    } else if (d.ddds) {
+        ext = ddds_frame(*d.ddds);
+        ext_type = codec::ext_nr_ran_container;
     } else if (d.nru_sn) {
-        ext = frame(up::Protocol::nru, 0, 0, d.nru_sn);
+        ext = frame(up::Protocol::nru, 0, 0, d.nru_sn, d.report_polling ? 0x01 : 0x00);   // Report polling: bit 0
         ext_type = codec::ext_nr_ran_container;
     }
     if (ext) {
@@ -81,8 +111,23 @@ Result<UserData> decode_gpdu(ByteView in) {
             if (!f) {
                 return f.error();
             }
-            if (auto sn = f->value("NR-U Sequence Number")) {
+            if (f->spec->pdu_type == 1) {
+                DeliveryStatus s;
+                const auto sn = [&f](const char* name) -> std::optional<std::uint32_t> {
+                    if (auto v = f->value(name)) {
+                        return static_cast<std::uint32_t>(*v);
+                    }
+                    return std::nullopt;
+                };
+                s.desired_buffer = sn("Desired buffer size for the data radio bearer").value_or(0);
+                s.highest_delivered = sn("Highest successfully delivered NR PDCP Sequence Number");
+                s.highest_transmitted = sn("Highest transmitted NR PDCP Sequence Number");
+                s.polling_nru_sn = sn("NR-U Sequence Number of Polling Frame");
+                s.final_frame = ((f->flags[0] >> 1) & 1U) != 0;
+                d.ddds = s;
+            } else if (auto sn = f->value("NR-U Sequence Number")) {
                 d.nru_sn = static_cast<std::uint32_t>(*sn);
+                d.report_polling = (f->flags[0] & 1U) != 0;
             }
         }
     }

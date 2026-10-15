@@ -1076,6 +1076,8 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             r.set("UL_SDUS", static_cast<std::int64_t>(aio.du().stats().ul_sdus));
             r.set("DL_SDUS", static_cast<std::int64_t>(aio.du().stats().dl_sdus));
             r.set("WRONG_PPID", static_cast<std::int64_t>(aio.du().stats().wrong_ppid));
+            r.set("DDDS_TX", static_cast<std::int64_t>(aio.du().stats().ddds_tx));
+            r.set("SI_TX", static_cast<std::int64_t>(aio.du().stats().si_tx));
             return r;
         });
         return s ? *s : unsound();
@@ -1091,6 +1093,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             r.set("DL_PACKETS", static_cast<std::int64_t>(aio.cuup().stats().dl_packets));
             r.set("UL_PACKETS", static_cast<std::int64_t>(aio.cuup().stats().ul_packets));
             r.set("DROPPED", static_cast<std::int64_t>(aio.cuup().stats().dropped));
+            r.set("DDDS_RX", static_cast<std::int64_t>(aio.cuup().stats().ddds_rx));
             return r;
         });
         return s ? *s : unsound();

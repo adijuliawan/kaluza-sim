@@ -79,6 +79,9 @@ struct CuCpConfig {
     std::vector<std::uint8_t> nea_preference{2, 1, 0};
     std::vector<std::uint8_t> nia_preference{2, 1};
     bool allow_null = false;            // D1: NIA0/NEA0 only as the bisect switch
+    // The UE Inactivity Timer E1 Bearer Context Setup gives the CU-UP with
+    // ActivityNotificationLevel "ue" (P2 Q4, KS-E1AP-D1; Q5 acts on its report).
+    std::uint16_t ue_inactivity_s = 120;
     std::string paging_drx = "v128";
 };
 
@@ -123,6 +126,10 @@ public:
     /// UE CONTEXT RELEASE REQUEST with a radio network cause ("user-inactivity").
     /// Errc::invalid_argument for a UE the AMF does not know yet.
     Result<void> request_release(std::uint32_t ran_ue, const std::string& cause = "user-inactivity");
+    /// The gNB-CU-initiated cell (de)activation (TS 38.473 8.2.5; P2 Q4): a GNB-CU
+    /// CONFIGURATION UPDATE to the DU; its answer comes as ran.f1.cu_config_update.
+    /// Errc::closed without F1.
+    Result<void> cu_configuration_update(std::vector<f1ap::NrCgi> activate, std::vector<f1ap::NrCgi> deactivate);
     /// The AMF Name of the last NG SETUP RESPONSE, "" before one.
     const std::string& amf_name() const noexcept { return amf_name_; }
 
@@ -243,6 +250,7 @@ private:
     ngap::NrCgi nr_cgi() const;
     ngap::Tai tai() const;
     std::uint8_t next_tid(Ue& ue);
+    std::uint8_t f1_transaction_ = 0;   // P2 Q4: gNB-CU-initiated F1 procedures
 
     Executor& ex_;
     IEventSink& events_;
