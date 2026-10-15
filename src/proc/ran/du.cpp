@@ -106,6 +106,10 @@ air::Frame Du::frame(air::FrameType t, std::uint32_t radio_id) const {
 
 void Du::on_f1_event(LinkEvent e) {
     if (e == LinkEvent::up || e == LinkEvent::restart) {
+        if (KSIM_MUTANT("f1_no_reassociation") && f1_ups_ > 0) {
+            return;   // the mutant: no F1 Setup on a new association (row ksim-p2.f1-reassociation)
+        }
+        ++f1_ups_;
         f1_setup();
         return;
     }

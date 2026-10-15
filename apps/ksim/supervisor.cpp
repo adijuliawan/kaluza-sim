@@ -1,0 +1,654 @@
+// SPDX-FileCopyrightText: 2026 Adi Juliawan
+// SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+
+#include "supervisor.hpp"
+
+#include <fcntl.h>
+#include <signal.h>
+#include <spawn.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <httplib.h>
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <csignal>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <thread>
+#include <vector>
+
+#include "api/http.hpp"
+#include "api/reply.hpp"
+#include "api/wait.hpp"
+#include "node/aio/run_dir.hpp"
+#include "node/aio/topology.hpp"
+#include "platform/clock.hpp"
+#include "platform/event.hpp"
+#include "platform/log.hpp"
+
+extern char** environ;   // NOLINT: posix_spawn passes our environment on
+
+namespace ksim::app {
+
+namespace {
+
+using api::Exit;
+using api::json;
+using api::Reply;
+using api::Request;
+
+constexpr std::chrono::milliseconds kMaxWait{600'000};
+
+std::string encode(const std::string& s) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string out;
+    for (const char c : s) {
+        const auto ch = static_cast<unsigned char>(c);
+        if (std::isalnum(ch) != 0 || ch == '-' || ch == '_' || ch == '.' || ch == '~' || ch == ':') {
+            out += static_cast<char>(ch);
+        } else {
+            out += '%';
+            out += hex[ch >> 4];
+            out += hex[ch & 0xF];
+        }
+    }
+    return out;
+}
+
+std::string self_exe() {
+    std::array<char, 4096> buf{};
+    const ssize_t n = ::readlink("/proc/self/exe", buf.data(), buf.size() - 1);
+    return n > 0 ? std::string(buf.data(), static_cast<std::size_t>(n)) : std::string("ksim");
+}
+
+std::uint64_t number(const std::string& v, std::uint64_t fallback) {
+    try {
+        return v.empty() ? fallback : std::stoull(v);
+    } catch (const std::exception&) {
+        return fallback;
+    }
+}
+
+struct Child {
+    Child(std::string r, const std::string& run)
+        : role(std::move(r)), dir(run + "/" + role), ctl(dir + "/ctl.sock"), pid(-1), generation(0), expected_exit(false) {}
+
+    std::string role;
+    std::string dir;
+    std::string ctl;
+    std::atomic<pid_t> pid;
+    std::atomic<std::uint64_t> generation;   // a new process each time it is (re)started
+    std::atomic<bool> expected_exit;         // a stop or a restart we asked for
+};
+
+class Supervisor {
+public:
+    Supervisor(const node::Topology& t, std::string topology_file, std::string run, RoleArgs a)
+        : t_(t), topology_file_(std::move(topology_file)), run_(std::move(run)), args_(std::move(a)),
+          events_(1U << 16, clock_) {
+        // EventRing's constructor (platform/event.cpp) sets every field; the analyzer does not see into it.
+        for (const char* r : {"cucp", "cuup", "du", "ue"}) {   // NOLINT(clang-analyzer-optin.cplusplus.UninitializedObject)
+            children_.push_back(std::make_unique<Child>(r, run_));
+        }
+    }
+    ~Supervisor() {
+        try {
+            shutdown();
+        } catch (const std::exception& e) {
+            std::fputs("ksim: the supervisor's shutdown failed\n", stderr);
+        }
+    }
+    Supervisor(const Supervisor&) = delete;
+    Supervisor& operator=(const Supervisor&) = delete;
+
+    Child& child(const std::string& role) {
+        for (auto& c : children_) {
+            if (c->role == role) {
+                return *c;
+            }
+        }
+        return *children_.front();
+    }
+
+    bool start(std::string& why) {
+        auto ef = node::EventFile::open(run_ + "/events.ndjson");
+        if (!ef) {
+            why = ef.error().what;
+            return false;
+        }
+        event_file_ = std::move(*ef);
+        events_.on_emit([f = event_file_.get()](const Event& e) { f->write(e); });
+        for (auto& c : children_) {
+            if (!spawn(*c, why)) {
+                return false;
+            }
+            relays_.emplace_back([this, p = c.get()] { relay(*p); });
+        }
+        link_captures();
+        reaping_ = true;
+        reaper_ = std::thread([this] { reap(); });
+        return true;
+    }
+
+    void bind(api::Server& server, std::atomic<bool>& stop);
+    void shutdown();
+    std::string manifest_roles() const {
+        json r = json::object();
+        for (const auto& c : children_) {
+            r[c->role] = {{"pid", static_cast<std::int64_t>(c->pid.load())}, {"dir", c->dir}};
+        }
+        return r.dump();
+    }
+
+private:
+    bool spawn(Child& c, std::string& why);
+    void stop_child(Child& c);
+    void relay(Child& c);
+    void reap();
+    void link_captures();
+    Reply call(const Child& c, const std::string& method, const std::string& path, const json& body = json()) const;
+    Reply forward(const Child& c, const Request& r) const;
+    void restart_gnb();
+
+    const node::Topology& t_;
+    std::string topology_file_;
+    std::string run_;
+    RoleArgs args_;
+    MonotonicClock clock_;
+    EventRing events_;
+    std::unique_ptr<node::EventFile> event_file_;
+    std::vector<std::unique_ptr<Child>> children_;
+    std::vector<std::thread> relays_;
+    std::thread reaper_;
+    std::thread restarter_;
+    std::mutex restart_mu_;
+    std::atomic<bool> stopping_{false};
+    std::atomic<bool> restarting_{false};
+    std::atomic<bool> reaping_{false};
+    std::atomic<std::uint64_t> torn_lines_{0};
+};
+
+bool Supervisor::spawn(Child& c, std::string& why) {
+    // The role makes its own run directory (it must be new or empty); its output goes beside it.
+    // A restart keeps what the role's last process wrote as <role>.<n>/ (the evidence before it).
+    std::error_code ec;
+    if (std::filesystem::exists(c.dir)) {
+        std::filesystem::rename(c.dir, c.dir + "." + std::to_string(c.generation.load()), ec);
+        std::filesystem::rename(run_ + "/" + c.role + ".out", c.dir + "." + std::to_string(c.generation.load()) + ".out", ec);
+    }
+    std::vector<std::string> argv{self_exe(), "run", "-c", topology_file_, "--run-dir", c.dir, "--role", c.role,
+                                  "--kair", run_ + "/kair.sock"};
+    if (args_.lab) {
+        argv.emplace_back("--lab");
+    }
+    if (args_.plain_nas) {
+        argv.emplace_back("--plain-nas");
+    }
+    if (!args_.sealed.empty()) {
+        argv.insert(argv.end(), {"--sealed", args_.sealed});
+    }
+    if (!args_.kek.empty()) {
+        argv.insert(argv.end(), {"--kek", args_.kek});
+    }
+    const std::string out = run_ + "/" + c.role + ".out";
+    const int fd = ::open(out.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
+        why = "cannot create " + out;
+        return false;
+    }
+    posix_spawn_file_actions_t fa;
+    posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, fd, 1);
+    posix_spawn_file_actions_adddup2(&fa, fd, 2);
+    std::vector<char*> args;
+    args.reserve(argv.size() + 1);
+    for (auto& a : argv) {
+        args.push_back(a.data());
+    }
+    args.push_back(nullptr);
+    pid_t pid = -1;
+    const int rc = posix_spawn(&pid, args[0], &fa, nullptr, args.data(), environ);
+    posix_spawn_file_actions_destroy(&fa);
+    ::close(fd);
+    if (rc != 0) {
+        why = "cannot start the " + c.role + " role";
+        return false;
+    }
+    c.pid = pid;
+    c.expected_exit = false;
+    ++c.generation;
+    // Ready when it prints CTL= (its links listen or are being dialled by then).
+    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (std::chrono::steady_clock::now() < end) {
+        std::ifstream in(out);
+        std::stringstream ss;
+        ss << in.rdbuf();
+        if (ss.str().find("\nCTL=") != std::string::npos || ss.str().rfind("CTL=", 0) == 0) {
+            events_.emit("run.role.start", "run:" + c.role, {{"role", c.role}, {"pid", std::to_string(pid)}});
+            return true;
+        }
+        // Before the reaper runs this thread reaps; after, the reaper does and says so in c.pid.
+        int status = 0;
+        if ((!reaping_.load() && ::waitpid(pid, &status, WNOHANG) == pid) || c.pid.load() <= 0) {
+            c.pid = -1;
+            why = "the " + c.role + " role exited at start: " + ss.str();
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    why = "the " + c.role + " role did not come up";
+    return false;
+}
+
+void Supervisor::stop_child(Child& c) {
+    const pid_t pid = c.pid.load();
+    if (pid <= 0) {
+        return;
+    }
+    c.expected_exit = true;
+    (void)call(c, "POST", "/v1/stop");
+    for (int i = 0; i < 100; ++i) {   // 10 s for a graceful stop
+        if (c.pid.load() <= 0) {
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    ::kill(pid, SIGTERM);
+    for (int i = 0; i < 50 && c.pid.load() > 0; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    if (c.pid.load() > 0) {
+        ::kill(pid, SIGKILL);
+    }
+}
+
+void Supervisor::reap() {
+    while (!stopping_.load() || std::any_of(children_.begin(), children_.end(), [](const auto& c) { return c->pid.load() > 0; })) {
+        int status = 0;
+        const pid_t pid = ::waitpid(-1, &status, WNOHANG);
+        if (pid > 0) {
+            for (auto& c : children_) {
+                if (c->pid.load() == pid) {
+                    c->pid = -1;
+                    if (!c->expected_exit.load()) {
+                        const std::string how = WIFEXITED(status) ? "exit " + std::to_string(WEXITSTATUS(status))
+                                                                  : "signal " + std::to_string(WTERMSIG(status));
+                        events_.emit("run.role.exit", "run:" + c->role, {{"role", c->role}, {"status", how}});
+                        log::warn("ksim", "the {} role ended on its own ({})", c->role, how);
+                    }
+                }
+            }
+            continue;
+        }
+        if (pid < 0 && stopping_.load()) {
+            return;   // no children left
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
+void Supervisor::relay(Child& c) {
+    std::uint64_t since = 0;
+    std::uint64_t gen = c.generation.load();
+    while (!stopping_.load()) {
+        if (c.generation.load() != gen) {
+            gen = c.generation.load();
+            since = 0;   // a new process numbers its events from 1
+        }
+        if (c.pid.load() <= 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            continue;
+        }
+        httplib::Client cli(api::socket_target(c.ctl));
+        cli.set_address_family(AF_UNIX);
+        cli.set_connection_timeout(std::chrono::seconds(2));
+        cli.set_read_timeout(std::chrono::seconds(5));   // a quiet role: reconnect and go on after `since`
+        std::string buf;
+        (void)cli.Get("/v1/events?follow=1&since=" + std::to_string(since), [&](const char* data, std::size_t n) {
+            buf.append(data, n);
+            for (std::size_t nl = buf.find('\n'); nl != std::string::npos; nl = buf.find('\n')) {
+                const std::string line = buf.substr(0, nl);
+                buf.erase(0, nl + 1);
+                try {
+                    const json j = json::parse(line);
+                    Event e;
+                    e.time_ms = j.value("t_ms", Millis{0});
+                    e.wall_ns = j.value("wall_ns", std::int64_t{0});
+                    e.name = j.value("event", std::string());
+                    e.subject = j.value("subject", std::string());
+                    if (j.contains("fields") && j.at("fields").is_object()) {
+                        for (const auto& [k, v] : j.at("fields").items()) {
+                            e.fields.push_back(EventField{k, v.is_string() ? v.get<std::string>() : v.dump()});
+                        }
+                    }
+                    since = j.value("seq", since);
+                    events_.relay(std::move(e));
+                } catch (const std::exception&) {
+                    ++torn_lines_;   // a torn line from a dying role; the next connection starts after `since`
+                }
+            }
+            return !stopping_.load() && c.generation.load() == gen;
+        });
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+}
+
+void Supervisor::link_captures() {
+    const std::pair<const char*, const char*> links[] = {{"ngap.pcapng", "cucp"}, {"f1ap.pcapng", "cucp"},
+                                                         {"e1ap.pcapng", "cucp"}, {"gtpu.pcapng", "cuup"},
+                                                         {"uu.pcapng", "ue"},     {"sim.pcapng", "ue"}};
+    for (const auto& [file, role] : links) {
+        std::error_code ec;
+        std::filesystem::create_symlink(std::string(role) + "/" + file, run_ + "/" + file, ec);
+    }
+}
+
+Reply Supervisor::call(const Child& c, const std::string& method, const std::string& path, const json& body) const {
+    httplib::Client cli(api::socket_target(c.ctl));
+    cli.set_address_family(AF_UNIX);
+    cli.set_connection_timeout(std::chrono::seconds(5));
+    cli.set_read_timeout(kMaxWait + std::chrono::seconds(10));
+    auto res = method == "GET" ? cli.Get(path) : cli.Post(path, body.is_null() ? "{}" : body.dump(), "application/json");
+    if (!res) {
+        return Reply::fail(Exit::abort, "the " + c.role + " role does not answer");
+    }
+    auto r = Reply::parse(res->body);
+    return r ? *r : Reply::fail(Exit::internal, "the " + c.role + " role's answer is not a control API reply");
+}
+
+Reply Supervisor::forward(const Child& c, const Request& r) const {
+    std::string path = r.path;
+    char sep = '?';
+    for (const auto& [k, v] : r.query) {
+        path += sep;
+        path += encode(k) + "=" + encode(v);
+        sep = '&';
+    }
+    return call(c, r.method, path, r.body);
+}
+
+void Supervisor::restart_gnb() {
+    // ksim-ctl gnb restart in split mode: the gNB's processes stop and start again
+    // (row amf-ueransim.032). The UEs find out on the air, the core from a new association.
+    const std::lock_guard<std::mutex> lock(restart_mu_);
+    restarting_ = true;
+    events_.emit("ran.gnb.restart", "gnb:" + t_.gnb_name, {{"mode", "split"}});
+    for (const char* r : {"du", "cuup", "cucp"}) {
+        stop_child(child(r));
+    }
+    std::string why;
+    for (const char* r : {"cucp", "cuup", "du"}) {
+        if (!spawn(child(r), why)) {
+            log::warn("ksim", "gNB restart: {}", why);
+            events_.emit("run.role.exit", "run:" + std::string(r), {{"role", r}, {"status", "restart failed"}});
+            break;
+        }
+    }
+    restarting_ = false;
+}
+
+void Supervisor::shutdown() {
+    if (stopping_.exchange(true)) {
+        return;
+    }
+    if (restarter_.joinable()) {
+        restarter_.join();
+    }
+    for (const char* r : {"ue", "du", "cuup", "cucp"}) {
+        stop_child(child(r));
+    }
+    for (auto& t : relays_) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+    if (reaper_.joinable()) {
+        reaper_.join();
+    }
+}
+
+void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
+    Child& ue = child("ue");
+    Child& cucp = child("cucp");
+    Child& du = child("du");
+    Child& cuup = child("cuup");
+    auto to = [this, &server](const char* method, const std::string& pattern, Child& c) {
+        auto h = [this, &c](const Request& r) { return forward(c, r); };
+        if (std::string(method) == "GET") {
+            server.get(pattern, h);
+        } else {
+            server.post(pattern, h);
+        }
+    };
+    // The UE farm's verbs.
+    to("GET", "/v1/ues", ue);
+    to("GET", "/v1/capabilities", ue);
+    for (const char* p : {"status", "sim", "sim-read", "sms", "ps", "ifaces"}) {
+        to("GET", std::string("/v1/ue/:sel/") + p, ue);
+    }
+    for (const char* p : {"power", "sim", "sim-trace", "airplane", "sms-send", "sms-memory", "service-request",
+                          "register", "deregister", "ps-establish", "ps-release", "ping", "exec"}) {
+        to("POST", std::string("/v1/ue/:sel/") + p, ue);
+    }
+    // The gNB's.
+    to("GET", "/v1/version", cucp);
+    to("GET", "/v1/gnb/:name/ue-list", cucp);
+    to("GET", "/v1/gnb/:name/amf-list", cucp);
+    to("GET", "/v1/du/:name/ue-list", du);
+    to("GET", "/v1/cuup/:name/bearers", cuup);
+    server.get("/v1/faults", [](const Request&) {
+        Reply r;
+        r.set("FAULTS", "0");   // fault injection is P3
+        return r;
+    });
+    server.get("/v1/nodes", [this](const Request&) {
+        Reply r;
+        r.set("NODES", static_cast<std::int64_t>(children_.size()));
+        int n = 0;
+        for (const auto& c : children_) {
+            const std::string k = "NODE." + std::to_string(++n);
+            r.set(k + ".NAME", c->role == "ue" ? std::string("ue-farm") : t_.gnb_name + (c->role == "cucp" ? "" : "-" + c->role));
+            r.set(k + ".ROLE", c->role);
+            r.set(k + ".PID", static_cast<std::int64_t>(c->pid.load()));
+            r.set(k + ".UP", c->pid.load() > 0 ? "1" : "0");
+        }
+        return r;
+    });
+    server.get("/v1/info", [this, &ue, &cucp, &du](const Request&) {
+        const Reply a = call(cucp, "GET", "/v1/info");
+        const Reply b = call(du, "GET", "/v1/info");
+        const Reply c = call(ue, "GET", "/v1/info");
+        Reply r;
+        r.set("ROLE", "split");
+        auto copy = [&r](const Reply& from, const char* key) {
+            if (from.kv.contains(key)) {
+                r.kv[key] = from.kv.at(key);
+            }
+        };
+        for (const char* k : {"NG_UP", "NG_SETUP", "F1_SETUP", "RAN_UES"}) {
+            copy(a, k);
+        }
+        for (const char* k : {"CELL_ACTIVE", "KAIR_FRAMES", "KAIR_ERRORS"}) {
+            copy(b, k);
+        }
+        copy(c, "UES");
+        std::int64_t lag = 0;
+        for (const Reply* x : {&a, &b, &c}) {
+            if (x->kv.contains("LOOP_LAG_MAX_MS")) {
+                lag = std::max<std::int64_t>(lag, std::stoll(x->kv.at("LOOP_LAG_MAX_MS").get<std::string>()));
+            }
+        }
+        r.set("GNB", t_.gnb_name);
+        r.set("PLMN", t_.mcc + t_.mnc);
+        r.set("AMF", t_.amf.to_string());
+        r.set("RUN_DIR", run_);
+        r.set("EVENT_SEQ", static_cast<std::int64_t>(events_.last_seq()));
+        r.set("LOOP_LAG_MAX_MS", lag);
+        return r;
+    });
+    server.get("/v1/wait", [this, &ue](const Request& req) {
+        api::WaitQuery q;
+        q.until = api::split_names(req.arg("event"));
+        q.fail = api::split_names(req.arg("fail"));
+        if (q.until.empty()) {
+            return Reply::fail(Exit::usage, "wait needs an event name");
+        }
+        if (const std::string sel = req.arg("ue"); !sel.empty()) {
+            const Reply st = call(ue, "GET", "/v1/ue/" + encode(sel) + "/status");
+            if (st.exit != Exit::ok || !st.kv.contains("UE")) {
+                return Reply::fail(Exit::unknown, "no such UE");
+            }
+            q.subject = "ue:" + st.kv.at("UE").get<std::string>();
+        } else {
+            q.subject = req.arg("subject");
+        }
+        for (auto [it, end] = req.query.equal_range("where"); it != end; ++it) {
+            const auto eq = it->second.find('=');
+            if (eq == std::string::npos) {
+                return Reply::fail(Exit::usage, "where is key=value");
+            }
+            q.where.emplace_back(it->second.substr(0, eq), it->second.substr(eq + 1));
+        }
+        q.since = req.arg("new") == "1" ? events_.last_seq() : number(req.arg("since"), 0);
+        q.timeout = std::min(std::chrono::milliseconds(number(req.arg("timeout_ms"), 30'000)), kMaxWait);
+        return api::wait(events_, q);
+    });
+    server.stream("/v1/events", [this, &stop](const Request& req, const api::Server::Write& write) {
+        std::uint64_t since = number(req.arg("since"), 0);
+        const std::string subject = req.arg("subject");
+        const std::string prefix = req.arg("filter");
+        const bool follow = req.arg("follow") == "1";
+        for (;;) {
+            for (const auto& e : events_.since(since, 1024)) {
+                since = e.seq;
+                if ((subject.empty() || e.subject == subject) && (prefix.empty() || e.name.rfind(prefix, 0) == 0) &&
+                    !write(to_ndjson(e) + "\n")) {
+                    return;
+                }
+            }
+            if (!follow || stop.load()) {
+                return;
+            }
+            (void)events_.wait(since, [](const Event&) { return true; }, std::chrono::milliseconds(1000));
+        }
+    });
+    server.post("/v1/gnb/:name/ue-release", [this, &ue, &cucp](const Request& req) {
+        if (req.params.at("name") != t_.gnb_name) {
+            return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        // The UE by its farm selector, found at the CU-CP by its C-RNTI, as in one process.
+        Reply st = call(ue, "GET", "/v1/ue/" + encode(req.arg("ue")) + "/status");
+        if (st.exit != Exit::ok) {
+            return st;
+        }
+        const std::string crnti = st.kv.contains("C_RNTI") ? st.kv.at("C_RNTI").get<std::string>() : std::string();
+        if (crnti.empty() || crnti == "-") {
+            return Reply::fail(Exit::wrong_state, "the UE has no RRC connection at this gNB");
+        }
+        json body = {{"c_rnti", crnti}, {"cause", req.arg("cause", "user-inactivity")},
+                     {"ue_label", st.kv.contains("UE") ? st.kv.at("UE").get<std::string>() : std::string()}};
+        return call(cucp, "POST", "/v1/gnb/" + encode(t_.gnb_name) + "/ue-release", body);
+    });
+    server.post("/v1/gnb/:name/restart", [this](const Request& req) {
+        if (req.params.at("name") != t_.gnb_name) {
+            return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        if (restarting_.load()) {
+            return Reply::fail(Exit::wrong_state, "the gNB is restarting");
+        }
+        const std::uint64_t since = events_.last_seq();
+        if (restarter_.joinable()) {
+            restarter_.join();
+        }
+        restarter_ = std::thread([this] { restart_gnb(); });
+        Reply out;
+        out.set("RESULT", "STARTED");
+        out.set("EVENT_SEQ", static_cast<std::int64_t>(since));
+        return out;
+    });
+    // P2 Q3: one role's process alone stops and starts again (rows ksim-p2.f1-reassociation and
+    // ksim-p2.f1-loss-release): the others see their association go and come back.
+    for (const char* role : {"cucp", "du", "cuup"}) {
+        const std::string name = t_.gnb_name + (std::string(role) == "cucp" ? "" : std::string("-") + role);
+        server.post(std::string("/v1/") + role + "/:name/restart", [this, role, name](const Request& req) {
+            if (req.params.at("name") != name) {
+                return Reply::fail(Exit::unknown, "no such node");
+            }
+            if (restarting_.load()) {
+                return Reply::fail(Exit::wrong_state, "the gNB is restarting");
+            }
+            const std::uint64_t since = events_.last_seq();
+            if (restarter_.joinable()) {
+                restarter_.join();
+            }
+            restarter_ = std::thread([this, role] {
+                const std::lock_guard<std::mutex> lock(restart_mu_);
+                restarting_ = true;
+                Child& c = child(role);
+                stop_child(c);
+                std::string why;
+                if (!spawn(c, why)) {
+                    events_.emit("run.role.exit", "run:" + c.role, {{"role", c.role}, {"status", "restart failed"}});
+                }
+                restarting_ = false;
+            });
+            Reply out;
+            out.set("RESULT", "STARTED");
+            out.set("EVENT_SEQ", static_cast<std::int64_t>(since));
+            return out;
+        });
+    }
+    server.post("/v1/stop", [&stop](const Request&) {
+        stop.store(true);
+        Reply r;
+        r.set("STOPPING", "1");
+        return r;
+    });
+}
+
+} // namespace
+
+int supervise(const node::Topology& t, const std::string& topology_file, const std::string& run_dir, const RoleArgs& a,
+              const volatile std::sig_atomic_t& signal) {
+    Supervisor s(t, topology_file, run_dir, a);
+    std::string why;
+    json m = {{"run", std::filesystem::path(run_dir).filename().string()}, {"mode", "split"}, {"status", "starting"}};
+    if (!s.start(why)) {
+        std::cerr << "ksim: " << why << "\n";
+        m["status"] = "failed";
+        m["error"] = why;
+        (void)node::write_file(run_dir + "/manifest.json", m.dump(2) + "\n");
+        return 1;
+    }
+    std::atomic<bool> stop{false};
+    api::Server server;
+    s.bind(server, stop);
+    const std::string ctl = run_dir + "/ctl.sock";
+    if (auto r = server.listen_unix(ctl); !r) {
+        std::cerr << "ksim: " << ctl << ": " << r.error().what << "\n";
+        return 1;
+    }
+    m["status"] = "running";
+    m["roles"] = json::parse(s.manifest_roles());
+    (void)node::write_file(run_dir + "/manifest.json", m.dump(2) + "\n");
+    std::cout << "RUN_DIR=" << run_dir << "\nCTL=" << ctl << "\n" << std::flush;
+    while (signal == 0 && !stop.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    server.stop();
+    s.shutdown();
+    m["status"] = "stopped";
+    (void)node::write_file(run_dir + "/manifest.json", m.dump(2) + "\n");
+    return 0;
+}
+
+} // namespace ksim::app

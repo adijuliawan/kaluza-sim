@@ -24,6 +24,7 @@
 
 #include "api/wait.hpp"
 #include "proc/ran/cucp.hpp"
+#include "proc/ran/cuup.hpp"
 #include "proc/ran/du.hpp"
 
 namespace ksim::node {
@@ -346,15 +347,22 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         return r;
     });
     server.get("/v1/info", [&aio, &t](const Request&) {
-        auto s = aio.call<Reply>([&aio] {
+        auto s = aio.call<Reply>([&aio, &t] {
+            // P2 Q3: a role process answers for what it hosts.
             Reply r;
-            r.set("ROLE", "aio");
-            r.set("NG_UP", aio.ng_up() ? "1" : "0");
-            r.set("NG_SETUP", aio.cucp().ng_ready() ? "1" : "0");
-            r.set("F1_SETUP", aio.cucp().f1_ready() ? "1" : "0");
-            r.set("CELL_ACTIVE", aio.du().cell_active() ? "1" : "0");
-            r.set("UES", static_cast<std::int64_t>(aio.ues().size()));
-            r.set("RAN_UES", static_cast<std::int64_t>(aio.cucp().ues()));
+            r.set("ROLE", t.role == Role::all ? "aio" : role_name(t.role));
+            if (aio.hosts_cucp()) {
+                r.set("NG_UP", aio.ng_up() ? "1" : "0");
+                r.set("NG_SETUP", aio.cucp().ng_ready() ? "1" : "0");
+                r.set("F1_SETUP", aio.cucp().f1_ready() ? "1" : "0");
+                r.set("RAN_UES", static_cast<std::int64_t>(aio.cucp().ues()));
+            }
+            if (aio.hosts_du()) {
+                r.set("CELL_ACTIVE", aio.du().cell_active() ? "1" : "0");
+            }
+            if (aio.hosts_ues()) {
+                r.set("UES", static_cast<std::int64_t>(aio.ues().size()));
+            }
             r.set("KAIR_FRAMES", static_cast<std::int64_t>(aio.stats().kair_frames));
             r.set("KAIR_ERRORS", static_cast<std::int64_t>(aio.stats().kair_errors));
             return r;
@@ -373,6 +381,12 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
     });
     server.get("/v1/nodes", [&t](const Request&) {
         Reply r;
+        if (t.role != Role::all) {
+            r.set("NODES", "1");
+            r.set("NODE.1.NAME", t.role == Role::ue ? std::string("ue-farm") : t.gnb_name + (t.role == Role::cucp ? "" : std::string("-") + role_name(t.role)));
+            r.set("NODE.1.ROLE", role_name(t.role));
+            return r;
+        }
         r.set("NODES", "2");
         r.set("NODE.1.NAME", t.gnb_name);
         r.set("NODE.1.ROLE", "cucp");
@@ -930,13 +944,20 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         }
     });
     server.get("/v1/gnb/:name/ue-list", [&aio, &t](const Request& req) {
-        if (req.params.at("name") != t.gnb_name) {
+        if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
             return Reply::fail(Exit::unknown, "no such gNB");
         }
         auto s = aio.call<Reply>([&aio] {
             Reply r;
             const auto list = aio.cucp().ue_list();
             r.set("UES", static_cast<std::int64_t>(list.size()));
+            // P2 Q2: the streams the DU's UE-associated F1AP came on (TS 38.472 §7).
+            std::string streams;
+            for (std::uint16_t st : aio.cucp().f1_ue_streams()) {
+                streams += (streams.empty() ? "" : ",") + std::to_string(st);
+            }
+            r.set("F1_UE_STREAMS", streams.empty() ? "-" : streams);
+            r.set("F1_UE_ON_STREAM0", static_cast<std::int64_t>(aio.cucp().stats().f1_ue_on_stream0));
             int n = 0;
             for (const auto& u : list) {
                 const std::string k = "UE." + std::to_string(++n);
@@ -950,7 +971,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         return s ? *s : unsound();
     });
     server.get("/v1/gnb/:name/amf-list", [&aio, &t](const Request& req) {
-        if (req.params.at("name") != t.gnb_name) {
+        if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
             return Reply::fail(Exit::unknown, "no such gNB");
         }
         auto s = aio.call<Reply>([&aio, &t] {
@@ -965,11 +986,33 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         return s ? *s : unsound();
     });
     server.post("/v1/gnb/:name/ue-release", [&aio, &t](const Request& req) {
-        if (req.params.at("name") != t.gnb_name) {
+        if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
             return Reply::fail(Exit::unknown, "no such gNB");
         }
         const std::string sel = req.arg("ue");
         const std::string cause = req.arg("cause", "user-inactivity");
+        if (!aio.hosts_ues()) {
+            // P2 Q3: in a split run the supervisor found the UE's C-RNTI at the farm.
+            const std::string crnti = req.arg("c_rnti");
+            const std::string label = req.arg("ue_label");
+            auto s = aio.call<Reply>([&aio, crnti, cause, label] {
+                for (const auto& u : aio.cucp().ue_list()) {
+                    if (!crnti.empty() && fmt::format("0x{:04x}", u.c_rnti) == crnti) {
+                        if (auto r = aio.cucp().request_release(u.ran_ue, cause); !r) {
+                            return Reply::fail(Exit::wrong_state, r.error().what);
+                        }
+                        Reply out;
+                        out.set("UE", label);
+                        out.set("RAN_UE_NGAP_ID", static_cast<std::int64_t>(u.ran_ue));
+                        out.set("CAUSE", cause);
+                        out.set("RESULT", "STARTED");
+                        return out;
+                    }
+                }
+                return Reply::fail(Exit::wrong_state, "the UE has no RRC connection at this gNB");
+            });
+            return s ? *s : unsound();
+        }
         auto s = aio.call<Reply>([&aio, sel, cause] {
             // The UE by its farm selector, found at the CU-CP by its C-RNTI.
             UeDevice* ue = aio.ue(sel);
@@ -1000,8 +1043,11 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         return s ? *s : unsound();
     });
     server.post("/v1/gnb/:name/restart", [&aio, &t](const Request& req) {
-        if (req.params.at("name") != t.gnb_name) {
+        if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
             return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        if (t.role != Role::all) {
+            return Reply::fail(Exit::wrong_state, "a split run's gNB is restarted by its supervisor");
         }
         const std::uint64_t since = aio.events().last_seq();
         auto s = aio.call<Reply>([&aio] {
@@ -1018,6 +1064,36 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         Reply r = *s;
         r.set("EVENT_SEQ", static_cast<std::int64_t>(since));
         return r;
+    });
+    server.get("/v1/du/:name/ue-list", [&aio, &t](const Request& req) {
+        if (req.params.at("name") != t.gnb_name + "-du" || !aio.hosts_du()) {
+            return Reply::fail(Exit::unknown, "no such DU");
+        }
+        auto s = aio.call<Reply>([&aio] {
+            Reply r;
+            r.set("CELL_ACTIVE", aio.du().cell_active() ? "1" : "0");
+            r.set("UES", static_cast<std::int64_t>(aio.du().ues()));
+            r.set("UL_SDUS", static_cast<std::int64_t>(aio.du().stats().ul_sdus));
+            r.set("DL_SDUS", static_cast<std::int64_t>(aio.du().stats().dl_sdus));
+            r.set("WRONG_PPID", static_cast<std::int64_t>(aio.du().stats().wrong_ppid));
+            return r;
+        });
+        return s ? *s : unsound();
+    });
+    server.get("/v1/cuup/:name/bearers", [&aio, &t](const Request& req) {
+        if (req.params.at("name") != t.gnb_name + "-cuup" || !aio.hosts_cuup()) {
+            return Reply::fail(Exit::unknown, "no such CU-UP");
+        }
+        auto s = aio.call<Reply>([&aio] {
+            Reply r;
+            r.set("E1_READY", aio.cuup().e1_ready() ? "1" : "0");
+            r.set("CONTEXTS", static_cast<std::int64_t>(aio.cuup().contexts()));
+            r.set("DL_PACKETS", static_cast<std::int64_t>(aio.cuup().stats().dl_packets));
+            r.set("UL_PACKETS", static_cast<std::int64_t>(aio.cuup().stats().ul_packets));
+            r.set("DROPPED", static_cast<std::int64_t>(aio.cuup().stats().dropped));
+            return r;
+        });
+        return s ? *s : unsound();
     });
     server.post("/v1/stop", [&stop](const Request&) {
         stop.store(true);

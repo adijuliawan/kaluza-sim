@@ -53,6 +53,7 @@ CuCp::CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAsso
     f1_.set_handlers(
         [this](ByteView msg, SctpMeta m) {
             if (ppid_ok(m, kF1apPpid, "f1ap")) {
+                f1_rx_stream_ = m.stream;
                 on_f1(msg);
             }
         },
@@ -170,7 +171,7 @@ void CuCp::on_f1_event(LinkEvent e) {
     // P2 Q2 (row ksim-p2.f1-loss-release): with F1 gone the UEs' radio connections are gone too.
     // A UE the AMF knows is asked to be released (TS 38.413 §8.3.2); the others go at once.
     du_.reset();
-    events_.emit("ran.f1.lost", cfg_.id, {{"event", link_event_name(e)}, {"ues", std::to_string(ues_.size())}});
+    events_.emit("ran.f1.lost", cfg_.id, {{"link", link_event_name(e)}, {"ues", std::to_string(ues_.size())}});
     std::vector<std::uint32_t> local;
     for (auto& [cu, ue] : ues_) {
         if (!ue.amf_ue || KSIM_MUTANT("f1_loss_silent")) {
@@ -211,6 +212,14 @@ void CuCp::on_f1(ByteView msg) {
         ++stats_.f1_errors;
         events_.emit("ran.f1.error", cfg_.id, {{"what", p.error().what}});
         return;
+    }
+    // P2 Q2: which streams the DU's UE-associated messages come on (row ksim-p2.per-ue-stream).
+    if (f1ap::du_ue_of(*p)) {
+        if (f1_rx_stream_ == 0) {
+            ++stats_.f1_ue_on_stream0;
+        } else {
+            f1_ue_streams_.insert(f1_rx_stream_);
+        }
     }
     std::visit(Overload{
                    [this](const f1ap::F1SetupRequest& m) { handle(m); },
@@ -862,7 +871,7 @@ void CuCp::on_e1_event(LinkEvent e) {
     // that had one is asked to be released (TS 38.413 §8.3.2), so the core does not keep sessions
     // that carry nothing.
     e1_ready_ = false;
-    events_.emit("ran.e1.lost", cfg_.id, {{"event", link_event_name(e)}});
+    events_.emit("ran.e1.lost", cfg_.id, {{"link", link_event_name(e)}});
     for (auto& [cu, ue] : ues_) {
         const bool had = ue.cu_up_ue.has_value();
         ue.cu_up_ue.reset();

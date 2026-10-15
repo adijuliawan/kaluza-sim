@@ -18,6 +18,26 @@ bool all_digits(const std::string& s) {
 
 } // namespace
 
+const char* role_name(Role r) noexcept {
+    switch (r) {
+    case Role::cucp: return "cucp";
+    case Role::cuup: return "cuup";
+    case Role::du: return "du";
+    case Role::ue: return "ue";
+    case Role::all: break;
+    }
+    return "all";
+}
+
+std::optional<Role> parse_role(const std::string& s) {
+    for (Role r : {Role::all, Role::cucp, Role::cuup, Role::du, Role::ue}) {
+        if (s == role_name(r)) {
+            return r;
+        }
+    }
+    return std::nullopt;
+}
+
 std::string resolve_path(const std::string& p, const std::string& base_dir) {
     if (p.rfind("~/", 0) == 0) {
         const char* home = std::getenv("HOME");   // NOLINT(concurrency-mt-unsafe): read at start-up only
@@ -32,7 +52,7 @@ std::string resolve_path(const std::string& p, const std::string& base_dir) {
 Result<Topology> load_topology(const std::string& file, std::string& why) {
     try {
         const Yaml y = Yaml::load_file(file);
-        y.only({"plmn", "seed", "amf", "gnbs", "ues", "secrets", "peer", "security", "netd"});
+        y.only({"plmn", "seed", "amf", "gnbs", "ues", "secrets", "peer", "security", "netd", "mode"});
         const std::string base = std::filesystem::path(file).parent_path().string();
         Topology t;
         t.file = file;
@@ -60,7 +80,37 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             gnbs.fail("P1 runs one gNB");
         }
         const Yaml g = gnbs.at(0);
-        g.only({"id", "name", "cucp", "cuup", "dus"});
+        g.only({"id", "name", "cucp", "cuup", "dus", "split"});
+        if (y.has("mode")) {
+            const std::string m = y.at("mode").as<std::string>();
+            if (m != "aio" && m != "split") {
+                y.at("mode").fail("aio or split");
+            }
+            t.mode = m == "split" ? Mode::split : Mode::aio;
+        }
+        if (g.has("split")) {
+            const Yaml sp = g.at("split");
+            sp.only({"f1c", "e1", "du", "cuup", "cuup_e1", "streams"});
+            auto addr = [&sp](const char* key, Endpoint& e) {
+                if (!sp.has(key)) {
+                    return;
+                }
+                auto a = Endpoint::parse(sp.at(key).as<std::string>(), e.port);
+                if (!a || a->family != Endpoint::Family::v4) {
+                    sp.at(key).fail("a numeric IPv4 address");
+                }
+                e = *a;
+            };
+            addr("f1c", t.split.f1c_listen);
+            addr("e1", t.split.e1_listen);
+            addr("du", t.split.du);
+            addr("cuup", t.split.cuup_f1u);
+            addr("cuup_e1", t.split.cuup_e1);
+            t.split.streams = sp.get<std::uint16_t>("streams", t.split.streams);
+            if (t.split.streams < 2) {
+                sp.at("streams").fail("at least 2: stream 0 and one for the UEs");
+            }
+        }
         g.at("id").only({"value", "bits"});
         t.gnb_id = g.at("id").at("value").as<std::uint32_t>();
         t.gnb_id_bits = g.at("id").get<std::uint8_t>("bits", 22);

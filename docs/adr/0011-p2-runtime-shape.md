@@ -10,7 +10,7 @@
 - **Decision:**
   1. **One entry point.** `ksim run -c <topology>` stays the only way to start a run. The topology's `mode: aio | split` picks the shape. In split mode `ksim` is a supervisor:
      - it asks netd for the namespaces (and, on kaluza-uesim, `ksim-mid`);
-     - it starts `ksim-cucp`, `ksim-cuup`, `ksim-du` and `ksim-ue`. Each role asks netd for its own sockets in its namespace, as P1's node does (ADR 0009 point 4), so no role calls `setns`; on the dev PC the roles make their own sockets on 127.0.0.x;
+     - it starts each role as this program with `--role` (`ksim-cucp`, `ksim-cuup`, `ksim-du` and `ksim-ue` are the same program with the role fixed). Each role asks netd for its own sockets in its namespace, as P1's node does (ADR 0009 point 4), so no role calls `setns`; on the dev PC the roles make their own sockets on 127.0.0.x;
      - each role has its own control socket `<run>/<node>.sock`, log and pcaps under `<run>/<node>/`;
      - the supervisor merges every role's events into its own `wait` ring and proxies `/v1/<node>/…`, so `ksim-ctl` and the gates are unchanged;
      - one merged manifest; a role's exit becomes a failure event.

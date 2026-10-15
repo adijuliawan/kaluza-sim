@@ -3,7 +3,8 @@
 //
 // ksim: the all-in-one simulator (P1 N8; architecture §2.1, verification.md §6).
 //
-//   ksim run -c <topology.yaml> [--run-dir D] [--lab] [--tcp PORT]
+//   ksim run -c <topology.yaml> [--run-dir D] [--lab] [--tcp PORT] [--role cucp|cuup|du|ue --kair S]
+//   ksim-cucp|ksim-cuup|ksim-du|ksim-ue run -c <topology.yaml> …   (the role fixed, P2 Q3)
 //   ksim stop [--run-dir D]
 //   ksim --version
 //
@@ -11,6 +12,11 @@
 // events.ndjson, ksim.log, the captures, ctl.sock), starts the gNB and the UE
 // farm, prints RUN_DIR= and CTL= and serves the control API until SIGINT,
 // SIGTERM or `ksim stop`. The UEs stay off until `ksim-ctl ue <sel> power on`.
+//
+// P2 Q3 (ADR 0011): a topology of mode: split makes `ksim run` the supervisor
+// (supervisor.hpp): it starts each role as this program with --role, in
+// <run>/<role>/, and serves the control API for all of them. With --role a
+// process runs that role alone; --kair is the DU's KAIR socket.
 
 #include <ksim/build_info.hpp>
 
@@ -39,6 +45,7 @@
 #include "node/aio/run_dir.hpp"
 #include "node/aio/topology.hpp"
 #include "platform/log.hpp"
+#include "supervisor.hpp"
 
 namespace {
 
@@ -103,6 +110,8 @@ struct Overrides {
     std::string sealed;
     std::string kek;
     bool plain_nas = false;
+    std::string role;    // P2 Q3: one role of a split run
+    std::string kair;    // P2 Q3: the DU's KAIR socket
 };
 
 int run(const std::string& topology_file, std::string run_dir, bool lab, int tcp_port, const Overrides& o) {
@@ -119,6 +128,15 @@ int run(const std::string& topology_file, std::string run_dir, bool lab, int tcp
         topo->kek_file = std::filesystem::absolute(o.kek).string();
     }
     topo->plain_nas = o.plain_nas;
+    if (!o.role.empty()) {
+        auto r = ksim::node::parse_role(o.role);
+        if (!r || topo->mode != ksim::node::Mode::split || o.kair.empty()) {
+            std::cerr << "ksim: --role is cucp, cuup, du or ue, of a mode: split topology, with --kair\n";
+            return 2;
+        }
+        topo->role = *r;
+        topo->kair_socket = o.kair;
+    }
     ksim::node::GuardInput guard;
     guard.addresses = {topo->amf, topo->ng_bind};
     guard.lab = lab;
@@ -153,7 +171,22 @@ int run(const std::string& topology_file, std::string run_dir, bool lab, int tcp
             std::fflush(log);
         });
     }
+    if (topo->mode == ksim::node::Mode::split && topo->role == ksim::node::Role::all) {
+        // The supervisor of a split run (P2 Q3).
+        ksim::app::RoleArgs ra;
+        ra.lab = lab;
+        ra.plain_nas = o.plain_nas;
+        ra.sealed = topo->sealed_dir;
+        ra.kek = topo->kek_file;
+        const int rc = ksim::app::supervise(*topo, std::filesystem::absolute(topology_file).string(), run_dir, ra, g_signal);
+        ksim::log::set_sink({});
+        if (log != nullptr) {
+            std::fclose(log);
+        }
+        return rc;
+    }
     json m = manifest(*topo, run_dir, lab);
+    m["role"] = ksim::node::role_name(topo->role);
     (void)ksim::node::write_file(run_dir + "/manifest.json", m.dump(2) + "\n");
 
     auto aio = ksim::node::AllInOne::start(*topo, run_dir, why);
@@ -240,6 +273,12 @@ static int run_main(int argc, char** argv) {
     run_cmd->add_option("--sealed", o.sealed, "the sealed card directory (instead of the topology's)");
     run_cmd->add_option("--kek", o.kek, "the KEK file (instead of the topology's)");
     run_cmd->add_flag("--plain-nas", o.plain_nas, "put NAS in clear into the Uu capture (KS-CTL-004)");
+#ifdef KSIM_FIXED_ROLE
+    o.role = KSIM_FIXED_ROLE;
+#else
+    run_cmd->add_option("--role", o.role, "one role of a split run: cucp, cuup, du or ue (the supervisor starts them)");
+#endif
+    run_cmd->add_option("--kair", o.kair, "a split run's KAIR socket (the DU's)");
     auto* stop_cmd = app.add_subcommand("stop", "stop a run");
     stop_cmd->add_option("--run-dir", run_dir, "the run directory (default the latest)");
     CLI11_PARSE(app, argc, argv);

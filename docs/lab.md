@@ -134,7 +134,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
      - With the dev PC's ksim-netd (N17; `tools/systemd/ksim-netd-devpc.service`, no parent link) the UEs run in netns mode. Each UE gets a namespace with TUNs and nothing on the host side, so no veth and no P-64 flap of vmnet8.
   3. `gates/run.sh open5gs`.
   4. `tools/open5gs-rig.sh stop`. It stops upfd as root too, deletes `ogstun` and `ogstun-edge`, and checks that no NF and no `ogstun` are left.
-  5. `ksim-sim range deprovision …`, then remove the NF logs in `~/kaluza-sim-rig/log`, since debug logs can hold the subscribers' key material.
+  5. `ksim-sim range deprovision …`, then remove the NF logs in `~/kaluza-sim-rig/log`, since debug logs can hold the subscribers' key material. Since P2 Q3 `tools/open5gs-rig.sh stop` removes them itself once no NF is left (`LOGS_LEFT=0`).
   6. Tell the core session what was left.
 
   The NF set is nrfd, scpd, ausfd, udmd, udrd, pcfd, bsfd, nssfd and amfd; smfd and upfd come only with the session runs.

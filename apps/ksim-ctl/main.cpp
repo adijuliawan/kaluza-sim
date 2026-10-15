@@ -576,9 +576,27 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
             }
             r = call(c, "POST", "/v1/gnb/" + encode(f.words[0]) + "/ue-release", body);
         } else if (f.words.size() >= 2 && f.words[1] == "restart") {
-            r = call(c, "POST", "/v1/gnb/" + encode(f.words[0]) + "/restart");
+            // gnb: the whole gNB; cucp: the CU-CP's process alone (a split run, P2 Q3)
+            r = call(c, "POST", std::string(verb == "cucp" ? "/v1/cucp/" : "/v1/gnb/") + encode(f.words[0]) + "/restart");
         } else {
-            r = Reply::fail(Exit::usage, "gnb <name> ue-list|amf-list|ue-release <ue>|restart");
+            r = Reply::fail(Exit::usage, "gnb|cucp <name> ue-list|amf-list|ue-release <ue>|restart");
+        }
+    } else if (verb == "du") {
+        // P2 Q3 (cli.md): the DU's own verbs; restart is a split run's DU process alone.
+        if (f.words.size() >= 2 && f.words[1] == "ue-list") {
+            r = call(c, "GET", "/v1/du/" + encode(f.words[0]) + "/ue-list");
+        } else if (f.words.size() >= 2 && f.words[1] == "restart") {
+            r = call(c, "POST", "/v1/du/" + encode(f.words[0]) + "/restart");
+        } else {
+            r = Reply::fail(Exit::usage, "du <name> ue-list|restart");
+        }
+    } else if (verb == "cuup") {
+        if (f.words.size() >= 2 && f.words[1] == "bearers") {
+            r = call(c, "GET", "/v1/cuup/" + encode(f.words[0]) + "/bearers");
+        } else if (f.words.size() >= 2 && f.words[1] == "restart") {
+            r = call(c, "POST", "/v1/cuup/" + encode(f.words[0]) + "/restart");
+        } else {
+            r = Reply::fail(Exit::usage, "cuup <name> bearers|restart");
         }
     } else if (verb == "ue") {
         if (f.words.empty()) {

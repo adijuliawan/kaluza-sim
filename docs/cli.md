@@ -132,9 +132,12 @@ EVENT_SEQ=48211
 | DU | `cell on\|off <pci>` · `cell power <pci> <dBm>` | Cell outage and power steps | v1 |
 | | `ue-list` · `paging-stats` | DU UE contexts; paging occasions served | v1 |
 | CU-UP | `bearers` · `tunnels` · `gtpu-echo <peer>` | E1 bearer contexts; GTP-U TEIDs; an Echo to a peer | v1 |
+| Split run (P2 Q3) | `cucp <name> restart` · `du <name>-du restart` · `cuup <name>-cuup restart` | That role's process alone stops and starts again; its last run directory is kept as `<role>.<n>/` (`gnb <name> restart` restarts all three) | v1 |
 | Any node | `info` · `version` · `capabilities` | Role, addresses, `VERSION=`, `COMMIT=`, `SPEC_PINS=`, `CAP.*=` | v1 |
 | | `faults list\|set <rule>\|clear` | Fault injection ([`architecture.md`](architecture.md) §9); `FAULTS=0` when clean | v1 |
 | | `pcap start\|stop [--iface …]` | Captures per interface | v1 |
+
+**As built (P2 Q3):** `du <name>-du ue-list` answers `CELL_ACTIVE`, `UES`, `UL_SDUS`, `DL_SDUS` and `WRONG_PPID`. `cuup <name>-cuup bearers` answers `E1_READY`, `CONTEXTS`, `DL_PACKETS`, `UL_PACKETS` and `DROPPED`. `gnb <name> ue-list` adds `F1_UE_STREAMS` (the SCTP streams the DU's UE-associated F1AP came on) and `F1_UE_ON_STREAM0`. In a split run `nodes` lists the four roles with their `PID` and `UP`. `cell on|off`, `paging-stats`, `tunnels` and `gtpu-echo` are not built yet (exit 5).
 
 ## 5. Moving a gate from nr-cli
 

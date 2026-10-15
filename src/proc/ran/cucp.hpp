@@ -50,6 +50,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -85,6 +86,7 @@ struct CuCpStats {
     std::uint64_t ngap_rx = 0;
     std::uint64_t ngap_errors = 0;       // ERROR INDICATIONs sent
     std::uint64_t wrong_ppid = 0;        // P2 Q2: messages under another protocol's PPID, dropped
+    std::uint64_t f1_ue_on_stream0 = 0;  // P2 Q2: UE-associated F1AP from the DU on stream 0
     std::uint64_t error_indications_rx = 0;
     std::uint64_t f1_errors = 0;
     std::uint64_t ics_ok = 0;
@@ -109,6 +111,8 @@ public:
 
     bool ng_ready() const noexcept { return ng_ready_; }
     bool f1_ready() const noexcept { return du_.has_value(); }
+    /// P2 Q2: the SCTP streams the DU's UE-associated F1AP came on (stream 0 counted apart).
+    const std::set<std::uint16_t>& f1_ue_streams() const noexcept { return f1_ue_streams_; }
     std::size_t ues() const noexcept { return ues_.size(); }
     const CuCpStats& stats() const noexcept { return stats_; }
     std::vector<CuCpUeView> ue_list() const;
@@ -257,6 +261,8 @@ private:
         f1ap::NrCgi cgi;
         std::uint32_t tac = 0;
     };
+    std::uint16_t f1_rx_stream_ = 0;
+    std::set<std::uint16_t> f1_ue_streams_;
     std::optional<DuInfo> du_;
     std::map<std::uint32_t, Ue> ues_;   // by gNB-CU UE F1AP ID
     std::uint32_t next_ue_ = 1;

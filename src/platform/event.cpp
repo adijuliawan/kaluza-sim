@@ -47,6 +47,22 @@ void EventRing::emit(EventName name, std::string subject, std::vector<EventField
     cv_.notify_all();
 }
 
+void EventRing::relay(Event e) {
+    {
+        const std::lock_guard lock(mu_);
+        e.seq = ++seq_;
+        if (ring_.size() == capacity_) {
+            ring_.pop_front();
+            ++dropped_;
+        }
+        ring_.push_back(std::move(e));
+        if (listener_) {
+            listener_(ring_.back());
+        }
+    }
+    cv_.notify_all();
+}
+
 std::uint64_t EventRing::last_seq() const {
     const std::lock_guard lock(mu_);
     return seq_;

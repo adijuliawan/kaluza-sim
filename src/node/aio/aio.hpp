@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <functional>
 #include <future>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -29,6 +30,7 @@
 #include "node/aio/run_dir.hpp"
 #include "node/aio/topology.hpp"
 #include "node/ue/device.hpp"
+#include "platform/assoc_slot.hpp"
 #include "platform/blocking.hpp"
 #include "platform/clock.hpp"
 #include "platform/event.hpp"
@@ -37,6 +39,8 @@
 
 namespace ksim::net {
 class SctpClient;
+class SctpListener;
+class SeqpacketListener;
 namespace netd {
 class Client;
 }
@@ -98,6 +102,11 @@ public:
     UeDevice* ue(const std::string& selector);
     proc::ran::CuCp& cucp() { return *cucp_; }
     proc::ran::Du& du() { return *du_; }
+    // P2 Q3: what this process hosts; in a split run one role each (ADR 0011).
+    bool hosts_ues() const noexcept { return topo_.role == Role::all || topo_.role == Role::ue; }
+    bool hosts_cucp() const noexcept { return topo_.role == Role::all || topo_.role == Role::cucp; }
+    bool hosts_cuup() const noexcept { return topo_.role == Role::all || topo_.role == Role::cuup; }
+    bool hosts_du() const noexcept { return topo_.role == Role::all || topo_.role == Role::du; }
     proc::ran::CuUp& cuup() { return *cuup_; }
     bool ng_up() const;
     /// The gNB's nodes stop and start again (P1 N12, ksim-ctl gnb restart).
@@ -109,6 +118,16 @@ private:
     AllInOne(Topology t, std::string run_dir);
     Result<void> build(std::string& why);   // on the shard
     Result<void> build_gnb(std::string& why);
+    struct FarmCard {
+        std::string imsi;
+        std::string group;
+        const UeGroup* g;
+        std::unique_ptr<uicc::os::Card> card;
+    };
+    Result<void> build_farm(std::vector<FarmCard> cards, const std::map<const UeGroup*, Persona>& personas,
+                            std::string& why);
+    void kair_accept(std::unique_ptr<IChannel> c);   // P2 Q3: the DU's end of KAIR
+    void kair_connect();                             // P2 Q3: the farm's end
     std::unique_ptr<uicc::IApduTransport> external_reader(const UeGroup& g, std::string& why);   // P2 Q1
     void connect_gnb();
     void teardown_gnb();
@@ -135,6 +154,18 @@ private:
     std::unique_ptr<TapAssoc> f1_tap_;
     std::unique_ptr<MemAssocPair> e1_;
     std::unique_ptr<TapAssoc> e1_tap_;
+    // P2 Q3, split: the real links of whichever roles this process hosts.
+    std::unique_ptr<AssocSlot> f1_slot_;               // the CU-CP's F1-C
+    std::unique_ptr<net::SctpListener> f1_listen_;
+    std::unique_ptr<net::SctpClient> f1_client_;       // the DU's F1-C
+    std::unique_ptr<AssocSlot> e1_slot_;               // the CU-CP's E1
+    std::unique_ptr<net::SctpListener> e1_listen_;
+    std::unique_ptr<net::SctpClient> e1_client_;       // the CU-UP's E1
+    std::unique_ptr<net::SeqpacketListener> kair_listen_;   // the DU's KAIR
+    std::vector<std::unique_ptr<IChannel>> kair_peers_;     // one per farm shard
+    std::map<std::uint32_t, IChannel*> kair_route_;         // radio ID to the farm it spoke from
+    std::unique_ptr<IChannel> kair_;                        // the farm's KAIR
+    std::optional<TimerId> kair_retry_;
     std::unique_ptr<MemNet> f1u_net_;
     std::unique_ptr<IDatagram> cuup_f1u_;
     std::unique_ptr<IDatagram> du_f1u_;

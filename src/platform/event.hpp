@@ -65,6 +65,10 @@ public:
 
     void emit(EventName name, std::string subject, std::vector<EventField> fields) override;
 
+    /// P2 Q3: an event another process emitted (a split run's role), taken as
+    /// it is and numbered here. Its name was checked where it was emitted.
+    void relay(Event e);
+
     std::uint64_t last_seq() const;
     std::uint64_t dropped() const;
     /// Events with seq > `since`, oldest first, at most `max`.

@@ -172,6 +172,7 @@ private:
     std::map<std::uint16_t, std::uint32_t> by_rnti_;
     std::unique_ptr<entity::gtpu::Endpoint> f1u_;
     std::uint16_t seq_ = 0;
+    std::uint64_t f1_ups_ = 0;   // F1 associations that came up (P2 Q3)
     DuStats stats_;
 };
 

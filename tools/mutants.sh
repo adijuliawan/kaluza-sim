@@ -55,7 +55,9 @@ while IFS=$'\t' read -r name row _; do
         echo "MUTANT=$name ELSEWHERE row=$row gate=$(basename "$gate") by=$elsewhere" | tee -a "$OUT/summary.txt"
         continue
     fi
-    KSIM_MUTANT="$name" KSIM_BIN="$T/bin" KSIM_RUNS="$T/runs-$name" KSIM_MASTER="$T/keys/master.key" \
+    # A gate may name the topology it needs (P2 Q3: '# topology: topologies/split-stub.yaml').
+    topo=$(sed -n 's/^# topology: //p' "$gate" | head -n 1)
+    KSIM_TOPOLOGY_FILE="${topo:+$ROOT/$topo}" KSIM_MUTANT="$name" KSIM_BIN="$T/bin" KSIM_RUNS="$T/runs-$name" KSIM_MASTER="$T/keys/master.key" \
         KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
         KSIM_PHASE="$(case "$gate" in *ksim-p2-*) echo p2 ;; *) echo p1 ;; esac)" \
         sh "$ROOT/gates/run.sh" stub "$gate" > "$OUT/$name.out" 2>&1

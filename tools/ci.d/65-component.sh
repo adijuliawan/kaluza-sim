@@ -11,7 +11,8 @@
 #      traces of every UE among them (sim.pcapng, N14);
 #   5. the canary over the run directory, the gates' ksim-ctl output and
 #      ksim-sim's output (derive, a kaluza dry run) included.
-# The run directory (no keys in it) is kept as build/component/last.
+# The run directory (no keys in it) is kept as build/component/last; the split run (P2 Q3) as
+# build/component/split-last.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 B="$ROOT/build/dev/apps"
@@ -60,5 +61,28 @@ mkdir -p "$ROOT/build/component"
 rm -rf "$ROOT/build/component/last"
 cp -r "$RUN" "$ROOT/build/component/last"
 rm -f "$ROOT/build/component/last/ctl.sock"
+
+# P2 Q3 (ADR 0011): the same P1 gates, and the split gate, with the roles as processes of their
+# own (topologies/split-stub.yaml), scored against the P2 row set; captures and canary as above.
+echo "-- the split run"
+KSIM_RUNS="$T/runs-split" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
+    KSIM_SIM_TRACE=1 KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE="$ROOT/topologies/split-stub.yaml" \
+    sh "$ROOT/gates/run.sh" stub "$ROOT"/gates/verification/ksim-p1-*.sh "$ROOT/gates/verification/ksim-p2-split.sh" \
+    > "$T/split.out" 2>&1 || rc=1
+cat "$T/split.out"
+SRUN="$(sed -n 's/^RUN_DIR=//p' "$T/split.out")"
+if [[ -n "$SRUN" && -d "$SRUN" ]]; then
+    grep -qx 'FAILURES=0' "$SRUN/stub.txt" || rc=1
+    "$PY" -I "$ROOT/tools/pcap_check.py" "$SRUN" | tee "$T/split-pcap.out" || rc=1
+    "$PY" -I "$ROOT/tools/secret_canary.py" --run-dir "$SRUN" --master "$T/keys/master.key" --block "$BLOCK" \
+        | tee "$T/split-canary.out" || rc=1
+    grep -E '^(PCAP_[A-Z_]+|PYCRATE_FAILED|CANARY_RUN)=' "$T/split-pcap.out" "$T/split-canary.out" | sed 's/^[^:]*://' > "$SRUN/checks.txt"
+    rm -rf "$ROOT/build/component/split-last"
+    cp -r "$SRUN" "$ROOT/build/component/split-last"
+    find "$ROOT/build/component/split-last" -name ctl.sock -delete
+    find "$ROOT/build/component/split-last" -name kair.sock -delete
+else
+    echo "COMPONENT: no split run directory"; rc=1
+fi
 echo "COMPONENT=$([[ $rc -eq 0 ]] && echo PASS || echo FAIL) RUN=build/component/last"
 exit "$rc"

@@ -27,7 +27,8 @@
 #        pools, off kaluza-core's 10.45-10.50 at kaluza-core-df's request). --t3512 N
 #        sets T3512 in our copy's amf.yaml first (the periodic rows).
 # stop:  stops every NF started from ~/kaluza-sim-rig/etc (upfd as root),
-#        deletes ogstun and ogstun-edge, and checks no NF and no ogstun is left.
+#        deletes ogstun and ogstun-edge, checks no NF and no ogstun is left, and
+#        then removes our NF logs (they can hold key material; P2 Q3).
 # status: NFS=<n>, each one's name and pid, and NGAP_LISTEN=0|1.
 
 set -eu
@@ -98,7 +99,10 @@ for dev in ogstun ogstun-edge; do
 done
 left=\$(pgrep -c -f 'open5gs-[a-z0-9]+d .*kaluza-sim-rig/etc/' || true)
 echo \"NFS_LEFT=\$left\"
-if ip link show ogstun >/dev/null 2>&1 || ip link show ogstun-edge >/dev/null 2>&1; then echo OGSTUN=present; else echo OGSTUN=absent; fi"
+if ip link show ogstun >/dev/null 2>&1 || ip link show ogstun-edge >/dev/null 2>&1; then echo OGSTUN=present; else echo OGSTUN=absent; fi
+# The NFs' debug logs can hold the subscribers' key material (lab.md section 6, step 5): removed here (P2 Q3).
+if [ \"\$left\" = 0 ]; then rm -f \"\$HOME\"/kaluza-sim-rig/log/*.log; fi
+echo \"LOGS_LEFT=\$(ls \"\$HOME\"/kaluza-sim-rig/log/ 2>/dev/null | wc -l)\""
     ;;
 status)
     rig "n=0

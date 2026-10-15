@@ -22,6 +22,12 @@
 //   secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek}
 //   peer: {name: stub}                      # free-form pins for the manifest
 //   security: {allow_null: false}            # D1: the bisect switch only
+//   mode: split                              # P2 Q3: aio (default) or split, the roles as processes
+//   (in gnbs[0]) split: {f1c: 127.0.10.1, e1: 127.0.20.1, du: 127.0.10.2, cuup: 127.0.10.3,
+//                        cuup_e1: 127.0.20.2, streams: 16}
+//                                            # split only: the CU-CP's F1-C and E1 listening addresses,
+//                                            # the DU's F1-C and F1-U address, the CU-UP's F1-U address
+//                                            # and E1 address, the F1-C/E1 outbound streams asked for
 //   netd: {socket: /run/ksim/netd.sock, netns: ksim-cucp, cuup_netns: ksim-cuup, parent: ens19, prefix: 24,
 //          nodes: true, ues: true}
 //                                            # with ksim-netd: NG-C from the CU-CP's own namespace,
@@ -72,6 +78,23 @@ struct NetdConfig {
     std::uint8_t prefix = 24;
 };
 
+/// P2 Q3 (ADR 0011): the shape of a run, and the role a process takes in it.
+enum class Mode : std::uint8_t { aio, split };
+enum class Role : std::uint8_t { all, cucp, cuup, du, ue };
+const char* role_name(Role r) noexcept;
+/// "cucp", "cuup", "du", "ue" (or "all"); nullopt for anything else.
+std::optional<Role> parse_role(const std::string& s);
+
+/// The split's links (ADR 0011 point 3): on the dev PC everything on 127.0.0.x.
+struct SplitConfig {
+    Endpoint f1c_listen = Endpoint::v4(127, 0, 10, 1, 38472);   // the CU-CP's F1-C (PPID 62)
+    Endpoint e1_listen = Endpoint::v4(127, 0, 20, 1, 38462);    // the CU-CP's E1 (PPID 64)
+    Endpoint du = Endpoint::v4(127, 0, 10, 2, 2152);            // the DU's F1-C (port 0) and F1-U address
+    Endpoint cuup_f1u = Endpoint::v4(127, 0, 10, 3, 2152);      // the CU-UP's F1-U
+    Endpoint cuup_e1 = Endpoint::v4(127, 0, 20, 2, 0);          // the CU-UP's E1 address
+    std::uint16_t streams = 16;                                 // F1-C and E1 outbound streams asked for
+};
+
 struct Topology {
     std::string file;                      // where it was read from
     std::string mcc;
@@ -98,6 +121,12 @@ struct Topology {
     /// inside it as it went over the air.
     bool plain_nas = false;
     NetdConfig netd;
+    Mode mode = Mode::aio;
+    SplitConfig split;
+    // Set at run time, not in the file (P2 Q3): the role this process runs and the
+    // DU's KAIR socket (the supervisor's run directory).
+    Role role = Role::all;
+    std::string kair_socket;
 };
 
 /// Reads and checks a topology; the error's text says where and why.
