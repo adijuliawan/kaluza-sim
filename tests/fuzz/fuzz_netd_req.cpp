@@ -73,11 +73,35 @@ public:
     }
     ksim::Result<std::uint32_t> exec(const std::string& n, const std::vector<std::string>& argv, const Peer& peer,
                                      std::vector<ksim::Fd> fds) override {
-        if (!ue_name(n) || names.count(n) == 0 || argv.empty() || fds.size() != 4 || peer.uid == 0 || peer.gid == 0) {
+        if (!valid_name(n) || names.count(n) == 0 || argv.empty() || fds.size() != 4 || peer.uid == 0 || peer.gid == 0) {
             std::abort();
         }
         return 1;
     }
+    // P2 Q6: what the policy lets through (the fuzz policy has --mid 10.250.0.0/24, --dn 10.60.0.0/24).
+    ksim::Result<void> bridge() override { return {}; }
+    ksim::Result<void> veth(const std::string& n, std::array<std::uint8_t, 4> a, std::uint8_t prefix) override {
+        if (!valid_name(n) || ue_name(n) || dn_name(n) || names.count(n) == 0 || a[0] != 10 || a[1] != 250 || a[2] != 0 ||
+            a[3] == 0 || a[3] == 255 || prefix != 24) {
+            std::abort();
+        }
+        return {};
+    }
+    ksim::Result<void> setup_dn(const std::string& n) override {
+        if (!dn_name(n) || names.count(n) != 0) {
+            std::abort();
+        }
+        names.insert(n);
+        return {};
+    }
+    ksim::Result<ksim::Fd> dn_tun(const std::string& n, const DnTunSpec& t) override {
+        if (!dn_name(n) || names.count(n) == 0 || t.addr[0] != 10 || t.addr[1] != 60 || t.addr[2] != 0 || t.mtu < 576 ||
+            t.mtu > 9000 || t.pool_prefix < 8 || t.pool_prefix > 30) {
+            std::abort();
+        }
+        return ksim::make_error(ksim::Errc::io, 0, "fake");
+    }
+    std::vector<std::string> gc_links() override { return {}; }
     void check_tun(const std::string& n, const TunSpec& t) const {
         const bool name = t.ifname.size() >= 4 && t.ifname.rfind("pdu", 0) == 0;
         if (!ue_name(n) || names.count(n) == 0 || !name || t.table < 101 || t.table > 115) {
@@ -102,6 +126,13 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     p.first = {172, 30, 30, 30};
     p.last = {172, 30, 30, 39};
     p.prefix = 24;
+    p.mid = true;
+    p.mid_first = {10, 250, 0, 1};
+    p.mid_last = {10, 250, 0, 254};
+    p.mid_prefix = 24;
+    p.dn = true;
+    p.dn_first = {10, 60, 0, 1};
+    p.dn_last = {10, 60, 0, 254};
     Server s(p, ops);
     std::optional<ksim::Fd> fd;
     const Reply r = s.handle(in, 1000, fd);
@@ -111,6 +142,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     (void)s.handle(in, 1001, fd);   // another uid: refused before anything
     // With four descriptors, as exec takes them, and a UE namespace in place.
     ops.names.insert("ksim-ue-1");
+    ops.names.insert("ksim-dn-1");
     std::vector<ksim::Fd> four;
     four.reserve(4);
     for (int i = 0; i < 4; ++i) {

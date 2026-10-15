@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# A ksim run on kaluza-uesim that outlives the SSH connection (P2 Q6, deploy v3;
+# lab.md 5): a systemd user unit, the instance naming the topology of the current
+# release (ksim-run@split-lab runs topologies/split-lab.yaml). The run directory is
+# ~/kaluza-sim-runs/<topology>-<UTC time>; ksim-ctl finds it there (KSIM_RUNS).
+# Lingering must be on for the user (root, once: loginctl enable-linger <user>).
+# Stop it with ksim-ctl stop or systemctl --user stop ksim-run@<topology>: both end
+# the run the same way (its UEs switched off by the gate runner, never here).
+[Unit]
+Description=kaluza-sim run of topology %i (the current release)
+
+[Service]
+Type=simple
+Environment=KSIM_RUNS=%h/kaluza-sim-runs
+ExecStart=/bin/sh -c 'exec %h/ksim/current/bin/ksim run -c %h/ksim/current/topologies/%i.yaml --lab --run-dir "$KSIM_RUNS/%i-$(date -u +%%Y%%m%%dT%%H%%M%%SZ)"'
+KillSignal=SIGINT
+TimeoutStopSec=30
+Restart=no
+
+[Install]
+WantedBy=default.target

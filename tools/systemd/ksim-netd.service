@@ -14,7 +14,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=KSIM_UID=1000
-ExecStart=/usr/local/sbin/ksim-netd --uid ${KSIM_UID} --parent ens19 --range 172.30.30.30-172.30.30.39 --prefix 24
+ExecStart=/usr/local/sbin/ksim-netd --uid ${KSIM_UID} --parent ens19 --range 172.30.30.30-172.30.30.39 --prefix 24 --mid 10.250.0.0/24 --dn 10.60.0.0/24
 Restart=on-failure
 RestartSec=2
 # No ProtectSystem, ProtectHome or PrivateTmp: each would give the service a

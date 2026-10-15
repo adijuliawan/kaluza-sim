@@ -102,6 +102,27 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 - **Secrets** (sealed card secrets, the range master secret) are streamed separately into a 0600 path, never printed, and verified by checksum. That is kaluza-core's practice for lab secrets.
 - **The provisioning credentials** (the Keycloak client `kaluza-sim-key-entry`'s secret and its mTLS client certificate, [ADR 0008](adr/0008-subscriber-provisioning-api.md)) stay on the dev PC in `~/.config/kaluza-sim/provisioning/` (0700/0600). They are never deployed to the VM. The 999/70 seed file (`~/.config/kaluza-sim/seed/`) stays there too. Provisioning runs from the dev PC only ([`sim-uicc.md`](sim-uicc.md) §8).
 - **Run directories** (`~/kaluza-sim-runs/<ts>/`: logs, pcaps, manifest) are pruned by age, because of the small disk.
+- **ksim-netd v3 (P2 Q6, ADR 0011 point 4).** New operations:
+  - `bridge` and `veth` (`ksim-mid`, 10.250.0.0/24), only with `--mid`, which netd refuses off kaluza-uesim;
+  - `setup_dn` and `dn_tun` (a DN namespace `ksim-dn-…` with a TUN `dn0` for the scripted UPF), with `--dn 10.60.0.0/24` on both hosts;
+  - `exec` into any namespace netd made.
+
+  The units: `tools/systemd/ksim-netd.service` (the VM: `--mid 10.250.0.0/24 --dn 10.60.0.0/24`) and `ksim-netd-devpc.service` (the dev PC: `--dn` only; never a bridge or a veth there, P-64).
+  - **The dev PC's upgrade is the user's (D6),** from a `release` build of this tree:
+
+    ```
+    sudo install -o root -g root -m 0755 build/release/apps/ksim-netd/ksim-netd /usr/local/sbin/ksim-netd
+    sudo install -o root -g root -m 0644 tools/systemd/ksim-netd-devpc.service /etc/systemd/system/ksim-netd.service
+    sudo sed -i "s/^Environment=KSIM_UID=.*/Environment=KSIM_UID=$(id -u)/" /etc/systemd/system/ksim-netd.service
+    sudo systemctl daemon-reload && sudo systemctl restart ksim-netd
+    ```
+
+    The privileged hooks (`KSIM_CI_PRIV=1 tools/ci.d/66-netd-priv.sh full`, `67-netns.sh full`) start their own netd from `build/dev` and need no install. From Q6 they check the DN namespace's TUN with an echo, and the data plane in split mode.
+  - **The VM's is mine in a window (LW1's setup, D6):** the deploy prints the same steps.
+- **Deploy v3 (P2 Q6):** `tools/deploy-uesim.sh` also ships the role apps and `ksim-corestub`, and with `--peers` OCUDU's `ocucp`/`ocuup` and their PIN.
+  - A peer library missing on the VM is named (`PEER_LDD=MISSING …`): the D7 list.
+  - A run that outlives SSH is the user unit `tools/systemd/ksim-run@.service` (`systemctl --user start ksim-run@split-lab`). It needs lingering (`loginctl enable-linger`, root, once).
+  - `topologies/split-lab.yaml` is LW1's split run: the CU-CP at .30 plus 10.250.0.1, the CU-UP at .31 plus 10.250.0.3, the DU at 10.250.0.2.
 - **The OCUDU peer (P2 Q4, ADR 0012):** `tools/ocudu-peer.sh build` on the dev PC. It exports `d9d2263f4d` from `ran/ocudu-fork` with `git archive` (the fork is never written to) into `~/kaluza-sim-peers/ocudu-d9d2263f4d/` and builds only `ocucp` and `ocuup`, Release, `-march=x86-64-v3`.
   - Built 2026-10-16: `ocucp` sha256 `0765349bbee1181696d9148f0f5ceb746fd6167429b6f40297eecee570de4551`, `ocuup` `43856373603eaf0256109aab10396c11373df5cabcf3ee8aa1875379fbf64d40`, recorded in the build's `PIN` file and copied into every run. Neither binary holds an AVX-512 instruction, so both run on the VM's Zen 3.
   - Beyond glibc and libstdc++, they need `libmbedcrypto.so.16`, `libsctp.so.1` and `libyaml-cpp.so.0.8`. These are the libraries D7 allows on the VM, once deploy v3's ldd check names them there (Q6).

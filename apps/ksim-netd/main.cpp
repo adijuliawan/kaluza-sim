@@ -8,8 +8,12 @@
 //
 //   ksim-netd --uid <uid> [--socket /run/ksim/netd.sock]
 //             [--parent ens19 --range 172.30.30.30-172.30.30.39 --prefix 24]
+//             [--mid 10.250.0.0/24] [--dn 10.60.0.0/24]
 //
-// A parent is refused unless the host is kaluza-uesim (ADR 0009 point 11).
+// A parent is refused unless the host is kaluza-uesim (ADR 0009 point 11), and
+// so is --mid (P2 Q6: the ksim-mid bridge and veth legs; a veth on the dev PC
+// flaps its VMware guests, kaluza-core P-64). --dn allows DN namespaces whose
+// TUN carries an address of that network (both hosts).
 
 #include <CLI/CLI.hpp>
 
@@ -38,6 +42,36 @@ bool parse_v4(const std::string& s, std::array<std::uint8_t, 4>& out) {
     return true;
 }
 
+/// "10.250.0.0/24": the network's host addresses (first, last) and the length.
+bool parse_net(const std::string& s, std::array<std::uint8_t, 4>& first, std::array<std::uint8_t, 4>& last,
+               std::uint8_t& len) {
+    const auto slash = s.find('/');
+    std::array<std::uint8_t, 4> a{};
+    if (slash == std::string::npos || !parse_v4(s.substr(0, slash), a)) {
+        return false;
+    }
+    int n = -1;
+    try {
+        n = std::stoi(s.substr(slash + 1));
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (n < 8 || n > 30) {
+        return false;
+    }
+    const std::uint32_t v = static_cast<std::uint32_t>(a[0]) << 24 | static_cast<std::uint32_t>(a[1]) << 16 |
+                            static_cast<std::uint32_t>(a[2]) << 8 | a[3];
+    const std::uint32_t mask = ~std::uint32_t{0} << (32 - n);
+    const std::uint32_t lo = (v & mask) + 1;
+    const std::uint32_t hi = (v | ~mask) - 1;
+    for (int i = 0; i < 4; ++i) {
+        first[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(lo >> (24 - 8 * i));
+        last[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(hi >> (24 - 8 * i));
+    }
+    len = static_cast<std::uint8_t>(n);
+    return true;
+}
+
 std::string host() {
     std::array<char, 256> b{};
     return ::gethostname(b.data(), b.size() - 1) == 0 ? std::string(b.data()) : std::string();
@@ -55,6 +89,10 @@ int run_main(int argc, char** argv) {
     app.add_option("--parent", parent, "the parent link for ipvlans (kaluza-uesim only)");
     app.add_option("--range", range, "the addresses allowed: first-last");
     app.add_option("--prefix", prefix, "the prefix length of those addresses");
+    std::string mid;
+    std::string dn;
+    app.add_option("--mid", mid, "the ksim-mid network for node legs, e.g. 10.250.0.0/24 (kaluza-uesim only)");
+    app.add_option("--dn", dn, "the network DN namespaces' TUNs take addresses from, e.g. 10.60.0.0/24");
     CLI11_PARSE(app, argc, argv);
 
     ksim::net::netd::Policy p;
@@ -73,6 +111,25 @@ int run_main(int argc, char** argv) {
         p.parent = parent;
         p.prefix = static_cast<std::uint8_t>(prefix);
     }
+    if (!mid.empty()) {
+        if (host() != "kaluza-uesim") {
+            std::cerr << "ksim-netd: refused: ksim-mid only on kaluza-uesim (P-64: no bridge or veth on the dev PC)\n";
+            return 7;
+        }
+        if (!parse_net(mid, p.mid_first, p.mid_last, p.mid_prefix)) {
+            std::cerr << "ksim-netd: --mid is a network, e.g. 10.250.0.0/24\n";
+            return 2;
+        }
+        p.mid = true;
+    }
+    if (!dn.empty()) {
+        std::uint8_t dn_len = 0;
+        if (!parse_net(dn, p.dn_first, p.dn_last, dn_len)) {
+            std::cerr << "ksim-netd: --dn is a network, e.g. 10.60.0.0/24\n";
+            return 2;
+        }
+        p.dn = true;
+    }
     if (::geteuid() != 0) {
         std::cerr << "ksim-netd: not root: every operation will fail\n";
     }
@@ -81,7 +138,8 @@ int run_main(int argc, char** argv) {
     std::signal(SIGPIPE, SIG_IGN);
     ksim::net::netd::LinuxOps ops;
     ksim::net::netd::Server server(p, ops);
-    std::cerr << "ksim-netd: serving uid " << uid << " on " << socket << (p.parent.empty() ? " (no parent link)" : " (parent " + p.parent + ")") << "\n";
+    std::cerr << "ksim-netd: serving uid " << uid << " on " << socket << (p.parent.empty() ? " (no parent link)" : " (parent " + p.parent + ")")
+              << (p.mid ? ", ksim-mid " + mid : std::string()) << (p.dn ? ", DN " + dn : std::string()) << "\n";
     if (auto r = ksim::net::netd::run_server(socket, server, g_stop); !r) {
         std::cerr << "ksim-netd: " << r.error().what << "\n";
         return 1;

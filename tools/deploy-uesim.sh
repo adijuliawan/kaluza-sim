@@ -2,16 +2,20 @@
 # SPDX-FileCopyrightText: 2026 Adi Juliawan
 # SPDX-License-Identifier: LicenseRef-kaluza-sim-private
 #
-# Deploy v2 to kaluza-uesim (VM 105; P1 N9, lab.md 5). Only in a window agreed
-# with the kaluza-core session and the user: it refuses without --window-agreed.
+# Deploy v3 to kaluza-uesim (VM 105; P1 N9, P2 Q6, lab.md 5). Only in a window
+# agreed with the kaluza-core session and the user: it refuses without --window-agreed.
 #
-#   tools/deploy-uesim.sh --window-agreed [--host kaluza-uesim] [--secrets] [--selftest]
+#   tools/deploy-uesim.sh --window-agreed [--host kaluza-uesim] [--secrets] [--selftest] [--peers]
 #
-# A release is ~/ksim/releases/<commit>/ (bin: ksim, ksim-ctl, ksim-sim,
-# ksim-netd, ksim-selftest from the release-lab preset; topologies, cards, personas,
-# gates, tools/systemd), ~/ksim/current points at it, and the newest three
-# releases are kept. Every binary's shared libraries must resolve on the VM
-# (LDD=PASS). --secrets streams the sealed card files and the KEK into
+# A release is ~/ksim/releases/<commit>/ (bin: ksim and its role apps ksim-cucp,
+# ksim-cuup, ksim-du, ksim-ue, ksim-ctl, ksim-sim, ksim-netd, ksim-selftest and
+# ksim-corestub from the release-lab preset; topologies, cards, personas, gates,
+# tools/systemd), ~/ksim/current points at it, and the newest three releases
+# are kept. Every binary's shared libraries must resolve on the VM (LDD=PASS).
+# --peers (P2 Q6, ADR 0012) adds OCUDU's ocucp and ocuup from tools/ocudu-peer.sh's
+# build with their PIN file, under peers/ocudu-<pin>/; a library they lack on the
+# VM is named (PEER_LDD=MISSING, the D7 list to install in a window) without
+# failing the deploy. --secrets streams the sealed card files and the KEK into
 # ~/.kaluza-sim on the VM (umask 077, over ssh stdin); the range master and the
 # provisioning credentials never leave the dev PC. --selftest runs
 # ksim-selftest from the release (the P0 M16 check). The script uses no sudo:
@@ -23,28 +27,37 @@ HOST=kaluza-uesim
 AGREED=0
 SECRETS=0
 SELFTEST=0
+PEERS=0
 while (( $# )); do
     case "$1" in
         --window-agreed) AGREED=1 ;;
         --host) HOST="$2"; shift ;;
         --secrets) SECRETS=1 ;;
         --selftest) SELFTEST=1 ;;
-        *) echo "usage: $0 --window-agreed [--host HOST] [--secrets] [--selftest]" >&2; exit 2 ;;
+        --peers) PEERS=1 ;;
+        *) echo "usage: $0 --window-agreed [--host HOST] [--secrets] [--selftest] [--peers]" >&2; exit 2 ;;
     esac
     shift
 done
 (( AGREED )) || { echo "DEPLOY=REFUSED (no --window-agreed: clear the window with kaluza-core first, lab.md)"; exit 2; }
 
 B="$ROOT/build/release-lab/apps"
-BINS=(ksim ksim-ctl ksim-sim ksim-netd ksim-selftest)
+BINS=(ksim ksim-cucp ksim-cuup ksim-du ksim-ue ksim-ctl ksim-sim ksim-netd ksim-selftest ksim-corestub)
+# The role apps are built in apps/ksim/ (the same program with the role fixed).
+bin_path() { case "$1" in ksim-cucp|ksim-cuup|ksim-du|ksim-ue) echo "$B/ksim/$1" ;; *) echo "$B/$1/$1" ;; esac; }
 # The binaries are built from the tree being released, and reconfigured so
 # their build stamp names it (W2 shipped a release named for the next commit
 # with binaries stamped by the previous configure).
 ( cd "$ROOT" && cmake --preset release-lab >/dev/null && cmake --build --preset release-lab -j "$(nproc)" >/dev/null ) ||
     { echo "DEPLOY=FAIL (the release-lab build failed)"; exit 1; }
 for b in "${BINS[@]}"; do
-    [[ -x "$B/$b/$b" ]] || { echo "DEPLOY=FAIL (no $B/$b/$b; cmake --build --preset release-lab)"; exit 1; }
+    [[ -x "$(bin_path "$b")" ]] || { echo "DEPLOY=FAIL (no $(bin_path "$b"); cmake --build --preset release-lab)"; exit 1; }
 done
+if (( PEERS )); then
+    PIN=$(sed -n 's/^PIN=//p' "$ROOT/tools/ocudu-peer.sh")
+    PEER_DIR="$HOME/kaluza-sim-peers/ocudu-$PIN"
+    [[ -f "$PEER_DIR/PIN" ]] || { echo "DEPLOY=FAIL (no OCUDU peer build; tools/ocudu-peer.sh build)"; exit 1; }
+fi
 REL="$(git -C "$ROOT" describe --always --dirty --abbrev=12)"
 rig() { ssh -o BatchMode=yes "$HOST" "$@"; }
 
@@ -52,7 +65,11 @@ rig() { ssh -o BatchMode=yes "$HOST" "$@"; }
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/$REL/bin" "$STAGE/$REL/tools"
-for b in "${BINS[@]}"; do cp "$B/$b/$b" "$STAGE/$REL/bin/"; done
+for b in "${BINS[@]}"; do cp "$(bin_path "$b")" "$STAGE/$REL/bin/"; done
+if (( PEERS )); then
+    mkdir -p "$STAGE/$REL/peers/ocudu-$PIN"
+    cp "$PEER_DIR/build/apps/cu_cp/ocucp" "$PEER_DIR/build/apps/cu_up/ocuup" "$PEER_DIR/PIN" "$STAGE/$REL/peers/ocudu-$PIN/"
+fi
 cp -r "$ROOT/topologies" "$ROOT/cards" "$ROOT/personas" "$ROOT/gates" "$STAGE/$REL/"
 cp -r "$ROOT/tools/systemd" "$STAGE/$REL/tools/"
 rig "mkdir -p ~/ksim/releases && test ! -e ~/ksim/releases/$REL" || { echo "DEPLOY=FAIL (release $REL is on the VM already)"; exit 1; }
@@ -70,6 +87,15 @@ for b in "${BINS[@]}"; do
 done
 (( ldd_bad )) && { echo "LDD=FAIL"; exit 1; }
 echo "LDD=PASS binaries=${#BINS[@]}"
+if (( PEERS )); then
+    missing=$(rig "ldd ~/ksim/current/peers/ocudu-$PIN/ocucp ~/ksim/current/peers/ocudu-$PIN/ocuup" |
+        awk '/not found/ {print $1}' | sort -u | tr '\n' ' ')
+    if [[ -n "$missing" ]]; then
+        echo "PEER_LDD=MISSING $missing(D7: the VM's packages for exactly these, in a window, each recorded in lab.md)"
+    else
+        echo "PEER_LDD=PASS peers=2"
+    fi
+fi
 
 if (( SECRETS )); then
     # The sealed cards and the KEK only; nothing else of ~/.kaluza-sim is sent.
@@ -85,6 +111,7 @@ if (( SELFTEST )); then
 fi
 
 uid=$(rig "id -u")
+user=$(rig "id -un")
 cat <<EOF
 
 ksim-netd is installed by the user, once per release that changes it (root on the VM):
@@ -92,5 +119,10 @@ ksim-netd is installed by the user, once per release that changes it (root on th
   sudo install -o root -g root -m 0644 ~/ksim/current/tools/systemd/ksim-netd.service /etc/systemd/system/
   sudo sed -i 's/^Environment=KSIM_UID=.*/Environment=KSIM_UID=$uid/' /etc/systemd/system/ksim-netd.service
   sudo systemctl daemon-reload && sudo systemctl enable --now ksim-netd
+
+A run that survives the SSH connection (P2 Q6): the user unit tools/systemd/ksim-run@.service,
+  install -D -m 0644 ~/ksim/current/tools/systemd/ksim-run@.service ~/.config/systemd/user/ksim-run@.service
+  systemctl --user daemon-reload && systemctl --user start ksim-run@split-lab
+which needs lingering for this user (root, once: sudo loginctl enable-linger $user).
 EOF
 echo "DEPLOY=PASS release=$REL"

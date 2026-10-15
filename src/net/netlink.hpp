@@ -31,6 +31,24 @@ struct Ipvlan {
 
 /// RTM_NEWLINK, NLM_F_REQUEST|ACK|CREATE|EXCL: an L2 ipvlan on a parent, in a namespace.
 Result<Bytes> new_ipvlan(std::uint32_t seq, const Ipvlan& v);
+// P2 Q6 (netd v3): kaluza-uesim's ksim-mid bridge, a node's veth leg on it, and
+// the route a DN namespace has to the UE pool.
+struct Veth {
+    std::string name;          // the end in the caller's namespace
+    std::string peer;          // the end created in the namespace
+    int peer_netns_fd = -1;
+};
+/// RTM_NEWLINK, NLM_F_REQUEST|ACK|CREATE|EXCL: a bridge (`ip link add name N type bridge`).
+Result<Bytes> new_bridge(std::uint32_t seq, const std::string& name);
+/// RTM_NEWLINK, NLM_F_REQUEST|ACK|CREATE|EXCL: a veth pair whose peer is made in a
+/// namespace (`ip link add name N type veth peer name P netns FD`).
+Result<Bytes> new_veth(std::uint32_t seq, const Veth& v);
+/// RTM_NEWLINK, NLM_F_REQUEST|ACK: IFLA_MASTER (`ip link set dev X master M`).
+Bytes set_master(std::uint32_t seq, int ifindex, int master_ifindex);
+/// RTM_NEWROUTE, NLM_F_REQUEST|ACK|CREATE|EXCL: <dst>/<len> through `oif`, scope link,
+/// the main table (`ip route add D/L dev X`).
+Result<Bytes> new_prefix_route(std::uint32_t seq, int oif, std::array<std::uint8_t, 4> dst, std::uint8_t len);
+
 /// RTM_NEWADDR, NLM_F_REQUEST|ACK|CREATE|EXCL: IFA_LOCAL and IFA_ADDRESS.
 Bytes new_addr_v4(std::uint32_t seq, int ifindex, std::array<std::uint8_t, 4> addr, std::uint8_t prefix);
 /// RTM_NEWLINK, NLM_F_REQUEST|ACK: IFF_UP set (ifi_change IFF_UP).

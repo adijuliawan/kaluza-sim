@@ -7,6 +7,7 @@
 #include <linux/if_addr.h>
 #include <linux/if_link.h>
 #include <linux/fib_rules.h>
+#include <linux/veth.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <sys/socket.h>
@@ -101,6 +102,64 @@ Result<Bytes> new_ipvlan(std::uint32_t seq, const Ipvlan& v) {
     m.attr16(IFLA_IPVLAN_FLAGS, 0);
     m.close(data);
     m.close(info);
+    return m.done();
+}
+
+Result<Bytes> new_bridge(std::uint32_t seq, const std::string& name) {
+    if (name.empty() || name.size() >= IFNAMSIZ) {
+        return make_error(Errc::invalid_argument, 0, "netlink: a bridge needs a name");
+    }
+    Msg m(RTM_NEWLINK, kCreate, seq);
+    ifinfo(m, 0, 0, 0);
+    m.attr_str(IFLA_IFNAME, name);
+    const std::size_t info = m.nest(IFLA_LINKINFO);
+    m.attr(IFLA_INFO_KIND, "bridge", 7);
+    m.close(info);
+    return m.done();
+}
+
+Result<Bytes> new_veth(std::uint32_t seq, const Veth& v) {
+    if (v.name.empty() || v.name.size() >= IFNAMSIZ || v.peer.empty() || v.peer.size() >= IFNAMSIZ || v.peer_netns_fd < 0) {
+        return make_error(Errc::invalid_argument, 0, "netlink: a veth needs two names and the peer's namespace");
+    }
+    Msg m(RTM_NEWLINK, kCreate, seq);
+    ifinfo(m, 0, 0, 0);
+    m.attr_str(IFLA_IFNAME, v.name);
+    const std::size_t info = m.nest(IFLA_LINKINFO);
+    m.attr(IFLA_INFO_KIND, "veth", 5);
+    const std::size_t data = m.nest(IFLA_INFO_DATA);
+    const std::size_t peer = m.nest(VETH_INFO_PEER);   // an ifinfomsg, then the peer's attributes
+    ifinfo(m, 0, 0, 0);
+    m.attr32(IFLA_NET_NS_FD, static_cast<std::uint32_t>(v.peer_netns_fd));
+    m.attr_str(IFLA_IFNAME, v.peer);
+    m.close(peer);
+    m.close(data);
+    m.close(info);
+    return m.done();
+}
+
+Bytes set_master(std::uint32_t seq, int ifindex, int master_ifindex) {
+    Msg m(RTM_NEWLINK, kChange, seq);
+    ifinfo(m, ifindex, 0, 0);
+    m.attr32(IFLA_MASTER, static_cast<std::uint32_t>(master_ifindex));
+    return m.done();
+}
+
+Result<Bytes> new_prefix_route(std::uint32_t seq, int oif, std::array<std::uint8_t, 4> dst, std::uint8_t len) {
+    if (oif <= 0 || len == 0 || len > 32) {
+        return make_error(Errc::invalid_argument, len, "netlink: a prefix route needs a link and a length 1..32");
+    }
+    Msg m(RTM_NEWROUTE, kCreate, seq);
+    rtmsg r{};
+    r.rtm_family = AF_INET;
+    r.rtm_dst_len = len;
+    r.rtm_table = RT_TABLE_MAIN;
+    r.rtm_protocol = RTPROT_BOOT;
+    r.rtm_scope = RT_SCOPE_LINK;
+    r.rtm_type = RTN_UNICAST;
+    m.raw(&r, sizeof(r));
+    m.attr(RTA_DST, dst.data(), 4);
+    m.attr32(RTA_OIF, static_cast<std::uint32_t>(oif));
     return m.done();
 }
 

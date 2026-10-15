@@ -247,7 +247,7 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         }
         if (y.has("netd")) {
             const Yaml n = y.at("netd");
-            n.only({"socket", "netns", "cuup_netns", "parent", "prefix", "nodes", "ues"});
+            n.only({"socket", "netns", "cuup_netns", "parent", "prefix", "nodes", "ues", "du_netns", "mid", "mid_prefix"});
             t.netd.enabled = true;
             t.netd.socket = n.get<std::string>("socket", t.netd.socket);
             t.netd.netns = n.get<std::string>("netns", t.netd.netns);
@@ -256,9 +256,28 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             t.netd.ues = n.get<bool>("ues", true);
             t.netd.parent = n.get<std::string>("parent", "");
             t.netd.prefix = n.get<std::uint8_t>("prefix", 24);
+            t.netd.du_netns = n.get<std::string>("du_netns", t.netd.du_netns);
+            t.netd.mid = n.get<bool>("mid", false);
+            t.netd.mid_prefix = n.get<std::uint8_t>("mid_prefix", 24);
             if (t.netd.netns.rfind("ksim-", 0) != 0 || t.netd.cuup_netns.rfind("ksim-", 0) != 0 ||
                 t.netd.cuup_netns == t.netd.netns || t.ng_bind.family != Endpoint::Family::v4 || t.netd.prefix > 32) {
                 n.fail("netd needs a ksim- namespace, an IPv4 ng_bind and a prefix up to 32");
+            }
+            // P2 Q6: split roles in namespaces of their own reach each other over ksim-mid only.
+            if (t.mode == Mode::split && t.netd.nodes) {
+                const auto same = [](const Endpoint& a, const Endpoint& b) {
+                    return std::equal(a.addr.begin(), a.addr.begin() + 4, b.addr.begin());
+                };
+                if (!t.netd.mid) {
+                    n.fail("split with node namespaces needs mid: true (ksim-mid, kaluza-uesim); "
+                           "on the dev PC the roles stay in the root namespace (nodes: false)");
+                }
+                if (t.netd.du_netns.rfind("ksim-", 0) != 0 || t.netd.du_netns == t.netd.netns ||
+                    t.netd.du_netns == t.netd.cuup_netns || t.netd.mid_prefix < 8 || t.netd.mid_prefix > 30 ||
+                    !same(t.split.f1c_listen, t.split.e1_listen) || !same(t.split.cuup_f1u, t.split.cuup_e1)) {
+                    n.fail("with mid, a ksim- DU namespace of its own, a mid prefix 8..30, the CU-CP's F1-C and E1 "
+                           "on one address (its leg) and the CU-UP's F1-U and E1 on one (its leg)");
+                }
             }
         }
         if (y.has("security")) {

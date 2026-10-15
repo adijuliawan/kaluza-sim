@@ -19,6 +19,13 @@
 // /etc/resolv.conf), drops to the asking uid and gid with no new privileges
 // and a process group of its own, starts the command, waits for it and writes
 // its wait status to the status pipe.
+//
+// P2 Q6 (netd v3): ksim-mid is a bridge with no address and no uplink; a node's
+// leg is a veth pair made with its peer straight in the namespace ("mid0"), the
+// host end mastered to the bridge. A DN namespace is set up as a UE's; its TUN
+// "dn0" carries the DN's address /32 and a route to the UE pool. gc removes the
+// bridge and any ksim-m… host end a namespace's removal left (none, normally:
+// a veth pair goes with either end).
 
 #include <fcntl.h>
 #include <grp.h>
@@ -37,6 +44,7 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
+#include <memory>
 
 #include "net/netd.hpp"
 #include "net/netlink.hpp"
@@ -244,7 +252,19 @@ std::vector<std::string> LinuxOps::list() { return netns::list(); }
 
 // ---- the UEs' namespaces (P1 N11) -----------------------------------------------------------
 
-Result<void> LinuxOps::setup_ue(const std::string& netns) {
+// A namespace with IPv6 off and the echo sockets open, then lo up (L13): a UE's, and
+// from P2 Q6 a DN's.
+namespace {
+Result<void> setup_isolated(const std::string& netns);
+} // namespace
+
+Result<void> LinuxOps::setup_ue(const std::string& netns) { return setup_isolated(netns); }
+
+Result<void> LinuxOps::setup_dn(const std::string& netns) { return setup_isolated(netns); }
+
+namespace {
+
+Result<void> setup_isolated(const std::string& netns) {
     if (auto r = netns::add(netns); !r) {
         return r;
     }
@@ -275,6 +295,8 @@ Result<void> LinuxOps::setup_ue(const std::string& netns) {
     }
     return {};
 }
+
+} // namespace
 
 Result<Fd> LinuxOps::tun(const std::string& netns, const TunSpec& t) {
     auto ns = netns::open(netns);
@@ -380,6 +402,145 @@ Result<std::uint32_t> LinuxOps::exec(const std::string& netns, const std::vector
         exec_helper(ns->get(), netns, argv, peer, raw);
     }
     return static_cast<std::uint32_t>(pid);   // the descriptors close here, in netd
+}
+
+// ---- netd v3 (P2 Q6) ------------------------------------------------------------------------
+
+Result<void> LinuxOps::bridge() {
+    auto rt = nl::Rtnl::open();
+    if (!rt) {
+        return rt.error();
+    }
+    if (::if_nametoindex(kMidBridge) == 0) {
+        if (auto r = request(*rt, nl::new_bridge(rt->next_seq(), kMidBridge)); !r) {
+            return r;
+        }
+    }
+    return link_up(*rt, kMidBridge);
+}
+
+Result<void> LinuxOps::veth(const std::string& netns, std::array<std::uint8_t, 4> addr, std::uint8_t prefix) {
+    if (auto r = bridge(); !r) {
+        return r;
+    }
+    auto ns = netns::open(netns);
+    if (!ns) {
+        return ns.error();
+    }
+    auto rt = nl::Rtnl::open();
+    if (!rt) {
+        return rt.error();
+    }
+    const std::string host = mid_host_link(netns);
+    if (auto r = request(*rt, nl::new_veth(rt->next_seq(), nl::Veth{host, kMidLink, ns->get()})); !r) {
+        return r;
+    }
+    auto undo = [&](Error e) -> Result<void> {
+        if (const unsigned i = ::if_nametoindex(host.c_str()); i != 0) {
+            (void)rt->request(nl::del_link(rt->next_seq(), static_cast<int>(i)));   // its peer goes with it
+        }
+        return e;
+    };
+    const unsigned host_idx = ::if_nametoindex(host.c_str());
+    const unsigned br_idx = ::if_nametoindex(kMidBridge);
+    if (host_idx == 0 || br_idx == 0) {
+        return undo(make_error(Errc::io, static_cast<std::uint32_t>(errno), "netd: the veth or ksim-mid has no index"));
+    }
+    if (auto r = request(*rt, nl::set_master(rt->next_seq(), static_cast<int>(host_idx), static_cast<int>(br_idx))); !r) {
+        return undo(r.error());
+    }
+    if (auto r = link_up(*rt, host.c_str()); !r) {
+        return undo(r.error());
+    }
+    auto inside = netns::run_in(ns->get(), [&]() -> Result<void> {
+        auto in = nl::Rtnl::open();
+        if (!in) {
+            return in.error();
+        }
+        const unsigned idx = ::if_nametoindex(kMidLink);
+        if (idx == 0) {
+            return make_error(Errc::io, static_cast<std::uint32_t>(errno), "netd: the leg is not in the namespace");
+        }
+        if (auto r = request(*in, nl::new_addr_v4(in->next_seq(), static_cast<int>(idx), addr, prefix)); !r) {
+            return r;
+        }
+        return link_up(*in, kMidLink);
+    });
+    if (!inside) {
+        return undo(inside.error());
+    }
+    return {};
+}
+
+Result<Fd> LinuxOps::dn_tun(const std::string& netns, const DnTunSpec& t) {
+    auto ns = netns::open(netns);
+    if (!ns) {
+        return ns.error();
+    }
+    Fd out;
+    auto r = netns::run_in(ns->get(), [&]() -> Result<void> {
+        Fd fd(::open("/dev/net/tun", O_RDWR | O_NONBLOCK | O_CLOEXEC));
+        if (!fd) {
+            return make_error(Errc::io, static_cast<std::uint32_t>(errno), "netd: /dev/net/tun");
+        }
+        ifreq ifr{};
+        ifr.ifr_flags = IFF_TUN | IFF_NO_PI;
+        std::memcpy(ifr.ifr_name, kDnLink, std::strlen(kDnLink));
+        if (::ioctl(fd.get(), TUNSETIFF, &ifr) != 0) {
+            return make_error(Errc::io, static_cast<std::uint32_t>(errno), "netd: TUNSETIFF");
+        }
+        const int idx = static_cast<int>(::if_nametoindex(kDnLink));
+        if (idx == 0) {
+            return make_error(Errc::io, static_cast<std::uint32_t>(errno), "netd: the TUN has no index");
+        }
+        auto rt = nl::Rtnl::open();
+        if (!rt) {
+            return rt.error();
+        }
+        if (auto e = request(*rt, nl::set_mtu(rt->next_seq(), idx, t.mtu)); !e) {
+            return e;
+        }
+        if (auto e = request(*rt, nl::new_addr_v4(rt->next_seq(), idx, t.addr, 32)); !e) {
+            return e;
+        }
+        if (auto e = request(*rt, nl::set_link_up(rt->next_seq(), idx)); !e) {
+            return e;
+        }
+        if (auto e = request(*rt, nl::new_prefix_route(rt->next_seq(), idx, t.pool, t.pool_prefix)); !e) {
+            return e;
+        }
+        out = std::move(fd);
+        return {};
+    });
+    if (!r) {
+        return r.error();
+    }
+    return out;
+}
+
+std::vector<std::string> LinuxOps::gc_links() {
+    std::vector<std::string> gone;
+    auto rt = nl::Rtnl::open();
+    if (!rt) {
+        return gone;
+    }
+    std::vector<std::string> names;
+    if (struct if_nameindex* all = ::if_nameindex(); all != nullptr) {
+        for (struct if_nameindex* i = all; i->if_index != 0; ++i) {
+            const std::string n = i->if_name;
+            if (n == kMidBridge || (n.rfind("ksim-m", 0) == 0 && n.size() == 12)) {
+                names.push_back(n);
+            }
+        }
+        ::if_freenameindex(all);
+    }
+    for (const auto& n : names) {
+        if (const unsigned idx = ::if_nametoindex(n.c_str()); idx != 0 &&
+            rt->request(nl::del_link(rt->next_seq(), static_cast<int>(idx)))) {
+            gone.push_back(n);
+        }
+    }
+    return gone;
 }
 
 void reap_children() {

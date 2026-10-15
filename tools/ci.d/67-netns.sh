@@ -10,7 +10,9 @@
 # loopback beside the stub) and gate ksim-p1-dataplane.sh: the TUN's address,
 # no IPv6 and no noise, a ping to the DN over the tunnel, the 1400-octet
 # probe, the QFI. Every row must PASS (none SKIP), and once netd has stopped
-# no ksim- namespace may be left.
+# no ksim- namespace may be left. From P2 Q6 the same gate in split mode too
+# (topologies/split-stub.yaml: the roles as processes on loopback, the farm's
+# UEs in their namespaces; the dev PC's privileged split smoke).
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ "${KSIM_CI_PRIV:-0}" == 1 ]] || { echo "NETNS_PRIV=SKIP (opt-in: KSIM_CI_PRIV=1)"; exit 77; }
@@ -40,6 +42,20 @@ if [[ -z "$RUN" || ! -f "$RUN/rows.tsv" ]]; then
 else
     awk -F '\t' '$2 != "PASS" { bad = 1 } END { exit bad }' "$RUN/rows.tsv" || rc=1
     [[ "$(wc -l < "$RUN/rows.tsv")" -ge 6 ]] || rc=1
+fi
+# P2 Q6: split mode.
+sed "s|\.\./|$ROOT/|g" "$ROOT/topologies/split-stub.yaml" > "$T/split.yaml"
+echo "netd: {socket: $T/netd.sock, nodes: false, ues: true}" >> "$T/split.yaml"
+KSIM_TOPOLOGY_FILE="$T/split.yaml" KSIM_RUNS="$T/runs-split" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" \
+    KSIM_SEALED="$T/cards" KSIM_PHASE=p2 sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p1-dataplane.sh" \
+    > "$T/split.out" 2>&1
+cat "$T/split.out"
+SRUN="$(sed -n 's/^RUN_DIR=//p' "$T/split.out")"
+if [[ -z "$SRUN" || ! -f "$SRUN/rows.tsv" ]]; then
+    rc=1
+else
+    awk -F '\t' '$2 != "PASS" { bad = 1 } END { exit bad }' "$SRUN/rows.tsv" || rc=1
+    [[ "$(wc -l < "$SRUN/rows.tsv")" -ge 6 ]] || rc=1
 fi
 sudo -n kill "$netd" 2>/dev/null; wait "$netd" 2>/dev/null
 left=$(ip netns list 2>/dev/null | grep -c '^ksim-' || true)

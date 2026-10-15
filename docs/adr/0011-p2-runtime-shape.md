@@ -24,6 +24,7 @@
      - on kaluza-uesim only: `ksim-mid` and its veth legs; `exec` inside a node namespace as the caller, for peer processes (ADR 0012);
      - on both hosts: a DN namespace with a TUN for the scripted core's UPF (the throughput harness);
      - gc of bridges, veths and DN namespaces.
+     - *As built (P2 Q6):* ops `bridge`, `veth`, `setup_dn`, `dn_tun`, enabled by `--mid <net>` (refused off kaluza-uesim, as `--parent`) and `--dn <net>` (both hosts); `exec` goes to any namespace netd made, still as the caller and never root. The split roles on kaluza-uesim each set up their own namespace and mid leg (topology `netd: {mid: true}`); a split topology with node namespaces but no `mid` is refused, so on the dev PC the roles stay in the root namespace and only the UEs get namespaces.
   5. **Shards:** the UE farm runs several shards, with UEs pinned by index and one KAIR socket per shard. The CU-CP and the DU stay on one shard. The ID layout `[shard:4][gen:4][index:24]` is kept, and the SCTP I/O thread waits until a measurement asks for it.
   6. **Moved into P2 from ADR 0009 point 6:**
      - metrics v0 on `/metrics` (Prometheus text): procedure counters with causes, per-QFI bytes, per-hop latency histograms, RSS and threads. Part of KS-CTL-005; the TS 28.552 labels come later;

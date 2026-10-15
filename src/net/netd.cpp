@@ -122,6 +122,21 @@ bool in_range(const std::array<std::uint8_t, 4>& a, const std::array<std::uint8_
 
 bool ue_name(const std::string& n) { return valid_name(n) && n.rfind("ksim-ue-", 0) == 0 && n.size() > 8; }
 
+bool dn_name(const std::string& n) { return valid_name(n) && n.rfind("ksim-dn-", 0) == 0 && n.size() > 8; }
+
+std::string mid_host_link(const std::string& netns) {
+    std::uint32_t h = 2166136261U;   // FNV-1a
+    for (const char c : netns) {
+        h = (h ^ static_cast<std::uint8_t>(c)) * 16777619U;
+    }
+    static constexpr const char* kHex = "0123456789abcdef";
+    std::string out = "ksim-m";
+    for (int s = 20; s >= 0; s -= 4) {
+        out.push_back(kHex[(h >> s) & 0xF]);
+    }
+    return out;
+}
+
 bool valid_name(const std::string& n) {
     if (n.size() < 6 || n.size() > 31 || n.rfind("ksim-", 0) != 0) {
         return false;
@@ -188,6 +203,24 @@ Bytes encode(const Request& r) {
         for (const auto& a : r.argv) {
             w.str(a);
         }
+        break;
+    case Op::bridge:
+        break;
+    case Op::veth:
+        w.str(r.netns);
+        put_addr(w, r.addr);
+        w.u8(r.prefix);
+        break;
+    case Op::setup_dn:
+        w.str(r.netns);
+        break;
+    case Op::dn_tun:
+        w.str(r.netns);
+        put_addr(w, r.addr);
+        w.u8(static_cast<std::uint8_t>(r.mtu >> 8));
+        w.u8(static_cast<std::uint8_t>(r.mtu & 0xFF));
+        put_addr(w, r.pool);
+        w.u8(r.pool_prefix);
         break;
     }
     return w.b;
@@ -287,6 +320,32 @@ Result<Request> decode_request(ByteView in) {
         }
         break;
     }
+    case static_cast<std::uint8_t>(Op::bridge):
+        q.op = Op::bridge;
+        break;
+    case static_cast<std::uint8_t>(Op::veth):
+        q.op = Op::veth;
+        if (!r.str(q.netns, kMaxString) || !get_addr(r, q.addr) || !r.u8(q.prefix) || q.prefix > 32) {
+            return malformed("netd: veth fields");
+        }
+        break;
+    case static_cast<std::uint8_t>(Op::setup_dn):
+        q.op = Op::setup_dn;
+        if (!r.str(q.netns, kMaxString)) {
+            return malformed("netd: setup_dn name");
+        }
+        break;
+    case static_cast<std::uint8_t>(Op::dn_tun): {
+        q.op = Op::dn_tun;
+        std::uint8_t hi = 0;
+        std::uint8_t lo = 0;
+        if (!r.str(q.netns, kMaxString) || !get_addr(r, q.addr) || !r.u8(hi) || !r.u8(lo) || !get_addr(r, q.pool) ||
+            !r.u8(q.pool_prefix) || q.pool_prefix > 32) {
+            return malformed("netd: dn_tun fields");
+        }
+        q.mtu = static_cast<std::uint16_t>(hi << 8 | lo);
+        break;
+    }
     default:
         return malformed("netd: unknown op");
     }
@@ -372,12 +431,15 @@ Reply Server::handle(ByteView request, const Peer& peer, std::vector<Fd> in, std
     if (q->op != Op::exec && !in.empty()) {
         return refuse("netd: descriptors go with exec only");
     }
-    const bool ue_op = q->op == Op::setup_ue || q->op == Op::tun || q->op == Op::tun_down || q->op == Op::resolv ||
-                       q->op == Op::exec;
+    const bool ue_op = q->op == Op::setup_ue || q->op == Op::tun || q->op == Op::tun_down || q->op == Op::resolv;
     if (ue_op && !ue_name(q->netns)) {
         return refuse("netd: the UE operations are for ksim-ue- namespaces");
     }
     if (ue_op && q->op != Op::setup_ue && !owned(q->netns)) {
+        return refuse("netd: no such ksim namespace");
+    }
+    // P2 Q6: exec in any namespace netd made (a UE's, a node's for a peer, a DN's).
+    if (q->op == Op::exec && (!valid_name(q->netns) || !owned(q->netns))) {
         return refuse("netd: no such ksim namespace");
     }
     const TunSpec spec{q->ifname, q->addr, q->mtu, q->table, q->main_default};
@@ -433,6 +495,60 @@ Reply Server::handle(ByteView request, const Peer& peer, std::vector<Fd> in, std
         r.pid = *pid;
         return r;
     }
+    case Op::bridge:
+        if (!p_.mid) {
+            return refuse("netd: no ksim-mid on this host (kaluza-uesim only, --mid)");
+        }
+        if (auto r = ops_.bridge(); !r) {
+            return failed(r.error());
+        }
+        return {};
+    case Op::veth:
+        if (!p_.mid) {
+            return refuse("netd: no ksim-mid on this host (kaluza-uesim only, --mid)");
+        }
+        if (!valid_name(q->netns) || ue_name(q->netns) || dn_name(q->netns) || !owned(q->netns)) {
+            return refuse("netd: a ksim-mid leg is for a node namespace netd made");
+        }
+        if (!in_range(q->addr, p_.mid_first, p_.mid_last) || q->prefix != p_.mid_prefix) {
+            return refuse("netd: that address is outside the ksim-mid range");
+        }
+        if (auto r = ops_.veth(q->netns, q->addr, q->prefix); !r) {
+            return failed(r.error());
+        }
+        return {};
+    case Op::setup_dn:
+        if (!p_.dn) {
+            return refuse("netd: no DN namespaces on this host (--dn)");
+        }
+        if (!dn_name(q->netns)) {
+            return refuse("netd: a DN namespace is ksim-dn-…");
+        }
+        if (owned(q->netns)) {
+            return refuse("netd: the namespace exists");
+        }
+        if (auto r = ops_.setup_dn(q->netns); !r) {
+            return failed(r.error());
+        }
+        return {};
+    case Op::dn_tun: {
+        if (!p_.dn) {
+            return refuse("netd: no DN namespaces on this host (--dn)");
+        }
+        if (!dn_name(q->netns) || !owned(q->netns)) {
+            return refuse("netd: no such ksim DN namespace");
+        }
+        if (!in_range(q->addr, p_.dn_first, p_.dn_last) || q->mtu < 576 || q->mtu > 9000 || !ue_address(q->pool) ||
+            q->pool_prefix < 8 || q->pool_prefix > 30) {
+            return refuse("netd: a DN TUN carries an address in the --dn range, an MTU 576..9000 and a unicast pool /8../30");
+        }
+        auto t = ops_.dn_tun(q->netns, DnTunSpec{q->addr, q->mtu, q->pool, q->pool_prefix});
+        if (!t) {
+            return failed(t.error());
+        }
+        fd = std::move(*t);
+        return {};
+    }
     case Op::setup_node:
         if (!valid_name(q->netns)) {
             return refuse("netd: a namespace name is ksim- and [a-z0-9-], 31 characters at most");
@@ -484,6 +600,9 @@ Reply Server::handle(ByteView request, const Peer& peer, std::vector<Fd> in, std
             if (valid_name(n) && ops_.teardown(n)) {
                 r.names.push_back(n);
             }
+        }
+        for (auto& l : ops_.gc_links()) {   // P2 Q6: ksim-mid and stray legs
+            r.names.push_back(l);
         }
         return r;
     }
@@ -747,6 +866,59 @@ Result<void> Client::setup_ue(const std::string& netns) {
         return out.error();
     }
     return {};
+}
+
+Result<void> Client::bridge() {
+    Request r;
+    r.op = Op::bridge;
+    auto out = call(r, nullptr);
+    if (!out) {
+        return out.error();
+    }
+    return {};
+}
+
+Result<void> Client::veth(const std::string& netns, std::array<std::uint8_t, 4> addr, std::uint8_t prefix) {
+    Request r;
+    r.op = Op::veth;
+    r.netns = netns;
+    r.addr = addr;
+    r.prefix = prefix;
+    auto out = call(r, nullptr);
+    if (!out) {
+        return out.error();
+    }
+    return {};
+}
+
+Result<void> Client::setup_dn(const std::string& netns) {
+    Request r;
+    r.op = Op::setup_dn;
+    r.netns = netns;
+    auto out = call(r, nullptr);
+    if (!out) {
+        return out.error();
+    }
+    return {};
+}
+
+Result<Fd> Client::dn_tun(const std::string& netns, const DnTunSpec& t) {
+    Request r;
+    r.op = Op::dn_tun;
+    r.netns = netns;
+    r.addr = t.addr;
+    r.mtu = t.mtu;
+    r.pool = t.pool;
+    r.pool_prefix = t.pool_prefix;
+    std::optional<Fd> fd;
+    auto out = call(r, &fd);
+    if (!out) {
+        return out.error();
+    }
+    if (!fd) {
+        return make_error(Errc::internal, 0, "netd: the reply carried no TUN");
+    }
+    return std::move(*fd);
 }
 
 Result<Fd> Client::tun(const std::string& netns, const TunSpec& t) {

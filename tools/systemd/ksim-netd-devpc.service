@@ -7,6 +7,8 @@
 # nodes stay in the root namespace here. Installed by the user as
 # ksim-netd.service, the binary root-owned in /usr/local/sbin (never run as
 # root from a home directory); it serves the uid of the user who runs ksim.
+# From P2 Q6 (netd v3) DN namespaces too (--dn), for the stub's UPF and a
+# traffic server; never --mid here: no bridge and no veth on the dev PC (P-64).
 [Unit]
 Description=kaluza-sim privileged helper (netns, ipvlan, sockets by fd)
 After=network-online.target
@@ -15,7 +17,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=KSIM_UID=1000
-ExecStart=/usr/local/sbin/ksim-netd --uid ${KSIM_UID}
+ExecStart=/usr/local/sbin/ksim-netd --uid ${KSIM_UID} --dn 10.60.0.0/24
 Restart=on-failure
 RestartSec=2
 # No ProtectSystem, ProtectHome or PrivateTmp: each would give the service a

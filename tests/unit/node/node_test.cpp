@@ -81,6 +81,53 @@ TEST(Topology, TheRepositorysTopologiesLoad) {
     EXPECT_EQ(lab->ues[1].first_imsi, "001010000300050");
 }
 
+// P2: the split and interop topologies load, and the VM's split puts each role in a
+// namespace with its ksim-mid leg (P2 Q6).
+TEST(Topology, TheP2TopologiesLoad) {
+    const std::string root = KSIM_SOURCE_DIR;
+    for (const char* f : {"split-stub.yaml", "split-open5gs.yaml", "split-stub-e1.yaml", "split-lab.yaml",
+                          "ocudu-c3-stub.yaml", "ocudu-c4-stub.yaml", "ocudu-c5-stub.yaml"}) {
+        std::string why;
+        auto t = load_topology(root + "/topologies/" + f, why);
+        ASSERT_TRUE(t) << f << ": " << why;
+        EXPECT_EQ(t->mode, Mode::split) << f;
+    }
+    std::string why;
+    auto lab = load_topology(root + "/topologies/split-lab.yaml", why);
+    ASSERT_TRUE(lab) << why;
+    EXPECT_TRUE(lab->netd.mid);
+    EXPECT_EQ(lab->netd.du_netns, "ksim-du");
+    EXPECT_EQ(lab->split.du, Endpoint::v4(10, 250, 0, 2, 2152));
+    auto e1 = load_topology(root + "/topologies/split-stub-e1.yaml", why);
+    ASSERT_TRUE(e1) << why;
+    EXPECT_EQ(e1->ue_inactivity_s, 15);
+    auto c4 = load_topology(root + "/topologies/ocudu-c4-stub.yaml", why);
+    ASSERT_TRUE(c4) << why;
+    EXPECT_EQ(c4->peer_cuup, "ocudu");
+    EXPECT_TRUE(c4->peer_cucp.empty());
+}
+
+TEST(Topology, SplitRolesInNamespacesNeedKsimMidAndOneAddressPerLeg) {
+    const std::string dir = temp_dir();
+    std::string base = kTopology;
+    base.replace(base.find("seed: 7"), 7, "seed: 7\nmode: split");
+    base.replace(base.find("    dus:"), 0,
+                 "    split: {f1c: 10.250.0.1, e1: 10.250.0.1, du: 10.250.0.2, cuup: 10.250.0.3, cuup_e1: 10.250.0.3}\n");
+    auto load = [&](const std::string& netd) {
+        std::string why;
+        return load_topology(write(dir + "/s.yaml", base + netd), why);
+    };
+    EXPECT_FALSE(load("netd: {nodes: true}\n"));   // the dev PC: no ksim-mid, so the roles stay in the root namespace
+    EXPECT_TRUE(load("netd: {nodes: false, ues: true}\n"));
+    EXPECT_TRUE(load("netd: {nodes: true, mid: true}\n"));
+    EXPECT_FALSE(load("netd: {nodes: true, mid: true, du_netns: ksim-cucp}\n"));   // the DU's own
+    std::string split = base;
+    split.replace(split.find("e1: 10.250.0.1"), 14, "e1: 10.250.0.9");   // the CU-CP's leg has one address
+    std::string why;
+    EXPECT_FALSE(load_topology(write(dir + "/s2.yaml", split + "netd: {nodes: true, mid: true}\n"), why));
+    fs::remove_all(dir);
+}
+
 TEST(Topology, ReadsTheP1SubsetAndResolvesPaths) {
     const std::string dir = temp_dir();
     std::string why;

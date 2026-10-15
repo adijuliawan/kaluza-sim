@@ -172,7 +172,11 @@ Result<void> AllInOne::build(std::string& why) {
     const bool netd_ues = topo_.netd.enabled && topo_.netd.ues && hosts_ues();
     const bool netd_cucp = topo_.netd.enabled && topo_.netd.nodes && hosts_cucp();
     const bool netd_cuup = topo_.netd.enabled && topo_.netd.nodes && hosts_cuup();
-    if (netd_ues || netd_cucp || netd_cuup) {
+    // P2 Q6: in a split run with node namespaces (kaluza-uesim) the DU has one too, and
+    // each role's gets a ksim-mid leg carrying its split address.
+    const bool split_ns = topo_.mode == Mode::split && topo_.role != Role::all && topo_.netd.enabled && topo_.netd.nodes;
+    const bool netd_du = split_ns && hosts_du();
+    if (netd_ues || netd_cucp || netd_cuup || netd_du) {
         auto c = net::netd::Client::connect(topo_.netd.socket);
         if (!c) {
             why = "ksim-netd: " + std::string(c.error().what) + " at " + topo_.netd.socket;
@@ -197,6 +201,27 @@ Result<void> AllInOne::build(std::string& why) {
             why = "ksim-netd: " + netd_->last_error();
             return up.error();
         }
+        my_netns_.push_back(topo_.netd.netns);
+        if (split_ns) {
+            if (auto r = mid_leg(topo_.netd.netns, topo_.split.f1c_listen, why); !r) {
+                return r;
+            }
+        }
+    }
+    if (netd_du) {
+        auto up = netd_->setup_node(topo_.netd.du_netns, "", {}, 0);
+        if (!up && netd_->last_error() == "netd: the namespace exists") {
+            (void)netd_->teardown(topo_.netd.du_netns);
+            up = netd_->setup_node(topo_.netd.du_netns, "", {}, 0);
+        }
+        if (!up) {
+            why = "ksim-netd (DU): " + netd_->last_error();
+            return up.error();
+        }
+        my_netns_.push_back(topo_.netd.du_netns);
+        if (auto r = mid_leg(topo_.netd.du_netns, topo_.split.du, why); !r) {
+            return r;
+        }
     }
     // N3 (P1 N10): UDP 2152 on the CU-UP's address; with netd, from its own namespace.
     std::unique_ptr<net::UdpSocket> n3;
@@ -211,6 +236,12 @@ Result<void> AllInOne::build(std::string& why) {
         if (!up) {
             why = "ksim-netd (N3): " + netd_->last_error();
             return up.error();
+        }
+        my_netns_.push_back(topo_.netd.cuup_netns);
+        if (split_ns) {
+            if (auto r = mid_leg(topo_.netd.cuup_netns, topo_.split.cuup_f1u, why); !r) {
+                return r;
+            }
         }
         auto fd = netd_->socket(topo_.netd.cuup_netns, net::netd::SockKind::udp, 4);
         if (!fd) {
@@ -400,10 +431,25 @@ Result<void> AllInOne::build_gnb(std::string& why) {
     const net::SctpBackoff redial{200, 2'000};
     net::SocketSource cucp_source;
     net::SocketSource cuup_source;
+    net::SocketSource du_source;
     if (netd_ && topo_.netd.nodes) {
         cucp_source = [this](int family) { return netd_->socket(topo_.netd.netns, net::netd::SockKind::sctp, family); };
         cuup_source = [this](int family) { return netd_->socket(topo_.netd.cuup_netns, net::netd::SockKind::sctp, family); };
+        if (topo_.mode == Mode::split) {   // P2 Q6: the DU's F1-C from its namespace
+            du_source = [this](int family) { return netd_->socket(topo_.netd.du_netns, net::netd::SockKind::sctp, family); };
+        }
     }
+    // P2 Q6: a split role's F1-U socket, from its namespace when it has one.
+    const auto f1u_socket = [this](const std::string& netns, const Endpoint& at) -> Result<std::unique_ptr<net::UdpSocket>> {
+        if (netd_ && topo_.netd.nodes && topo_.mode == Mode::split) {
+            auto fd = netd_->socket(netns, net::netd::SockKind::udp, 4);
+            if (!fd) {
+                return fd.error();
+            }
+            return net::UdpSocket::bind(shard_->reactor(), std::move(*fd), at);
+        }
+        return net::UdpSocket::bind(shard_->reactor(), at);
+    };
     auto gtpu_tap = [cap](const Endpoint& from, const Endpoint& to, ByteView p) { cap->gtpu(from, to, p); };
 
     // F1-C: the DU's end and the CU-CP's.
@@ -436,7 +482,8 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         Endpoint bind = topo_.split.du;
         bind.port = 0;
         f1_client_ = std::make_unique<net::SctpClient>(shard_->reactor(), *shard_, std::vector<Endpoint>{bind},
-                                                       std::vector<Endpoint>{topo_.split.f1c_listen}, links, redial);
+                                                       std::vector<Endpoint>{topo_.split.f1c_listen}, links, redial,
+                                                       du_source);
         f1_du = f1_client_.get();
     }
     if (f1_cu != nullptr) {
@@ -512,7 +559,7 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         cuup_f1u_addr = topo_.split.cuup_f1u;
         du_f1u_addr = topo_.split.du;
         if (hosts_cuup()) {
-            auto u = net::UdpSocket::bind(shard_->reactor(), cuup_f1u_addr);
+            auto u = f1u_socket(topo_.netd.cuup_netns, cuup_f1u_addr);
             if (!u) {
                 why = "F1-U bind " + cuup_f1u_addr.to_string() + ": " + u.error().what;
                 return u.error();
@@ -520,7 +567,7 @@ Result<void> AllInOne::build_gnb(std::string& why) {
             cuup_f1u_ = std::make_unique<TapDatagram>(std::move(*u), gtpu_tap);
         }
         if (hosts_du()) {
-            auto u = net::UdpSocket::bind(shard_->reactor(), du_f1u_addr);
+            auto u = f1u_socket(topo_.netd.du_netns, du_f1u_addr);
             if (!u) {
                 why = "F1-U bind " + du_f1u_addr.to_string() + ": " + u.error().what;
                 return u.error();
@@ -765,12 +812,21 @@ void AllInOne::teardown() {
     air_.reset();
     ue_net_.reset();   // after the UEs: each took its namespace down
     if (netd_) {
-        if (topo_.netd.nodes) {
-            (void)netd_->teardown(topo_.netd.cuup_netns);
-            (void)netd_->teardown(topo_.netd.netns);
+        for (auto it = my_netns_.rbegin(); it != my_netns_.rend(); ++it) {   // P2 Q6: what this process made
+            (void)netd_->teardown(*it);   // a ksim-mid leg goes with its namespace
         }
+        my_netns_.clear();
         netd_.reset();
     }
+}
+
+Result<void> AllInOne::mid_leg(const std::string& netns, const Endpoint& at, std::string& why) {
+    auto r = netd_->veth(netns, v4_of(at), topo_.netd.mid_prefix);
+    if (!r) {
+        why = "ksim-netd (ksim-mid leg of " + netns + "): " + netd_->last_error();
+        return r.error();
+    }
+    return {};
 }
 
 void AllInOne::stop() {

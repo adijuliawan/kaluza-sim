@@ -33,7 +33,11 @@
 //                                            # with a peer CU-CP, cucp: may be left out
 //   (in a cell) ssb_arfcn: 632640            # P2 Q4: the SSB the MeasurementTimingConfiguration names
 //   netd: {socket: /run/ksim/netd.sock, netns: ksim-cucp, cuup_netns: ksim-cuup, parent: ens19, prefix: 24,
-//          nodes: true, ues: true}
+//          nodes: true, ues: true, du_netns: ksim-du, mid: true, mid_prefix: 24}
+//                                            # P2 Q6, split with node namespaces (kaluza-uesim): each
+//                                            # role's namespace gets a ksim-mid leg with its split
+//                                            # address (the CU-CP's F1-C and E1, the CU-UP's F1-U and
+//                                            # E1, the DU's), and the DU a namespace of its own
 //                                            # with ksim-netd: NG-C from the CU-CP's own namespace,
 //                                            # N3 from the CU-UP's (nodes); each UE in a namespace
 //                                            # ksim-ue-<index> with a TUN per session (ues, P1 N11)
@@ -76,6 +80,9 @@ struct NetdConfig {
     std::string socket = "/run/ksim/netd.sock";
     std::string netns = "ksim-cucp";
     std::string cuup_netns = "ksim-cuup";   // N3's namespace, with n3_bind on its ipvlan
+    std::string du_netns = "ksim-du";       // P2 Q6, split with mid: the DU's namespace (no ipvlan)
+    bool mid = false;                       // P2 Q6: each split role's leg on ksim-mid (kaluza-uesim)
+    std::uint8_t mid_prefix = 24;
     bool nodes = true;                      // the CU-CP's and CU-UP's namespaces
     bool ues = true;                        // the UEs' namespaces and TUNs
     std::string parent;

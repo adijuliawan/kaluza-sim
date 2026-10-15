@@ -62,6 +62,33 @@ TEST(Netlink, MtuRoutesAndRulesAreWhatIproute2Sends) {
     EXPECT_FALSE(new_rule_from(kSeq2, {10, 45, 0, 2}, 0));
 }
 
+// P2 Q6, netd v3, the same method (iproute2 6.19.0, strace -e write=3, unprivileged):
+//   ip link add name ksim-mid type bridge                                         seq 0x6ad1374b
+//   ip link set dev lo master lo                                                  seq 0x6ad1374b
+//   ip route add 10.45.0.0/16 dev lo                                              seq 0x6ad1374b
+//   ip link add name ksim-m1a2b3c type veth peer name mid0 netns /proc/self/ns/net (fd 4)  seq 0x6ad13756
+TEST(Netlink, BridgeVethMasterAndPrefixRouteAreWhatIproute2Sends) {
+    auto br = new_bridge(0x6ad1374b, "ksim-mid");
+    ASSERT_TRUE(br);
+    EXPECT_EQ(to_hex(*br), "40000000100005064b37d16a00000000000000000000000000000000000000000d0003006b73696d2d6d696400000000"
+                           "100012000b0001006272696467650000");
+    EXPECT_EQ(to_hex(set_master(0x6ad1374b, 1, 1)),
+              "28000000100005004b37d16a000000000000000001000000000000000000000008000a0001000000");
+    auto rt = new_prefix_route(0x6ad1374b, 1, {10, 45, 0, 0}, 16);
+    ASSERT_TRUE(rt);
+    EXPECT_EQ(to_hex(*rt), "2c000000180005064b37d16a0000000002100000fe03fd0100000000080001000a2d00000800040001000000");
+    auto v = new_veth(0x6ad13756, Veth{"ksim-m1a2b3c", "mid0", 4});
+    ASSERT_TRUE(v);
+    EXPECT_EQ(to_hex(*v), "70000000100005065637d16a0000000000000000000000000000000000000000110003006b73696d2d6d3161326233"
+                          "63000000003c0012000900010076657468000000002c000200280001000000000000000000000000000000000008"
+                          "001c0004000000090003006d69643000000000");
+    EXPECT_FALSE(new_bridge(1, ""));
+    EXPECT_FALSE(new_veth(1, Veth{"ksim-m1a2b3c", "mid0", -1}));   // no namespace for the peer
+    EXPECT_FALSE(new_veth(1, Veth{"a-name-of-sixteen", "mid0", 4}));
+    EXPECT_FALSE(new_prefix_route(1, 1, {10, 45, 0, 0}, 33));
+    EXPECT_FALSE(new_prefix_route(1, 0, {10, 45, 0, 0}, 16));
+}
+
 TEST(Netlink, BadIpvlanSpecsAreRefused) {
     EXPECT_FALSE(new_ipvlan(1, Ipvlan{"", 1, 4}));
     EXPECT_FALSE(new_ipvlan(1, Ipvlan{"a-name-too-long-for-ifnamsiz", 1, 4}));

@@ -31,6 +31,25 @@
 //                                                status written to the fourth; the pid
 //                                                comes back
 //
+// and from P2 Q6 (netd v3, ADR 0011):
+//
+//   bridge                                       kaluza-uesim only (--mid): the bridge
+//                                                "ksim-mid", up, no address, no uplink
+//   veth <netns> <addr>/<prefix>                 a node namespace's leg on it: a veth
+//                                                pair, "ksim-m<6 hex>" on the bridge,
+//                                                "mid0" in the namespace with the
+//                                                address (in the --mid range)
+//   setup_dn <netns>                             a DN namespace "ksim-dn-…" (--dn): IPv6
+//                                                off, lo up, as a UE's
+//   dn_tun <netns> <addr> <mtu> <pool>/<len>     a TUN "dn0" in it carrying the DN's
+//                                                address (in the --dn range) and a route
+//                                                to the UE pool; its fd handed back (the
+//                                                stub's UPF reads and writes it)
+//
+// exec runs in any namespace netd made (a UE's, a node's for an interop peer,
+// a DN's for a traffic server), still as the asking uid; gc also removes
+// ksim-mid and any "ksim-m…" link left on the host.
+//
 // A socket keeps the namespace it was made in, so ksim binds, connects and
 // uses it in its own namespace and never calls setns (point 4). Requests and
 // replies are a small binary format (a root process parses as little as it
@@ -60,7 +79,11 @@ inline constexpr std::size_t kMaxMessage = 1024;
 enum class Op : std::uint8_t {
     setup_node = 1, teardown = 2, socket = 3, list = 4, gc = 5,
     setup_ue = 6, tun = 7, tun_down = 8, resolv = 9, exec = 10,
+    bridge = 11, veth = 12, setup_dn = 13, dn_tun = 14,
 };
+inline constexpr const char* kMidBridge = "ksim-mid";   // P2 Q6
+inline constexpr const char* kMidLink = "mid0";         // a node's leg, in its namespace
+inline constexpr const char* kDnLink = "dn0";           // a DN namespace's TUN
 enum class SockKind : std::uint8_t { sctp = 1, udp = 2 };
 enum class Status : std::uint8_t { ok = 0, refused = 1, failed = 2, malformed = 3 };
 
@@ -77,6 +100,8 @@ struct Request {
     std::uint8_t table = 0;               // tun, tun_down: 101..115
     bool main_default = false;            // tun: the main table's default route too
     std::vector<std::string> argv;        // exec: 1..16 words
+    std::array<std::uint8_t, 4> pool{};   // dn_tun: the UE pool the DN routes to dn0
+    std::uint8_t pool_prefix = 0;         // dn_tun: 8..30
 };
 
 /// The asking process, from SO_PEERCRED.
@@ -92,6 +117,14 @@ struct TunSpec {
     std::uint16_t mtu = 1500;
     std::uint8_t table = 101;
     bool main_default = false;
+};
+
+/// A DN namespace's TUN (op dn_tun, P2 Q6).
+struct DnTunSpec {
+    std::array<std::uint8_t, 4> addr{};   // the DN's address, /32 on dn0
+    std::uint16_t mtu = 1500;
+    std::array<std::uint8_t, 4> pool{};   // routed to dn0
+    std::uint8_t pool_prefix = 16;
 };
 
 struct Reply {
@@ -113,11 +146,25 @@ struct Policy {
     std::array<std::uint8_t, 4> first{};  // the address range allowed
     std::array<std::uint8_t, 4> last{};
     std::uint8_t prefix = 24;
+    // P2 Q6: ksim-mid and its legs (kaluza-uesim only; none on the dev PC, P-64).
+    bool mid = false;
+    std::array<std::uint8_t, 4> mid_first{};
+    std::array<std::uint8_t, 4> mid_last{};
+    std::uint8_t mid_prefix = 24;
+    // P2 Q6: DN namespaces and the addresses their TUN may carry.
+    bool dn = false;
+    std::array<std::uint8_t, 4> dn_first{};
+    std::array<std::uint8_t, 4> dn_last{};
 };
 
 bool valid_name(const std::string& n);
 /// A UE's namespace: valid_name and "ksim-ue-…".
 bool ue_name(const std::string& n);
+/// A DN namespace: valid_name and "ksim-dn-…" (P2 Q6).
+bool dn_name(const std::string& n);
+/// The host end of a node's ksim-mid leg: "ksim-m" and six hex digits of the
+/// namespace's name (P2 Q6).
+std::string mid_host_link(const std::string& netns);
 
 /// What netd does to the system; the real one needs root (ops_linux.cpp),
 /// tests use a fake.
@@ -137,6 +184,13 @@ public:
     /// Starts `argv` in the namespace as `peer`; fds: stdin, stdout, stderr, the status pipe. The pid.
     virtual Result<std::uint32_t> exec(const std::string& netns, const std::vector<std::string>& argv, const Peer& peer,
                                        std::vector<Fd> fds) = 0;
+    // P2 Q6.
+    virtual Result<void> bridge() = 0;
+    virtual Result<void> veth(const std::string& netns, std::array<std::uint8_t, 4> addr, std::uint8_t prefix) = 0;
+    virtual Result<void> setup_dn(const std::string& netns) = 0;
+    virtual Result<Fd> dn_tun(const std::string& netns, const DnTunSpec& t) = 0;
+    /// Removes ksim-mid and any ksim-m… link on the host; the names removed.
+    virtual std::vector<std::string> gc_links() = 0;
 };
 
 /// The request handler: policy first, then the operation.
@@ -179,6 +233,11 @@ public:
     Result<void> resolv(const std::string& netns, std::array<std::uint8_t, 4> dns) override;
     Result<std::uint32_t> exec(const std::string& netns, const std::vector<std::string>& argv, const Peer& peer,
                                std::vector<Fd> fds) override;
+    Result<void> bridge() override;
+    Result<void> veth(const std::string& netns, std::array<std::uint8_t, 4> addr, std::uint8_t prefix) override;
+    Result<void> setup_dn(const std::string& netns) override;
+    Result<Fd> dn_tun(const std::string& netns, const DnTunSpec& t) override;
+    std::vector<std::string> gc_links() override;
 };
 
 /// Reaps the exec helpers that ended (run_server calls it each turn).
@@ -203,6 +262,11 @@ public:
     /// fds: stdin, stdout, stderr and the status pipe's write end (netd writes
     /// the command's wait status there, four octets in host order, then closes it).
     Result<std::uint32_t> exec(const std::string& netns, const std::vector<std::string>& argv, const std::vector<int>& fds);
+    // P2 Q6.
+    Result<void> bridge();
+    Result<void> veth(const std::string& netns, std::array<std::uint8_t, 4> addr, std::uint8_t prefix);
+    Result<void> setup_dn(const std::string& netns);
+    Result<Fd> dn_tun(const std::string& netns, const DnTunSpec& t);
     /// netd's message for the last request that did not succeed.
     const std::string& last_error() const noexcept { return last_; }
 

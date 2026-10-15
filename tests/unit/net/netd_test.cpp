@@ -78,6 +78,33 @@ public:
         }
         return 4242;
     }
+    Result<void> bridge() override {
+        ++bridges;
+        return {};
+    }
+    Result<void> veth(const std::string& n, std::array<std::uint8_t, 4> addr, std::uint8_t prefix) override {
+        legs.push_back(n);
+        last_addr = addr;
+        last_prefix = prefix;
+        return {};
+    }
+    Result<void> setup_dn(const std::string& n) override {
+        names.insert(n);
+        return {};
+    }
+    Result<Fd> dn_tun(const std::string&, const DnTunSpec& t) override {
+        last_dn = t;
+        int sv[2];
+        if (::socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sv) != 0) {
+            return make_error(Errc::io, 0, "fake: socketpair");
+        }
+        tun_peer = Fd(sv[1]);
+        return Fd(sv[0]);
+    }
+    std::vector<std::string> gc_links() override { return {"ksim-mid"}; }
+    int bridges = 0;
+    std::vector<std::string> legs;
+    DnTunSpec last_dn;
     std::set<std::string> names{"other-ns"};
     TunSpec last_tun;
     Fd tun_peer;
@@ -368,4 +395,139 @@ TEST(Netd, ClientAndServerPassATunOneWayAndExecDescriptorsTheOther) {
 }
 
 } // namespace
+// ---- netd v3 (P2 Q6) ------------------------------------------------------------------------
+
+Policy vm() {
+    Policy p = lab();
+    p.mid = true;
+    p.mid_first = {10, 250, 0, 1};
+    p.mid_last = {10, 250, 0, 254};
+    p.mid_prefix = 24;
+    p.dn = true;
+    p.dn_first = {10, 60, 0, 1};
+    p.dn_last = {10, 60, 0, 254};
+    return p;
+}
+
+Request v3(Op op, const std::string& n = "") {
+    Request r;
+    r.op = op;
+    r.netns = n;
+    return r;
+}
+
+TEST(Netd, V3RequestsRoundTrip) {
+    Request v = v3(Op::veth, "ksim-du");
+    v.addr = {10, 250, 0, 12};
+    v.prefix = 24;
+    auto back = decode_request(encode(v));
+    ASSERT_TRUE(back);
+    EXPECT_EQ(back->op, Op::veth);
+    EXPECT_EQ(back->addr, v.addr);
+    EXPECT_EQ(back->prefix, 24);
+    Request t = v3(Op::dn_tun, "ksim-dn-1");
+    t.addr = {10, 60, 0, 1};
+    t.mtu = 1500;
+    t.pool = {10, 45, 0, 0};
+    t.pool_prefix = 16;
+    back = decode_request(encode(t));
+    ASSERT_TRUE(back);
+    EXPECT_EQ(back->pool, t.pool);
+    EXPECT_EQ(back->pool_prefix, 16);
+    EXPECT_EQ(back->mtu, 1500);
+    for (std::size_t cut = 0; cut < encode(t).size(); ++cut) {
+        EXPECT_FALSE(decode_request(ByteView(encode(t).data(), cut))) << cut;
+    }
+    back = decode_request(encode(v3(Op::bridge)));
+    ASSERT_TRUE(back);
+    EXPECT_EQ(back->op, Op::bridge);
+    EXPECT_EQ(mid_host_link("ksim-du"), mid_host_link("ksim-du"));
+    EXPECT_NE(mid_host_link("ksim-du"), mid_host_link("ksim-cuup"));
+    EXPECT_EQ(mid_host_link("ksim-du").size(), 12u);   // within IFNAMSIZ
+    EXPECT_EQ(mid_host_link("ksim-du").rfind("ksim-m", 0), 0u);
+}
+
+TEST(Netd, KsimMidAndItsLegsOnlyWhereTheyAreAllowedAndOnlyForNodeNamespaces) {
+    FakeOps dev_ops;
+    Server dev(lab(), dev_ops);   // no --mid: the dev PC
+    EXPECT_EQ(ask(dev, v3(Op::bridge)).status, Status::refused);
+    FakeOps ops;
+    Server srv(vm(), ops);
+    EXPECT_EQ(ask(srv, v3(Op::bridge)).status, Status::ok);
+    EXPECT_EQ(ops.bridges, 1);
+    Request leg = v3(Op::veth, "ksim-du");
+    leg.addr = {10, 250, 0, 12};
+    leg.prefix = 24;
+    EXPECT_EQ(ask(srv, leg).status, Status::refused);   // no such namespace yet
+    ASSERT_EQ(ask(srv, setup("ksim-du", "", {})).status, Status::ok);
+    EXPECT_EQ(ask(srv, leg).status, Status::ok);
+    EXPECT_EQ(ops.legs, std::vector<std::string>{"ksim-du"});
+    Request out = leg;
+    out.addr = {10, 250, 1, 12};
+    EXPECT_EQ(ask(srv, out).status, Status::refused);   // outside the range
+    out = leg;
+    out.prefix = 16;
+    EXPECT_EQ(ask(srv, out).status, Status::refused);
+    ASSERT_EQ(ask(srv, ue_op(Op::setup_ue)).status, Status::ok);
+    Request ue_leg = leg;
+    ue_leg.netns = ue_op(Op::setup_ue).netns;
+    EXPECT_EQ(ask(srv, ue_leg).status, Status::refused);   // a UE's namespace has no leg
+    EXPECT_EQ(ask(dev, leg).status, Status::refused);
+}
+
+TEST(Netd, DnNamespacesCarryATunInTheirRangeAndExecGoesToAnyNamespaceNetdMade) {
+    FakeOps ops;
+    Server srv(vm(), ops);
+    EXPECT_EQ(ask(srv, v3(Op::setup_dn, "ksim-cucp")).status, Status::refused);   // not a DN's name
+    ASSERT_EQ(ask(srv, v3(Op::setup_dn, "ksim-dn-1")).status, Status::ok);
+    EXPECT_EQ(ask(srv, v3(Op::setup_dn, "ksim-dn-1")).status, Status::refused);   // exists
+    Request t = v3(Op::dn_tun, "ksim-dn-1");
+    t.addr = {10, 60, 0, 1};
+    t.mtu = 1500;
+    t.pool = {10, 45, 0, 0};
+    t.pool_prefix = 16;
+    std::optional<Fd> fd;
+    EXPECT_EQ(srv.handle(encode(t), ::getuid(), fd).status, Status::ok);
+    EXPECT_TRUE(fd.has_value());
+    EXPECT_EQ(ops.last_dn.pool_prefix, 16);
+    Request bad = t;
+    bad.addr = {10, 45, 0, 1};
+    EXPECT_EQ(ask(srv, bad).status, Status::refused);   // outside --dn
+    bad = t;
+    bad.pool_prefix = 31;
+    EXPECT_EQ(ask(srv, bad).status, Status::refused);
+    bad = t;
+    bad.netns = "ksim-dn-2";
+    EXPECT_EQ(ask(srv, bad).status, Status::refused);   // not made
+    FakeOps dev_ops;
+    Server no_dn(lab(), dev_ops);
+    EXPECT_EQ(ask(no_dn, v3(Op::setup_dn, "ksim-dn-1")).status, Status::refused);
+    // exec: a node's namespace netd made (an interop peer), never one it did not make.
+    ASSERT_EQ(ask(srv, setup("ksim-cucp", "", {})).status, Status::ok);
+    Request e = v3(Op::exec, "ksim-cucp");
+    e.argv = {"ocucp", "-c", "cucp.yml"};
+    std::vector<Fd> four;
+    four.reserve(4);
+    for (int i = 0; i < 4; ++i) {
+        four.emplace_back(::dup(2));
+    }
+    std::optional<Fd> none;
+    EXPECT_EQ(srv.handle(encode(e), Peer{::getuid(), ::getgid()}, std::move(four), none).status, Status::ok);
+    EXPECT_EQ(ops.last_argv, e.argv);
+    e.netns = "ksim-unmade";
+    std::vector<Fd> four2;
+    four2.reserve(4);
+    for (int i = 0; i < 4; ++i) {
+        four2.emplace_back(::dup(2));
+    }
+    EXPECT_EQ(srv.handle(encode(e), Peer{::getuid(), ::getgid()}, std::move(four2), none).status, Status::refused);
+    // gc: the namespaces, then ksim-mid.
+    Request gc;
+    gc.op = Op::gc;
+    std::optional<Fd> g;
+    const Reply r = srv.handle(encode(gc), ::getuid(), g);
+    EXPECT_NE(std::find(r.names.begin(), r.names.end(), "ksim-mid"), r.names.end());
+    EXPECT_NE(std::find(r.names.begin(), r.names.end(), "ksim-dn-1"), r.names.end());
+}
+
 } // namespace ksim::net::netd

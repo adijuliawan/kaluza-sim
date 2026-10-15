@@ -129,6 +129,7 @@ private:
     void kair_accept(std::unique_ptr<IChannel> c);   // P2 Q3: the DU's end of KAIR
     void kair_connect();                             // P2 Q3: the farm's end
     std::unique_ptr<uicc::IApduTransport> external_reader(const UeGroup& g, std::string& why);   // P2 Q1
+    Result<void> mid_leg(const std::string& netns, const Endpoint& at, std::string& why);   // P2 Q6
     void connect_gnb();
     void teardown_gnb();
     void teardown();                         // on the shard
@@ -147,6 +148,7 @@ private:
 
     // On the shard.
     std::unique_ptr<net::netd::Client> netd_;   // with topology netd: the nodes' and UEs' namespaces
+    std::vector<std::string> my_netns_;          // the node namespaces this process set up (P2 Q6)
     std::unique_ptr<NetdUeNet> ue_net_;         // with netd ues: the UEs' TUN data plane
     std::unique_ptr<net::SctpClient> ng_;
     std::unique_ptr<TapAssoc> ng_tap_;

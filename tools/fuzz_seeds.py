@@ -123,7 +123,7 @@ def main() -> int:
         return b"".join(len(p).to_bytes(2, "big") + p for p in pdus)
     seeds["fuzz_ngap_proc"] = [lp(bytes.fromhex(r["hex"])) for r in ngap_rows]
     # fuzz_netd_req: ksim-netd requests (src/net/netd.cpp encode()): setup_node in and out
-    # of the policy, teardown, socket, list, gc.
+    # of the policy, teardown, socket, list, gc, and the netd v3 operations.
     def nstr(t):
         return bytes([len(t)]) + t
     seeds["fuzz_netd_req"] = [
@@ -131,7 +131,14 @@ def main() -> int:
         bytes([1, 1]) + nstr(b"ksim-cuup") + nstr(b"") + bytes([0, 0, 0, 0, 0]),
         bytes([1, 1]) + nstr(b"ksim-x") + nstr(b"eth0") + bytes([172, 30, 30, 1, 24]),
         bytes([1, 2]) + nstr(b"ksim-cucp"), bytes([1, 3]) + nstr(b"ksim-cucp") + bytes([1, 4]),
-        bytes([1, 3]) + nstr(b"ksim-cucp") + bytes([2, 6]), bytes([1, 4]), bytes([1, 5])]
+        bytes([1, 3]) + nstr(b"ksim-cucp") + bytes([2, 6]), bytes([1, 4]), bytes([1, 5]),
+        # P2 Q6, netd v3: bridge, veth (in and out of the --mid range), setup_dn, dn_tun, exec in a node.
+        bytes([1, 11]),
+        bytes([1, 12]) + nstr(b"ksim-cucp") + bytes([10, 250, 0, 10, 24]),
+        bytes([1, 12]) + nstr(b"ksim-ue-1") + bytes([10, 251, 0, 10, 24]),
+        bytes([1, 13]) + nstr(b"ksim-dn-1"),
+        bytes([1, 14]) + nstr(b"ksim-dn-1") + bytes([10, 60, 0, 1, 0x05, 0xdc, 10, 45, 0, 0, 16]),
+        bytes([1, 10]) + nstr(b"ksim-cucp") + bytes([1]) + nstr(b"ocucp")]
     seeds["fuzz_mustfail"] = [b"KSIM must crash here"]
     total = 0
     for target, items in seeds.items():
