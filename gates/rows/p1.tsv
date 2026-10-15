@@ -8,6 +8,8 @@
 # Rows named ksim-p1.* are kaluza-sim's own (sim behaviour the reference gates cannot see).
 # N18 correction: smsf.022 needs SMS added to a subscription on the core, a core-side trigger kaluza-sim
 # has none of on kaluza-core in P1 (the user, 2026-10-15), so its cores are the stub's (Open5GS: D3).
+# Likewise ksim-p1.backoff (W4): it needs a #29 reject with a back-off timer and an accept after it, which
+# kaluza-core has no trigger for; its probe there found KF-001 (F-76), fixed and verified in W4.
 #
 #   observable  sim: kaluza-sim's own evidence (events, ksim-ctl output, its pcaps) decides the row;
 #               core: only the core's state, logs or metrics can (not a kaluza-sim row; P4 parity)
@@ -269,4 +271,4 @@ ksim-p1.reregistration-required	kaluza-sim	-	after a network deregistration with
 ksim-p1.radio-loss-release	kaluza-sim	-	an abrupt power-off leads the gNB to ask for a release with radio connection with UE lost	idle	sim	sim	yes	stub,open5gs,kaluza	N12	no_release_on_radio_loss	ngap UEContextReleaseRequest cause radio-connection-with-ue-lost
 ksim-p1.guti-after-power-cycle	kaluza-sim	-	after a graceful power cycle the UE registers with its 5G-GUTI and a protected initial message	registration	sim	sim	yes	stub,open5gs,kaluza	N12	guti_not_persisted	nas pcap: 5G-GUTI identity; initial message integrity-protected (EF 4F01, 4F03)
 ksim-p1.sms-not-allowed	kaluza-sim	-	the UE sends no SMS while SMS over NAS is not allowed	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	ksim-ctl ue sms-send exit 6; no CP-DATA in the pcap
-ksim-p1.backoff	kaluza-sim	-	after a #29 rejection with a back-off timer the UE waits it out before asking again	session	sim	sim	yes	stub,open5gs,kaluza	N10	ignore_backoff	event nas.sm.backoff; no request before expiry
+ksim-p1.backoff	kaluza-sim	-	after a #29 rejection with a back-off timer the UE waits it out before asking again	session	sim	sim	yes	stub,open5gs	N10	ignore_backoff	event nas.sm.backoff; no request before expiry
