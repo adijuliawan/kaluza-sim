@@ -94,6 +94,7 @@ struct UeTaps {
 /// What `sim info` shows: read from the card in the reader, never a key.
 struct SimInfo {
     bool present = true;
+    std::string reader = "inproc";   // inproc, pcsc:<reader> or bridge:<host:port> (P2 Q1)
     std::string atr;
     std::string iccid;
     std::string imsi;
@@ -108,6 +109,11 @@ public:
     /// `net`: the system's side of the TUN data plane (none: inject mode).
     UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::os::Card> card,
              std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net = nullptr);
+    /// P2 Q1: a card outside the process (PC/SC, the card bridge): `reader`
+    /// reaches it, `reader_name` says how (sim info's READER). No soft card,
+    /// so sim read is refused; the card itself keeps what it holds.
+    UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::IApduTransport> reader,
+             std::string reader_name, std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net = nullptr);
     ~UeDevice();
     UeDevice(const UeDevice&) = delete;
     UeDevice& operator=(const UeDevice&) = delete;
@@ -173,6 +179,9 @@ public:
     proc::ue::MmState mm_state() const noexcept { return mm_->state(); }
 
 private:
+    UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::os::Card> card,
+             std::unique_ptr<uicc::IApduTransport> reader, std::string reader_name, std::function<void(air::Frame)> to_air,
+             const UeTaps& taps, IUeNet* net);
     struct Ping {
         std::uint16_t id = 0;
         PingRequest req;
@@ -212,9 +221,11 @@ private:
 
     Executor& ex_;
     UeDeviceConfig cfg_;
-    std::unique_ptr<uicc::os::Card> card_;
-    uicc::InProcTransport transport_;
-    uicc::trace::TracingTransport tracer_;   // between the reader and the terminal: off until sim trace on
+    std::unique_ptr<uicc::os::Card> card_;            // the soft card, or none for a card outside the process
+    std::unique_ptr<uicc::IApduTransport> reader_;    // InProc over card_, PC/SC, or the bridge
+    std::string reader_name_;
+    uicc::CardSlot slot_;                             // the card in the reader, or none (sim remove|insert)
+    uicc::trace::TracingTransport tracer_;   // between the slot and the terminal: off until sim trace on
     uicc::Terminal terminal_;
     std::function<void(std::uint8_t, ByteView, const std::string&)> sim_tap_;
     std::unique_ptr<proc::ue::UeRrc> rrc_;

@@ -461,6 +461,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             Reply r;
             r.set("UE", ue->subject().substr(3));
             r.set("PRESENT", i.present ? "1" : "0");
+            r.set("READER", i.reader);
             r.set("ICCID", i.iccid);
             r.set("IMSI", i.imsi);
             r.set("MSISDN", i.msisdn);

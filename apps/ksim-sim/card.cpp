@@ -29,7 +29,11 @@
 #include "uicc/image/image.hpp"
 #include "uicc/secrets/secrets.hpp"
 #include "uicc/trace/trace.hpp"
+#include "uicc/transport/bridge.hpp"
 #include "uicc/transport/vpcd.hpp"
+#ifdef KSIM_HAVE_PCSC
+#include "uicc/transport/pcsc.hpp"
+#endif
 
 namespace ksim::sim {
 
@@ -287,6 +291,137 @@ int serve(const ServeOptions& o) {
     std::cout << "APDUS=" << apdus << "\nCONNECTS=" << connects << "\nTRACED=" << trace.count() << "\n";
     return 0;
 }
+
+#ifdef KSIM_HAVE_PCSC
+// ---- the card bridge (P2 Q1; lab.md §7) -------------------------------------------------------
+
+int serve_bridge(const BridgeOptions& o) {
+    auto at = Endpoint::parse(o.listen);
+    auto allow = Endpoint::parse(o.allow, 0);
+    if (!at || !allow) {
+        std::cerr << "ksim-sim: --listen is host:port and --allow one numeric address\n";
+        return 2;
+    }
+    auto names = uicc::pcsc::readers();
+    if (!names) {
+        std::cerr << "ksim-sim: " << names.error().what << "\n";
+        return 1;
+    }
+    auto reader = uicc::pcsc::pick(*names, o.reader);
+    if (!reader) {
+        std::cerr << "ksim-sim: --pcsc: " << reader.error().what << "\n";
+        return 2;
+    }
+    auto card = uicc::pcsc::PcscCard::open(*reader);
+    if (!card) {
+        std::cerr << "ksim-sim: " << *reader << ": " << card.error().what << "\n";
+        return 1;
+    }
+    ServeOptions to;
+    to.trace_udp = o.trace_udp;
+    to.trace_pcap = o.trace_pcap;
+    TraceOut trace;
+    std::string why;
+    if (!trace.open(to, why)) {
+        std::cerr << "ksim-sim: " << why << "\n";
+        return 2;
+    }
+    std::signal(SIGINT, on_signal);
+    std::signal(SIGTERM, on_signal);
+    std::signal(SIGPIPE, SIG_IGN);
+    Reactor reactor;
+    uicc::trace::Redactor redactor(true);
+    uicc::bridge::AdminFilter filter(o.admin);
+    std::unique_ptr<IStream> client;
+    std::unique_ptr<uicc::vpcd::Deframer> in;
+    std::size_t apdus = 0;
+    std::size_t clients = 0;
+    std::size_t turned_away = 0;
+    auto answer = [&](ByteView payload) {
+        if (client && client->open()) {
+            (void)client->send(uicc::vpcd::frame(payload));
+        }
+    };
+    auto on_message = [&](ByteView m) {
+        if (m.size() == 1) {
+            if (m[0] == uicc::vpcd::kPowerOn || m[0] == uicc::vpcd::kReset) {
+                filter.reset();
+                auto atr = (*card)->reset();
+                if (trace.any() && atr) {
+                    for (const auto& rec : redactor.flush()) {
+                        trace.put(uicc::trace::kSubApdu, rec);
+                    }
+                    redactor.reset();
+                    trace.put(uicc::trace::kSubAtr, *atr);
+                }
+            } else if (m[0] == uicc::vpcd::kAtr) {
+                auto atr = (*card)->atr();
+                answer(atr ? ByteView(*atr) : ByteView());
+            }
+            return;
+        }
+        ++apdus;
+        Bytes rsp;
+        if (auto sw = filter.check(m)) {
+            rsp = {static_cast<std::uint8_t>(*sw >> 8), static_cast<std::uint8_t>(*sw & 0xFF)};
+        } else if (auto r = (*card)->transmit(m)) {
+            rsp = std::move(*r);
+        } else {
+            rsp = {0x6F, 0x00};   // no precise diagnosis (TS 102 221 §10.2.1.6)
+        }
+        if (trace.any()) {
+            for (const auto& rec : redactor.apply(m, rsp)) {
+                trace.put(uicc::trace::kSubApdu, rec);
+            }
+        }
+        answer(rsp);
+        secure_zero(rsp);
+    };
+    auto listener = net::TcpListener::listen(reactor, *at, [&](std::unique_ptr<IStream> s) {
+        const Endpoint peer = s->peer();
+        if (peer.family != allow->family || peer.addr != allow->addr || (client && client->open())) {
+            ++turned_away;
+            std::cout << "REFUSED=" << peer.host() << (client && client->open() ? " (a client is connected)" : "") << "\n"
+                      << std::flush;
+            s->close();
+            return;
+        }
+        client = std::move(s);
+        ++clients;
+        in = std::make_unique<uicc::vpcd::Deframer>(on_message);
+        client->set_handlers([&](ByteView d) { in->feed(d); },
+                             [&] { std::cout << "CLIENT=closed\n" << std::flush; });
+        std::cout << "CLIENT=" << peer.host() << "\n" << std::flush;
+    });
+    if (!listener) {
+        std::cerr << "ksim-sim: cannot listen on " << o.listen << ": " << listener.error().what << "\n";
+        return 1;
+    }
+    std::cout << "BRIDGE=" << o.listen << "\nREADER=" << *reader << "\nALLOW=" << o.allow << "\nADMIN=" << (o.admin ? 1 : 0)
+              << "\n" << std::flush;
+    const auto start = std::chrono::steady_clock::now();
+    while (g_stop == 0) {
+        if (o.seconds != 0 && std::chrono::steady_clock::now() - start >= std::chrono::seconds(o.seconds)) {
+            break;
+        }
+        (void)reactor.run_once(100);
+    }
+    for (const auto& rec : redactor.flush()) {
+        trace.put(uicc::trace::kSubApdu, rec);
+    }
+    if (client) {
+        client->close();
+    }
+    std::cout << "APDUS=" << apdus << "\nREFUSED_APDUS=" << filter.refused() << "\nCLIENTS=" << clients
+              << "\nTURNED_AWAY=" << turned_away << "\nTRACED=" << trace.count() << "\n";
+    return 0;
+}
+#else
+int serve_bridge(const BridgeOptions&) {
+    std::cerr << "ksim-sim: this build has no PC/SC (KSIM_PCSC is off)\n";
+    return 2;
+}
+#endif
 
 // ---- validate, export, import ----
 

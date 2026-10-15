@@ -35,6 +35,20 @@ struct ServeOptions {
 };
 
 int serve(const ServeOptions& o);
+
+/// The card bridge (P2 Q1; lab.md §7): a card in a PC/SC reader lent to one
+/// remote terminal over the vpcd framing. Only APDUs cross; unless `admin`,
+/// the administrator's commands are refused here (uicc/transport/bridge).
+struct BridgeOptions {
+    std::string reader;                       // --pcsc: a reader name, "#n" or a unique part
+    std::string listen = "127.0.0.1:35970";   // one address
+    std::string allow;                        // the one peer address taken
+    bool admin = false;
+    std::string trace_udp;
+    std::string trace_pcap;
+    unsigned seconds = 0;
+};
+int serve_bridge(const BridgeOptions& o);
 /// Checks an image (TS 102 221 and TS 31.102: ARR references, FIDs and SFIs,
 /// record sizes, EF.DIR, the files each UST service brings, key files never
 /// readable). `access`: one line per EF with its READ access in the state

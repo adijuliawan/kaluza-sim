@@ -42,4 +42,22 @@ private:
     os::Card* card_;
 };
 
+/// A reader slot (P2 Q1): the card's transport, or none while the UICC is
+/// out (`sim remove|insert`). With none, every call fails with Errc::closed,
+/// through the executor as an answer would come.
+class CardSlot final : public IApduTransport {
+public:
+    CardSlot(Executor& exec, IApduTransport* inner) : exec_(exec), inner_(inner) {}
+
+    void insert(IApduTransport* inner) noexcept { inner_ = inner; }
+    bool empty() const noexcept { return inner_ == nullptr; }
+
+    void reset(Done done) override;
+    void transmit(Bytes capdu, Done done) override;
+
+private:
+    Executor& exec_;
+    IApduTransport* inner_;
+};
+
 } // namespace ksim::uicc

@@ -15,3 +15,5 @@ dereg_no_reregistration	ksim-p1.reregistration-required	after a network de-regis
 no_release_on_radio_loss	ksim-p1.radio-loss-release	the DU never reports a UE it no longer hears from, so no release request with radio connection with UE lost (TS 38.473 8.3.2)
 guti_not_persisted	ksim-p1.guti-after-power-cycle	EF.5GS3GPPLOCI is neither written nor read, so a power cycle loses the 5G-GUTI (TS 31.102 4.4.11.2, TS 24.501 5.5.1.2.4)
 sms_rp_da_empty	smsf.024	RP-DA left empty instead of the service centre of EF.SMSP, so the SC refuses the submit (TS 24.011 7.3.1.2; L7)
+pcsc_response_truncated	ksim-p2.pcsc-register	the PC/SC transport drops a response's data and keeps SW1 SW2, so the UE never reads its card (P2 Q1)
+bridge_admin_open	ksim-p2.bridge-refuses-admin	the card bridge lets VERIFY ADM1 and AF20/AF30 writes through without --admin (P2 Q1)

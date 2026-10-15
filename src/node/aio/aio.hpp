@@ -29,6 +29,7 @@
 #include "node/aio/run_dir.hpp"
 #include "node/aio/topology.hpp"
 #include "node/ue/device.hpp"
+#include "platform/blocking.hpp"
 #include "platform/clock.hpp"
 #include "platform/event.hpp"
 #include "platform/memlink.hpp"
@@ -108,6 +109,7 @@ private:
     AllInOne(Topology t, std::string run_dir);
     Result<void> build(std::string& why);   // on the shard
     Result<void> build_gnb(std::string& why);
+    std::unique_ptr<uicc::IApduTransport> external_reader(const UeGroup& g, std::string& why);   // P2 Q1
     void connect_gnb();
     void teardown_gnb();
     void teardown();                         // on the shard
@@ -121,6 +123,7 @@ private:
     std::unique_ptr<EventFile> event_file_;
     std::unique_ptr<Capture> capture_;
     std::unique_ptr<Shard> shard_;
+    std::unique_ptr<BlockingPool> blocking_;   // P2 Q1: PC/SC calls, made when a UE's card is pcsc:
     bool stopped_ = false;
 
     // On the shard.

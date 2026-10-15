@@ -83,7 +83,7 @@ EVENT_SEQ=48211
 | | `power off [--switch-off\|--graceful\|--abrupt]` | Switch-off deregistration, graceful (state written to the card), or abrupt (battery pull: no NAS, no card write) | v1 |
 | | `airplane on\|off` | Radio off/on as a phone does: deregistration with switch-off when registered, then no radio | v1 |
 | | `reboot` | `power off --graceful` then `power on` | v1 |
-| SIM | `sim info` | ICCID, IMSI, UST/EST service flags, SUCI scheme, routing indicator. **Never keys** | v1 |
+| SIM | `sim info` | READER (inproc, pcsc:<reader>, bridge:<host:port>; P2 Q1), ICCID, IMSI, UST/EST service flags, SUCI scheme, routing indicator. **Never keys**. For a card outside the process only READER and IMSI, and `sim read` is refused | v1 |
 | | `sim read <EF>` | Decoded content of a non-secret EF (e.g. `5GS3GPPLOCI`, `FPLMN`, `SMSP`). Refuses 4F03/4F05/AF20/AF30 | v1 |
 | | `sim remove` · `sim insert <card>` · `sim swap <card>` | Card removal (NAS remove-SIM handling) and insertion | v1 |
 | | `sim trace on\|off` | GSMTAP-SIM APDU trace, redacted ([`sim-uicc.md`](sim-uicc.md) §6) | v1 |

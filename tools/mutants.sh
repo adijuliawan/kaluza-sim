@@ -39,13 +39,20 @@ while IFS=$'\t' read -r name row _; do
     [[ -z "$name" || "$name" == name || "$name" == \#* ]] && continue
     if [[ ${#want[@]} -gt 0 && ! " ${want[*]} " == *" $name "* ]]; then continue; fi
     total=$((total + 1))
-    gate=$(grep -l "row $row " "$ROOT"/gates/verification/ksim-p1-*.sh | head -n 1)
+    gate=$(grep -l "row $row " "$ROOT"/gates/verification/ksim-p[12]-*.sh | head -n 1)
     if [[ -z "$gate" ]]; then
         echo "MUTANT=$name SURVIVED row=$row gate=none (no gate scores the row)" | tee -a "$OUT/summary.txt"
         continue
     fi
+    # A gate that needs a reader or a peer runs its mutants in its own hook (P2 Q1: 57-pcsc).
+    if elsewhere=$(sed -n 's/^# mutants: run by //p' "$gate") && [[ -n "$elsewhere" ]]; then
+        total=$((total - 1))
+        echo "MUTANT=$name ELSEWHERE row=$row gate=$(basename "$gate") by=$elsewhere" | tee -a "$OUT/summary.txt"
+        continue
+    fi
     KSIM_MUTANT="$name" KSIM_BIN="$T/bin" KSIM_RUNS="$T/runs-$name" KSIM_MASTER="$T/keys/master.key" \
         KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
+        KSIM_PHASE="$(case "$gate" in *ksim-p2-*) echo p2 ;; *) echo p1 ;; esac)" \
         sh "$ROOT/gates/run.sh" stub "$gate" > "$OUT/$name.out" 2>&1
     run=$(sed -n 's/^RUN_DIR=//p' "$OUT/$name.out")
     res=$(awk -F'\t' -v r="$row" '$1 == r {print $2}' "$run/rows.tsv" 2>/dev/null | head -n 1)

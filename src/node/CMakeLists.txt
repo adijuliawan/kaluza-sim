@@ -21,3 +21,6 @@ target_link_libraries(ksim_node
     PUBLIC ksim::proc ksim::net ksim::api ksim::uicc ksim::platform ksim::codec_air ksim::codec_ip ksim::codec_ngap ksim::crypto
     PRIVATE ksim::buildinfo ksim::warnings)
 ksim_layer(ksim_node node)
+if(KSIM_PCSC)
+    target_link_libraries(ksim_node PUBLIC ksim::uicc_pcsc)   # P2 Q1: card: {pcsc: …}
+endif()

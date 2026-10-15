@@ -111,8 +111,28 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             if (!all_digits(grp.first_imsi) || grp.first_imsi.size() != 15 || grp.count == 0 || grp.count > 1000) {
                 u.fail("a range is a 15-digit first IMSI, and a count 1..1000");
             }
-            u.at("card").only({"template"});
-            grp.card_template = resolve_path(u.at("card").at("template").as<std::string>(), base);
+            const Yaml card = u.at("card");
+            card.only({"template", "pcsc", "bridge"});
+            if (card.has("template") + card.has("pcsc") + card.has("bridge") != 1) {
+                card.fail("a card is one of template, pcsc or bridge");
+            }
+            if (card.has("template")) {
+                grp.card_template = resolve_path(card.at("template").as<std::string>(), base);
+            } else {
+                // P2 Q1: a card outside the process is one card, so its group holds one UE.
+                if (grp.count != 1) {
+                    card.fail("a pcsc or bridge card serves one UE (count: 1)");
+                }
+                if (card.has("pcsc")) {
+                    card.at("pcsc").only({"reader"});
+                    grp.card_pcsc = card.at("pcsc").at("reader").as<std::string>();
+                } else {
+                    grp.card_bridge = card.at("bridge").as<std::string>();
+                    if (!Endpoint::parse(grp.card_bridge)) {
+                        card.fail("a bridge is host:port");
+                    }
+                }
+            }
             if (u.has("persona")) {
                 grp.persona = resolve_path(u.at("persona").as<std::string>(), base);   // N15
             }

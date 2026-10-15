@@ -19,3 +19,16 @@ add_library(ksim::uicc ALIAS ksim_uicc)
 target_include_directories(ksim_uicc PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_uicc PUBLIC ksim::platform ksim::codec_uicc ksim::crypto PRIVATE ksim::warnings)
 ksim_layer(ksim_uicc uicc)
+
+# The card bridge's command filter (P2 Q1): pure, so in the uicc library itself.
+target_sources(ksim_uicc PRIVATE transport/bridge.cpp)
+
+# P2 Q1: the PC/SC backend, a library of its own so only what uses it links pcsc-lite.
+if(KSIM_PCSC)
+    add_library(ksim_uicc_pcsc STATIC transport/pcsc.cpp)
+    add_library(ksim::uicc_pcsc ALIAS ksim_uicc_pcsc)
+    target_include_directories(ksim_uicc_pcsc PUBLIC ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(ksim_uicc_pcsc PUBLIC ksim::uicc ksim::platform PRIVATE PkgConfig::PCSCLITE ksim::warnings)
+    target_compile_definitions(ksim_uicc_pcsc PUBLIC KSIM_HAVE_PCSC=1)
+    ksim_layer(ksim_uicc_pcsc uicc)
+endif()

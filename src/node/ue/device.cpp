@@ -26,8 +26,20 @@ std::string guti_text(const nas::ie::MobileIdentity& g) {
 
 UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::os::Card> card,
                    std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net)
-    : ex_(ex), cfg_(std::move(cfg)), card_(std::move(card)), transport_(ex, card_.get()), tracer_(transport_, {}),
-      terminal_(tracer_), sim_tap_(taps.sim), events_(events), net_(cfg_.netns.empty() ? nullptr : net) {
+    : UeDevice(ex, events, std::move(cfg), std::move(card), nullptr, "inproc", std::move(to_air), taps, net) {}
+
+UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::IApduTransport> reader,
+                   std::string reader_name, std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net)
+    : UeDevice(ex, events, std::move(cfg), nullptr, std::move(reader), std::move(reader_name), std::move(to_air), taps,
+               net) {}
+
+UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::os::Card> card,
+                   std::unique_ptr<uicc::IApduTransport> reader, std::string reader_name,
+                   std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net)
+    : ex_(ex), cfg_(std::move(cfg)), card_(std::move(card)),
+      reader_(reader ? std::move(reader) : std::make_unique<uicc::InProcTransport>(ex, card_.get())),
+      reader_name_(std::move(reader_name)), slot_(ex, reader_.get()), tracer_(slot_, {}), terminal_(tracer_),
+      sim_tap_(taps.sim), events_(events), net_(cfg_.netns.empty() ? nullptr : net) {
     const std::string subject = "ue:imsi-" + cfg_.supi;
     proc::ue::RrcConfig rc;
     rc.id = subject;
@@ -315,7 +327,7 @@ Result<void> UeDevice::sim(bool present) {
     sim_present_ = present;
     events_.emit("ue.sim", subject(), {{"present", present ? "1" : "0"}});
     if (!present) {
-        transport_.insert(nullptr);
+        slot_.insert(nullptr);
         if (powered_) {
             if (proc::ue::is_registered(mm_->state()) || mm_->state() == proc::ue::MmState::registered_initiated) {
                 sm_->release_all_local("deregistration");   // the de-registration takes the sessions
@@ -326,7 +338,7 @@ Result<void> UeDevice::sim(bool present) {
         }
         return {};
     }
-    transport_.insert(card_.get());
+    slot_.insert(reader_.get());
     if (powered_) {
         const bool was_no_supi = mm_->state() == proc::ue::MmState::deregistered_no_supi;
         mm_->usim_inserted();
@@ -396,6 +408,11 @@ std::string lower(std::string_view s) {
 SimInfo UeDevice::sim_info() const {
     SimInfo s;
     s.present = sim_present_;
+    s.reader = reader_name_;
+    if (!card_) {
+        s.imsi = cfg_.supi;   // a card outside the process: what the terminal read from it at power-up
+        return s;
+    }
     s.atr = to_hex(card_->atr());
     const uicc::os::File& mf = card_->mf();
     auto ef = [&](std::uint16_t fid) { return find_ef(mf, [fid](const uicc::os::File& f) { return f.fid == fid; }); };
@@ -431,6 +448,9 @@ SimInfo UeDevice::sim_info() const {
 }
 
 Result<UeDevice::SimEf> UeDevice::sim_read(std::string_view want) const {
+    if (!card_) {
+        return make_error(Errc::unsupported, 0, "the card is outside the process: read it with pySim where it sits");
+    }
     const std::string w = lower(want);
     const uicc::os::File* f = nullptr;
     const uicc::os::File& mf = card_->mf();

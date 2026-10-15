@@ -97,6 +97,13 @@ IApduTransport { reset(cb); transmit(capdu, cb); }
 - **Terminal side, `VpcdTransport`:** one exchange at a time over a stream a card connected; a reset sends 2 then 4.
 - **Readers:** CI uses reader 1 and leaves reader 0 for people. On Ubuntu the vpcd driver listens on 0.0.0.0, not loopback; that is the package's reader.conf, not ours.
 
+**PC/SC and the card bridge as built (P2 Q1; rows KS-UICC-B11 to B13, T7).**
+- **`Pcsc`:** pcsc-lite's SCardConnect (exclusive, T=0 or T=1), SCardTransmit and SCardReconnect, on the 2-thread blocking pool, one call at a time per card. It is built only with `KSIM_PCSC` (off in release-lab).
+- **A UE's card outside the process:** `card: {pcsc: {reader: <name, #n or a unique part>}}` on the dev PC, or `card: {bridge: <host:port>}` on the lab VM; one UE per such group. `sim info` then prints `READER=pcsc:…` or `READER=bridge:…`, and `sim read` is refused. The card must have PIN1 disabled: the UE never sends VERIFY PIN1.
+- **The bridge:** `ksim-sim serve --pcsc <reader> --listen <host:port> --allow <address> [--admin]`. One client at a time, from that address only. Without `--admin` it answers 6982 itself to VERIFY/CHANGE/DISABLE/ENABLE/UNBLOCK of an ADM key, to UPDATE while AF20 or AF30 is selected, and to CREATE, DELETE and TERMINATE.
+- **The burn:** `ksim-sim adm1 seal --out <file> --kek <file>`, then `ksim-sim burn --pcsc <reader> --imsi <IMSI> --master <file> --adm1 <file> --kek <file> [--dry-run]` (section 8, step 4). It stops before any VERIFY when ADM1 has fewer than 3 tries; it verifies ADM1 once; it writes AF20 and the personalising EFs, reads the IMSI back, and checks K and OPc with one AUTHENTICATE at SQN 0 (a RES, or an AUTS whose MAC-S checks). Only K_FPR is printed.
+- **CI:** `tools/ci.d/57-pcsc.sh` runs all of it on pcscd's vpcd reader 1, with our soft card dressed as a sysmoISIM-SJA5, and kills the mutants `pcsc_response_truncated` and `bridge_admin_open`.
+
 A card is attached to exactly one terminal at a time, as a physical card sits in one reader. `ksim-ctl ue <n> sim remove|insert|swap` models card removal and swap ([`cli.md`](cli.md)).
 
 **AT passthrough (v1.x).** On the optional AT port, +CSIM, +CRSM and +CCHO/+CCHC/+CGLA forward APDUs to the same transport. lpac's AT backend, which uses CCHO/CGLA, can then reach the card.

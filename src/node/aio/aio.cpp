@@ -12,6 +12,7 @@
 
 #include "codec/air/kair.hpp"
 #include "net/netd.hpp"
+#include "net/tcp.hpp"
 #include "net/sctp.hpp"
 #include "net/udp.hpp"
 #include "platform/memlink.hpp"
@@ -21,6 +22,10 @@
 #include "proc/ran/du.hpp"
 #include "uicc/image/image.hpp"
 #include "uicc/secrets/secrets.hpp"
+#include "uicc/transport/vpcd.hpp"
+#ifdef KSIM_HAVE_PCSC
+#include "uicc/transport/pcsc.hpp"
+#endif
 
 namespace ksim::node {
 
@@ -96,7 +101,9 @@ std::unique_ptr<AllInOne> AllInOne::start(const Topology& t, const std::string& 
 }
 
 Result<void> AllInOne::build(std::string& why) {
-    auto kek = uicc::secrets::load_kek(topo_.kek_file);
+    // P2 Q1: only soft cards need the KEK; a pcsc: or bridge: card keeps its keys itself.
+    const bool soft = std::any_of(topo_.ues.begin(), topo_.ues.end(), [](const UeGroup& g) { return !g.card_template.empty(); });
+    Result<SecretBytes> kek = soft ? uicc::secrets::load_kek(topo_.kek_file) : Result<SecretBytes>(SecretBytes{});
     if (!kek) {
         why = std::string("the KEK: ") + kek.error().what;
         return kek.error();
@@ -131,6 +138,10 @@ Result<void> AllInOne::build(std::string& why) {
             if (!sub) {
                 why = "imsi-" + imsi + ": " + sub.error().what;
                 return sub.error();
+            }
+            if (g.card_template.empty()) {
+                cards.push_back(Card{imsi, g.group, &g, nullptr});   // P2 Q1: the card is outside the process
+                continue;
             }
             auto sealed = read_all(topo_.sealed_dir + "/imsi-" + imsi + ".sec");
             if (!sealed) {
@@ -272,9 +283,19 @@ Result<void> AllInOne::build(std::string& why) {
             taps.nas = [cap](bool ul, ByteView plain, const std::string& supi) { cap->nas(ul, plain, supi); };
         }
         taps.sim = [cap](std::uint8_t sub, ByteView payload, const std::string& supi) { cap->sim(sub, payload, supi); };
-        ues_.push_back(std::make_unique<UeDevice>(*shard_, events_, std::move(uc), std::move(c.card),
-                                                  [this, i](const air::Frame& f) { ue_to_air(i, f); }, taps,
-                                                  ue_net_.get()));
+        auto to_air = [this, i](const air::Frame& f) { ue_to_air(i, f); };
+        if (c.card) {
+            ues_.push_back(std::make_unique<UeDevice>(*shard_, events_, std::move(uc), std::move(c.card), std::move(to_air),
+                                                      taps, ue_net_.get()));
+        } else {
+            auto reader = external_reader(*c.g, why);
+            if (!reader) {
+                return make_error(Errc::invalid_argument, 0, "a UE's card reader cannot be opened");
+            }
+            const std::string name = c.g->card_pcsc.empty() ? "bridge:" + c.g->card_bridge : "pcsc:" + c.g->card_pcsc;
+            ues_.push_back(std::make_unique<UeDevice>(*shard_, events_, std::move(uc), std::move(reader), name,
+                                                      std::move(to_air), taps, ue_net_.get()));
+        }
         (*dgram)->set_handler([this, i](ByteView payload, const Endpoint&) {
             auto f = air::decode(payload);
             if (!f) {
@@ -291,6 +312,34 @@ Result<void> AllInOne::build(std::string& why) {
 
     connect_gnb();
     return {};
+}
+
+std::unique_ptr<uicc::IApduTransport> AllInOne::external_reader(const UeGroup& g, std::string& why) {
+    if (!g.card_bridge.empty()) {
+        // The card bridge (lab.md §7): vpcd framing over TCP, this UE in the terminal role.
+        auto ep = Endpoint::parse(g.card_bridge);
+        auto s = ep ? net::tcp_connect(shard_->reactor(), *ep) : Result<std::unique_ptr<IStream>>(ep.error());
+        if (!s) {
+            why = "group " + g.group + ": the card bridge " + g.card_bridge + " cannot be reached";
+            return nullptr;
+        }
+        return std::make_unique<uicc::vpcd::VpcdTransport>(*shard_, std::move(*s));
+    }
+#ifdef KSIM_HAVE_PCSC
+    auto names = uicc::pcsc::readers();
+    auto reader = names ? uicc::pcsc::pick(*names, g.card_pcsc) : Result<std::string>(names.error());
+    if (!reader) {
+        why = "group " + g.group + ": PC/SC reader " + g.card_pcsc + ": " + reader.error().what;
+        return nullptr;
+    }
+    if (!blocking_) {
+        blocking_ = std::make_unique<BlockingPool>(2);
+    }
+    return std::make_unique<uicc::pcsc::PcscTransport>(*shard_, *blocking_, *reader);
+#else
+    why = "group " + g.group + ": this build has no PC/SC (KSIM_PCSC is off, as in release-lab): use card: {bridge: …}";
+    return nullptr;
+#endif
 }
 
 Result<void> AllInOne::build_gnb(std::string& why) {

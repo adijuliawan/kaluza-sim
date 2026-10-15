@@ -28,6 +28,9 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)  # no C++20 modules; skips the dyndep scan
 option(KSIM_WERROR "Treat warnings in hand-written code as errors" ON)
 set(KSIM_ARCH_FLAGS "" CACHE STRING "Target-CPU flags, e.g. the release-lab preset's x86-64-v3 set")
 option(KSIM_MUTATIONS "Compile the sim mutants' switches in (platform/mutation.hpp; preset mutants)" OFF)
+# P2 Q1: the PC/SC card backend (pcsc-lite). Off in release-lab: the lab VM reaches real cards through the
+# card bridge (lab.md section 7), so its binaries need no libpcsclite.
+option(KSIM_PCSC "Build the PC/SC card backend (uicc/transport/pcsc, ksim-sim burn and the card bridge)" ON)
 if(KSIM_MUTATIONS)
     add_compile_definitions(KSIM_MUTATIONS=1)
 endif()
@@ -69,6 +72,10 @@ else()
 endif()
 find_package(nlohmann_json 3.11 REQUIRED)
 find_package(CLI11 2.4 REQUIRED)
+if(KSIM_PCSC)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(PCSCLITE REQUIRED IMPORTED_TARGET libpcsclite)
+endif()
 ksim_asn1_generate()
 
 enable_testing()

@@ -51,7 +51,9 @@ struct UeGroup {
     std::string group;
     unsigned count = 1;
     std::string first_imsi;
-    std::string card_template;
+    std::string card_template;              // the soft card, or one of:
+    std::string card_pcsc;                  // P2 Q1: a PC/SC reader (exact name, "#n", or a unique part)
+    std::string card_bridge;                // P2 Q1: the card bridge's host:port (ksim-sim serve --pcsc)
     std::vector<Slice> nssai{Slice{}};   // the requested NSSAI
     std::string imeisv_tac = "86000000";   // 8 digits; the SNR comes from the IMSI
     std::string persona;                    // N15: a persona file (personas/), empty: the generic UE

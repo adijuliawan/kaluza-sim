@@ -13,6 +13,11 @@
 //   ksim-sim range provision --target open5gs --block <…> --master <file> --ssh <host>
 //            [--db-config <remote yaml>] [--sst 1] [--sd 000001] [--dnn internet] [--replace]
 //   ksim-sim range deprovision --target open5gs --block <…> --ssh <host> [--db-config <remote yaml>]
+//   ksim-sim serve --pcsc <reader> --listen <host:port> --allow <address> [--admin]
+//       the card bridge (P2 Q1; lab.md §7): a real card lent to one remote terminal
+//   ksim-sim adm1 seal --out <file> --kek <file> [--stdin]
+//   ksim-sim burn --pcsc <reader> --imsi <IMSI> --master <file> --adm1 <file> --kek <file> [--dry-run]
+//       a spare real card written as a sim-range card (burn.hpp; the user runs both)
 //       the block into or out of the Open5GS fork's PostgreSQL on the rig
 //       (ADR 0010 point 2): one ogs_subscriber_upsert() per subscriber, the
 //       fork's own write path. The documents travel in a COPY data block on
@@ -31,6 +36,7 @@
 
 #include <CLI/CLI.hpp>
 
+#include "burn.hpp"
 #include "card.hpp"
 
 #include <cstdio>
@@ -449,6 +455,29 @@ static int run_main(int argc, char** argv) {
     serve_cmd->add_flag("--no-redact", so.no_redact, "trace keys and PINs in clear (with --test-keys only)");
     serve_cmd->add_option("--seconds", so.seconds, "stop after this long (0: on SIGINT or SIGTERM)");
     serve_cmd->add_option("--personality", so.card.personality, "present a real card's ATR (sysmoISIM-SJA5)");
+    // P2 Q1: the card bridge, a real card lent over the vpcd framing (lab.md section 7).
+    ksim::sim::BridgeOptions bo;
+    serve_cmd->add_option("--pcsc", bo.reader, "bridge: the card in this PC/SC reader (a name, #n or a unique part)");
+    serve_cmd->add_option("--listen", bo.listen, "bridge: host:port to listen on (35970)");
+    serve_cmd->add_option("--allow", bo.allow, "bridge: the one peer address it takes");
+    serve_cmd->add_flag("--admin", bo.admin, "bridge: let VERIFY ADM1 and AF20/AF30 writes through");
+    auto* adm1_cmd = app.add_subcommand("adm1", "a real card's ADM1, sealed (P2 Q1; the user runs it)");
+    adm1_cmd->require_subcommand(1);
+    std::string seal_out;
+    bool seal_stdin = false;
+    auto* seal_cmd = adm1_cmd->add_subcommand("seal", "ask for the ADM1 without echo and write it sealed under the KEK");
+    seal_cmd->add_option("--out", seal_out, "the sealed file (0600, never overwritten)")->required();
+    seal_cmd->add_option("--kek", kek, "the KEK file")->required();
+    seal_cmd->add_flag("--stdin", seal_stdin, "read one line from stdin instead (tests)");
+    ksim::sim::BurnOptions burn_o;
+    auto* burn_cmd = app.add_subcommand("burn", "write a real card over PC/SC as a sim-range card (the user runs it)");
+    burn_cmd->add_option("--pcsc", burn_o.reader, "the PC/SC reader (a name, #n or a unique part)")->required();
+    burn_cmd->add_option("--imsi", burn_o.imsi, "the sim-range IMSI the card becomes")->required();
+    burn_cmd->add_option("--master", burn_o.master, "the range master file")->required();
+    burn_cmd->add_option("--adm1", burn_o.adm1, "the sealed ADM1 (ksim-sim adm1 seal)")->required();
+    burn_cmd->add_option("--kek", burn_o.kek, "the KEK the ADM1 is sealed under")->required();
+    burn_cmd->add_option("--template", burn_o.tmpl, "the card image template for the EF contents");
+    burn_cmd->add_flag("--dry-run", burn_o.dry_run, "read the card and its ADM1 tries; write nothing");
     std::string image;
     bool access = false;
     auto* validate_cmd = app.add_subcommand("validate", "check a card image (TS 102 221, TS 31.102)");
@@ -471,7 +500,19 @@ static int run_main(int argc, char** argv) {
     CLI11_PARSE(app, argc, argv);
     ::umask(077);
     if (serve_cmd->parsed()) {
+        if (!bo.reader.empty()) {
+            bo.trace_udp = so.trace_udp;
+            bo.trace_pcap = so.trace_pcap;
+            bo.seconds = so.seconds;
+            return ksim::sim::serve_bridge(bo);
+        }
         return ksim::sim::serve(so);
+    }
+    if (seal_cmd->parsed()) {
+        return ksim::sim::adm1_seal(seal_out, kek, seal_stdin);
+    }
+    if (burn_cmd->parsed()) {
+        return ksim::sim::burn_pcsc(burn_o);
     }
     if (validate_cmd->parsed()) {
         return ksim::sim::validate(image, access);

@@ -163,6 +163,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
   - The bridge binds one address and accepts only the VM's.
   - It refuses administrative commands (VERIFY ADM1, writes to AF20/AF30) unless started with `--admin`. Burning a card stays your action.
 - **Cost.** About 1–5 ms per APDU. An authentication takes a handful of APDUs, well inside NAS timers.
+- **As built (P2 Q1):** `ksim-sim serve --pcsc <reader> --listen <address>:35970 --allow <VM address>`, one client at a time. A UE on the VM names it with `card: {bridge: <dev PC address>:35970}` and must be the only UE of its group. The real card is a spare sysmoISIM that you burn as imsi-001010000300100 with `ksim-sim burn` (decision D3, sim-uicc.md §5). Its subscriber is provisioned on kaluza-core through the API after telling the core session; that is window LW4.
 
 ## 8. Open lab items
 
