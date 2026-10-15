@@ -186,6 +186,9 @@ Flow read_flow_qos(std::uint8_t qfi, const json& j) {
     if (!c.contains("non-Dynamic-5QI")) {
         throw jer::NotP1("a dynamic 5QI");
     }
+    if (j.contains("gBR-QoS-Flow-Information")) {
+        throw jer::NotP1("a GBR QoS flow");   // until P2 Q11 (KS-NGAP-D2)
+    }
     const json& arp = j.at("nGRANallocationRetentionPriority");
     return {qfi, c.at("non-Dynamic-5QI").at("fiveQI").get<std::uint16_t>(), arp.at("priorityLevel").get<std::uint8_t>(),
             arp.at("pre-emptionCapability").get<std::string>() == "may-trigger-pre-emption",

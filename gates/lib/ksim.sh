@@ -6,10 +6,12 @@
 # ksim-ctl and scores rows from the sim's own evidence: events (ksim-ctl wait),
 # ksim-ctl output and the run's pcaps. Rows print in kaluza-core's format
 #   '  PASS  <row text> got=<evidence>'
-# with the row text taken verbatim from gates/rows/p1.tsv by row id (the
-# UE_IMPL parity contract), and each row is appended to <run>/rows.tsv as
+# with the row text taken verbatim from the phase's row set by row id (the
+# UE_IMPL parity contract): gates/rows/p1.tsv, or gates/rows/p2.tsv when
+# KSIM_ROWS names it (P2 Q0; it carries the P1 rows with the same text).
+# Each row is appended to <run>/rows.tsv as
 #   <row id> TAB <PASS|FAIL|SKIP|ALLOWED> TAB <core> TAB <got>
-# for tools/p1_exit.py. On Open5GS a FAIL that gates/allow/open5gs.tsv lists for
+# for tools/p1_exit.py and tools/p2_exit.py. On Open5GS a FAIL that gates/allow/open5gs.tsv lists for
 # the row is scored ALLOWED (ADR 0010 point 3).
 #
 # The caller sets RUN (the run directory), CORE (stub, open5gs or kaluza) and
@@ -25,7 +27,8 @@
 
 pass=0; fail=0; skip=0; allowed=0
 ROWS_TSV="$RUN/rows.tsv"
-P1_ROWS="$KSIM_ROOT/gates/rows/p1.tsv"
+: "${KSIM_ROWS:=$KSIM_ROOT/gates/rows/p1.tsv}"
+ROWS_SET="$KSIM_ROWS"
 ALLOW="$KSIM_ROOT/gates/allow/$CORE.tsv"
 
 abort() { printf '\nABORT: %s\n' "$1" >&2; exit 3; }
@@ -35,9 +38,9 @@ ctl() { "$KSIM_CTL" --run "$RUN" "$@"; }
 # kv KEY: the first KEY=value of the text on stdin.
 kv() { sed -n "s/^$1=//p" | head -n 1; }
 
-# row_text ID: the row's text in gates/rows/p1.tsv.
+# row_text ID: the row's text in the phase's row set.
 row_text() {
-    awk -F '\t' -v id="$1" '$1 == id { print $4; found = 1; exit } END { if (!found) exit 1 }' "$P1_ROWS"
+    awk -F '\t' -v id="$1" '$1 == id { print $4; found = 1; exit } END { if (!found) exit 1 }' "$ROWS_SET"
 }
 
 # allow_id ID: the allow entry for the row on this core, if any.
@@ -51,7 +54,7 @@ record() { printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$CORE" "$3" >> "$ROWS_TSV"; }
 # row ID WANT GOT: PASS when GOT matches the extended regex WANT.
 row() {
     _id="$1"; _want="$2"; _got="$3"
-    _text=$(row_text "$_id") || abort "row $_id is not in gates/rows/p1.tsv"
+    _text=$(row_text "$_id") || abort "row $_id is not in $(basename "$ROWS_SET")"
     if printf '%s\n' "$_got" | grep -Eq -- "$_want"; then
         pass=$((pass + 1)); printf '  PASS  %-66s got=%s\n' "$_text" "$_got"; record "$_id" PASS "$_got"
     elif _allow=$(allow_id "$_id"); then
@@ -64,7 +67,7 @@ row() {
 
 # skip_row ID WHY
 skip_row() {
-    _text=$(row_text "$1") || abort "row $1 is not in gates/rows/p1.tsv"
+    _text=$(row_text "$1") || abort "row $1 is not in $(basename "$ROWS_SET")"
     skip=$((skip + 1)); printf '  SKIP  %-66s %s\n' "$_text" "$2"; record "$1" SKIP "$2"
 }
 

@@ -53,7 +53,8 @@ target_link_libraries(unit_rrc_msg PRIVATE ksim::codec_rrc ksim::warnings GTest:
 gtest_discover_tests(unit_rrc_msg DISCOVERY_MODE PRE_TEST)
 
 add_executable(unit_ngap_msg ngap_msg_test.cpp)
-target_link_libraries(unit_ngap_msg PRIVATE ksim::codec_ngap ksim::codec_rrc ksim::warnings GTest::gtest_main)
+target_link_libraries(unit_ngap_msg PRIVATE ksim::codec_ngap ksim::codec_rrc ksim_codec_jer ksim::asn1_ngap ksim::warnings
+    GTest::gtest_main)
 target_compile_definitions(unit_ngap_msg PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 gtest_discover_tests(unit_ngap_msg DISCOVERY_MODE PRE_TEST)
 

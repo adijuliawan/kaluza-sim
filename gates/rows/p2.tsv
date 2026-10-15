@@ -1,0 +1,153 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The P2 row set (plan Q0, frozen 2026-10-15; ADR 0011, ADR 0012, verification.md 3.2).
+# Two parts:
+#  - the P1 rows (gates/rows/p1.tsv, p1=yes), copied with their text verbatim: the UE_IMPL parity
+#    contract holds in every mode. Their cores are P1's; P2 scores them per mode.
+#  - kaluza-sim's own ksim-p2.* rows: the split, OCUDU interop, AS security, the UP security policy,
+#    QoS, cards, scale and performance.
+#
+#   p2          yes for every row here (anything else becomes a P3 row)
+#   cores       stub, open5gs, kaluza (as in P1); open5gs=allow as in P1. uesim: the performance set,
+#               inside kaluza-uesim against the VM-local scripted core (ADR 0011 point 9). card: the
+#               burn, run by the user on the dev PC
+#   modes       aio (P1's all-in-one), split (C2, our roles over real F1/E1), and the OCUDU combinations
+#               C3 (OCUDU's CU-CP and CU-UP), C4 (OCUDU's CU-UP), C5 (OCUDU's CU-CP), ADR 0012. C4 and
+#               C5 run on the stub only. A P1 row whose evidence is our CU-CP's NGAP is not scored in C3
+#               or C5; one whose evidence is our CU-UP's N3 not in C3 or C4; the gNB- and AMF-restart rows
+#               only in aio and split. In C3 and C5 the RAN release of the idle rows is OCUDU's inactivity
+#               release (ADR 0012 consequences)
+#   milestone   where the row is first scored. The P1 rows: Q3 in split mode, Q4 in C3, Q5 in C4/C5
+#   mutant      the KSIM_MUTATIONS switch that must fail the row ('-': interop rows, whose control is the
+#               peer; performance rows, whose control is the number; rows a P1 mutant already covers)
+id	gate	n	text	family	observable	trigger	p2	cores	modes	milestone	mutant	evidence
+amf-ueransim.001	kaluza-amf-ueransim	1	the gNB completed NG Setup	ran	sim	sim	yes	stub,open5gs,kaluza	aio,split,C4	Q3	-	ngap NGSetupResponse; event ran.ng.setup
+amf-ueransim.006	kaluza-amf-ueransim	6	the UE completed Initial Registration	registration	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	null_suci_full_imsi	event nas.reg.complete; nas pcap
+amf-ueransim.012	kaluza-amf-ueransim	12	the UE took the SECURITY MODE COMMAND	registration	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	kamf_input_sbi_spelling	event nas.smc.complete
+amf-ueransim.014	kaluza-amf-ueransim	14	the UE has a uesimtun0 address from the pool	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ksim-ctl ue ifaces: pdu1 IPv4 in the accepted PDU address
+amf-ueransim.015	kaluza-amf-ueransim	15	the UE's tunnels hold no IPv6 address of the UE VM's own	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ksim-ctl ue ifaces: no IPv6 on the UE tunnels; netd noise counter 0 (L13)
+amf-ueransim.016	kaluza-amf-ueransim	16	the UE reports the session established	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	event nas.sm.est.accept
+amf-ueransim.018	kaluza-amf-ueransim	18	a ping over the tunnel reaches the DN	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ksim-ctl ue ping to the core profile DN_ADDR
+amf-ueransim.023	kaluza-amf-ueransim	23	the RAN release put the UE in CM-IDLE	idle	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	event nas.mm.cm_idle after ksim-ctl gnb ue-release
+amf-ueransim.024	kaluza-amf-ueransim	24	★ the UE runs T3512 at the subscription's <n> s	registration	sim	subscription	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	event nas.mm.t3512 value = the sub-block subsRegTimer
+amf-ueransim.025	kaluza-amf-ueransim	25	an uplink ping from idle is reactivated	idle	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	event nas.sr.accept with uplink data pending
+amf-ueransim.027	kaluza-amf-ueransim	27	a downlink ping to the idle UE is answered	paging	sim	dn	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	paging_ignore	ping from the DN host answered while CM-IDLE
+amf-ueransim.028	kaluza-amf-ueransim	28	and not every packet was lost	paging	sim	dn	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ping loss below 100 %
+amf-ueransim.029	kaluza-amf-ueransim	29	the AMF sent a PAGING	paging	sim	dn	yes	stub,open5gs,kaluza	aio,split,C4	Q3	-	ngap Paging received by the gNB (event ran.ngap.paging)
+amf-ueransim.032	kaluza-amf-ueransim	32	the gNB set up again	ran	sim	sim	yes	stub,open5gs,kaluza	aio,split	Q3	-	event ran.ng.setup after a gNB restart (ksim-ctl gnb restart)
+amf-ueransim.033	kaluza-amf-ueransim	33	★ a downlink ping after the gNB came back is answered	paging	sim	dn	yes	stub,open5gs,kaluza	aio,split	Q3	-	DN ping answered after the gNB restart
+amf-ueransim.034	kaluza-amf-ueransim	34	through a PAGING	paging	sim	dn	yes	stub,open5gs,kaluza	aio,split	Q3	-	ngap Paging received after the gNB restart
+amf-ueransim.036	kaluza-amf-ueransim	36	★ the next accept gave T3512 the new <n> s	registration	sim	oam	yes	stub,open5gs	aio,split,C3,C4,C5	Q3	-	event nas.mm.t3512 new value after a subscription change; kaluza-core parity under the gate contract later (no trigger grant in P1, user via kaluza-core-1e 2026-10-15)
+amf-ueransim.037	kaluza-amf-ueransim	37	★ the UE's periodic registration was accepted	registration	sim	subscription	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	event nas.reg.accept type periodic
+amf-ueransim.038	kaluza-amf-ueransim	38	★ with no new authentication	registration	sim	subscription	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	no AUTHENTICATION REQUEST between the periodic request and accept
+amf-ueransim.039	kaluza-amf-ueransim	39	and the session still carries a ping	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ping after the periodic registration
+amf-ueransim.044	kaluza-amf-ueransim	44	the UE holds a second session	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ksim-ctl ue ps-list: two sessions (internet, ims)
+amf-ueransim.047	kaluza-amf-ueransim	47	★★ PSI 1 asked for again before the AMF heard of its release: released as a duplicate, established anew	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	after a power cycle without deregistration, PSI 1 established anew
+amf-ueransim.049	kaluza-amf-ueransim	49	★★ ... the UE has its ims session within <n> s, not after T3580's <n> s	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ims session accepted within the row bound, not after T3580
+amf-ueransim.060	kaluza-amf-ueransim	60	the UE received a PDU SESSION RELEASE COMMAND	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	event nas.sm.rel.command
+amf-ueransim.061	kaluza-amf-ueransim	61	the UE de-registered	dereg	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	event nas.dereg.accept
+amf-ueransim.063	kaluza-amf-ueransim	63	★ the draining AMF sent the gNB an AMF STATUS INDICATION	ran	sim	core-restart	yes	stub	aio,split	Q3	-	ngap AMFStatusIndication received
+amf-ueransim.064	kaluza-amf-ueransim	64	the gNB re-associated after the restart	ran	sim	core-restart	yes	stub,open5gs	aio,split	Q3	-	SCTP re-association and NG Setup after the AMF restart (L11)
+amf-ueransim.065	kaluza-amf-ueransim	65	the UE is registered without re-registering	registration	sim	core-restart	yes	stub,open5gs	aio,split	Q3	-	UE still registered, no new REGISTRATION REQUEST
+amf-ueransim.066	kaluza-amf-ueransim	66	no NEW authentication was needed	registration	sim	core-restart	yes	stub,open5gs	aio,split	Q3	-	no AUTHENTICATION REQUEST after the restart
+amf-ueransim.069	kaluza-amf-ueransim	69	the session works again after the restart	session	sim	core-restart	yes	stub,open5gs	aio,split	Q3	-	ping after the AMF restart
+smf-ueransim.010	kaluza-smf-ueransim	10	the UE has a uesimtun0 address from the pool	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ksim-ctl ue ifaces: pdu1 IPv4
+smf-ueransim.017	kaluza-smf-ueransim	17	the QFI the UE decoded is the QFI eUPF marks with	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C5	Q3	-	the QoS rule QFI equals the QFI in the DL PDU Session Container at the gNB
+smf-ueransim.020	kaluza-smf-ueransim	20	★ replies return over the tunnel (eUPF U-12)	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ping replies arrive over the tunnel
+smf-ueransim.023	kaluza-smf-ueransim	23	the UE received a PDU SESSION RELEASE COMMAND	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	event nas.sm.rel.command
+smf-ueransim.032	kaluza-smf-ueransim	32	the UE holds a session to release	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ksim-ctl ue ps-list: one session
+smf-ueransim.034	kaluza-smf-ueransim	34	the UE received the network's RELEASE COMMAND	session	sim	oam	yes	stub,open5gs	aio,split,C3,C4,C5	Q3	-	event nas.sm.rel.command, network-requested; kaluza-core parity under the gate contract later (no trigger grant in P1, user via kaluza-core-1e 2026-10-15)
+smf-ueransim.036	kaluza-smf-ueransim	36	the RAN and the UE both answered	session	sim	oam	yes	stub,open5gs	aio,split,C4	Q3	-	RRC and NAS answers to a network release; kaluza-core parity under the gate contract later (no trigger grant in P1, user via kaluza-core-1e 2026-10-15)
+smf-ueransim.040	kaluza-smf-ueransim	40	a fresh UE holds a session	session	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	ksim-ctl ue ps-list on a fresh UE
+smf-ueransim.041	kaluza-smf-ueransim	41	the RAN release put the UE in CM-IDLE	idle	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	event nas.mm.cm_idle after ksim-ctl gnb ue-release
+smsf.009	kaluza-smsf	9	gNB: NG Setup successful	ran	sim	sim	yes	stub,open5gs,kaluza	aio,split,C4	Q3	-	ngap NGSetupResponse
+smsf.010	kaluza-smsf	10	UE 1: registered	registration	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	UE 1 registered with SMS requested
+smsf.011	kaluza-smsf	11	UE 2: registered	registration	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	UE 2 registered with SMS requested
+smsf.012	kaluza-smsf	12	UE 3: registered	registration	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	UE 3 (not SMS-subscribed sub-block) registered
+smsf.013	kaluza-smsf	13	★★ the three UEs asked for SMS (5GS update type, SMS requested = 1, on the wire)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	nas pcap: 5GS update type SMS requested = 1 from all three
+smsf.014	kaluza-smsf	14	★★ ...and the REGISTRATION ACCEPTs say SMS over NAS allowed to UE 1 and 2, not to UE 3 (on the wire)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	nas pcap: SMS over NAS allowed to UE 1 and 2, not UE 3
+smsf.015	kaluza-smsf	15	★ UE 1 read it: SMS over NAS allowed	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	event nas.reg.accept sms_allowed=1
+smsf.019	kaluza-smsf	19	★★ UE 3 (not subscribed): SMS over NAS not allowed, and registered all the same	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	UE 3 registered, sms_allowed=0
+smsf.022	kaluza-smsf	22	...and requested again: activated, allowed	sms	sim	sim	yes	stub;open5gs=allow	aio,split,C3,C4,C5	Q3	-	registration update with SMS requested again: sms_allowed=1
+smsf.023	kaluza-smsf	23	UE 1: the submit went (sms-send)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	ksim-ctl ue sms-send exit 0
+smsf.024	kaluza-smsf	24	★★ UE 1: RP-ACK for its submit (the SMSC took it)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	sms_rp_da_empty	event sms.rp.ack for the MO
+smsf.025	kaluza-smsf	25	★★ UE 2: delivered once, the same text	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	UE 2 sms-list: one DELIVER, same text
+smsf.026	kaluza-smsf	26	★ the TP-UD arrived byte-identical (TS 23.040: the SC relays it)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	TP-UD byte-identical at UE 2
+smsf.028	kaluza-smsf	28	★★ on the wire: CP-DATA and CP-ACK, four each (gsm_a.dtap)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	uu/nas pcap: CP-DATA and CP-ACK four each (gsm_a.dtap)
+smsf.029	kaluza-smsf	29	★★ ...RP-DATA ms->n, n->ms, RP-ACK ms->n, n->ms: one each (gsm_a.rp)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	pcap: RP-DATA and RP-ACK one each per direction (gsm_a.rp)
+smsf.030	kaluza-smsf	30	★ ...an SMS-SUBMIT and an SMS-DELIVER (gsm_sms), the text as sent	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	pcap: one SMS-SUBMIT and one SMS-DELIVER (gsm_sms)
+smsf.031	kaluza-smsf	31	...nothing malformed	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	pcap: no malformed frame
+smsf.032	kaluza-smsf	32	★ UCS2 (Korean): delivered once, the same text	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	UCS2 text delivered once
+smsf.034	kaluza-smsf	34	★ ...UE 2 received three SMS-DELIVERs with a concatenation header	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	UE 2 received three DELIVERs with a concatenation UDH (MO concatenated, D7)
+smsf.035	kaluza-smsf	35	★★ MT to an idle UE: NGAP Paging	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C4	Q3	-	ngap Paging for MT to an idle UE
+smsf.036	kaluza-smsf	36	★ ...a service request, then the DL CP-DATA, delivered once	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	service request, then DL CP-DATA, delivered once
+smsf.037	kaluza-smsf	37	★ MO from idle: a service request first, then the submit, delivered once	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	MO from idle: service request first, then the submit
+ksim-p1.reg-null-suci	kaluza-sim	-	the REGISTRATION REQUEST carries a null-scheme SUCI whose output is the MSIN	registration	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	null_suci_full_imsi	nas pcap: SUCI protection scheme 0, scheme output = MSIN digits
+ksim-p1.as-smc-nia2	kaluza-sim	-	the AS SECURITY MODE COMMAND selected NIA2 and NEA2, and SRB1 verifies after it	registration	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	kgnb_wrong_ul_count	event rrc.smc.complete alg=nia2/nea2; no PDCP integrity failure
+ksim-p1.imeisv	kaluza-sim	-	the UE returned its IMEISV in SECURITY MODE COMPLETE when the AMF asked	registration	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	-	nas pcap: IMEISV in SECURITY MODE COMPLETE iff requested
+ksim-p1.switch-off	kaluza-sim	-	a switch-off deregistration leaves the UE deregistered with no accept awaited	dereg	sim	sim	yes	stub,open5gs,kaluza	aio,split,C4	Q3	-	event nas.dereg.sent switch_off=1; ngap UE context released
+ksim-p1.reregistration-required	kaluza-sim	-	after a network deregistration with re-registration required the UE registers again	dereg	sim	oam	yes	stub,open5gs	aio,split,C3,C4,C5	Q3	dereg_no_reregistration	event nas.reg.complete after nas.dereg.network; kaluza-core has no trigger open to the sim (kaluza-core-1e, 2026-10-15); kaluza-core parity under the gate contract later (no trigger grant in P1, user via kaluza-core-1e 2026-10-15)
+ksim-p1.radio-loss-release	kaluza-sim	-	an abrupt power-off leads the gNB to ask for a release with radio connection with UE lost	idle	sim	sim	yes	stub,open5gs,kaluza	aio,split,C4	Q3	no_release_on_radio_loss	ngap UEContextReleaseRequest cause radio-connection-with-ue-lost
+ksim-p1.guti-after-power-cycle	kaluza-sim	-	after a graceful power cycle the UE registers with its 5G-GUTI and a protected initial message	registration	sim	sim	yes	stub,open5gs,kaluza	aio,split,C3,C4,C5	Q3	guti_not_persisted	nas pcap: 5G-GUTI identity; initial message integrity-protected (EF 4F01, 4F03)
+ksim-p1.sms-not-allowed	kaluza-sim	-	the UE sends no SMS while SMS over NAS is not allowed	sms	sim	sim	yes	stub,kaluza;open5gs=allow	aio,split,C3,C4,C5	Q3	-	ksim-ctl ue sms-send exit 6; no CP-DATA in the pcap
+ksim-p1.backoff	kaluza-sim	-	after a #29 rejection with a back-off timer the UE waits it out before asking again	session	sim	sim	yes	stub,open5gs	aio,split,C3,C4,C5	Q3	ignore_backoff	event nas.sm.backoff; no request before expiry
+ksim-p2.f1-setup-sctp	kaluza-sim	-	the DU completed F1 Setup with the CU-CP over SCTP (PPID 62, port 38472)	split	sim	sim	yes	stub,open5gs,kaluza	split,C3,C4,C5	Q3	-	f1ap pcap from the socket; event ran.f1.setup
+ksim-p2.e1-setup-sctp	kaluza-sim	-	the CU-UP completed E1 Setup with the CU-CP over SCTP (PPID 64, port 38462)	split	sim	sim	yes	stub,open5gs,kaluza	split,C4,C5	Q3	-	e1ap pcap from the socket; event ran.e1.setup
+ksim-p2.f1u-udp	kaluza-sim	-	user data crossed F1-U as GTP-U with NR-U between the DU and the CU-UP	split	sim	sim	yes	stub,open5gs,kaluza	split,C3,C4,C5	Q3	-	gtpu pcap (F1-U) from the socket; NR-U DL USER DATA
+ksim-p2.kair-seqpacket	kaluza-sim	-	the UE farm and the DU exchanged KAIR frames over the run's SEQPACKET socket, one subscription per farm shard	split	sim	sim	yes	stub,open5gs,kaluza	split,C3,C4,C5	Q3	-	event ran.du.kair.subscribe per shard; uu pcap
+ksim-p2.roles-separate	kaluza-sim	-	each role ran as its own process and kept its own log and pcaps in the run directory	split	sim	sim	yes	stub,open5gs,kaluza	split	Q3	-	<run>/<node>/ per role; manifest roles
+ksim-p2.f1-reassociation	kaluza-sim	-	after the CU-CP restarted, the DU re-associated and completed F1 Setup again	split	sim	fault	yes	stub	split	Q2	f1_no_reassociation	event ran.f1.setup twice; f1ap pcap
+ksim-p2.f1-loss-release	kaluza-sim	-	when F1 was lost the CU-CP asked the AMF to release the UEs it served	split	sim	fault	yes	stub	split	Q2	f1_loss_silent	ngap UEContextReleaseRequest per UE after the F1 loss
+ksim-p2.per-ue-stream	kaluza-sim	-	each UE's F1AP and E1AP messages travel on its own SCTP stream, within the negotiated count	split	sim	sim	yes	stub	split	Q2	single_ue_stream	f1ap/e1ap pcap sctp.data_sid per UE
+ksim-p2.ocudu-f1-setup	kaluza-sim	-	OCUDU's CU-CP accepted our DU's F1 Setup and activated its cell	interop	sim	sim	yes	stub,open5gs,kaluza	C3,C5	Q4	-	f1ap pcap F1SetupResponse with the cell to activate
+ksim-p2.ocudu-registration	kaluza-sim	-	a UE registered through our DU and OCUDU's CU-CP	interop	sim	sim	yes	stub,open5gs,kaluza	C3,C5	Q4	-	event nas.reg.complete; uu pcap
+ksim-p2.ocudu-as-smc	kaluza-sim	-	the AS security mode OCUDU's CU-CP chose verified at the UE: SRB1 integrity and ciphering	interop	sim	sim	yes	stub,open5gs,kaluza	C3,C5	Q4	-	event rrc.smc.complete alg; no PDCP integrity failure
+ksim-p2.ocudu-nea1	kaluza-sim	-	with nea1 and nia1 first in OCUDU's preference lists the UE ran SRB1, SRB2 and the DRB on NEA1/NIA1	interop	sim	sim	yes	stub	C3	Q8	-	event rrc.smc.complete alg=nia1/nea1; ping over the DRB
+ksim-p2.ocudu-capability	kaluza-sim	-	the UE answered OCUDU's capability enquiry from its persona	interop	sim	sim	yes	stub,open5gs,kaluza	C3,C5	Q4	-	uu pcap UECapabilityInformation byte-identical to the persona
+ksim-p2.ocudu-drb	kaluza-sim	-	OCUDU set up the DRB by UE Context Modification and the UE carried a ping over it	interop	sim	sim	yes	stub,open5gs,kaluza	C3,C5	Q4	-	f1ap UEContextModification; ksim-ctl ue ping
+ksim-p2.ocudu-ddds	kaluza-sim	-	our DU reported DL data delivery status to OCUDU's CU-UP over NR-U	interop	sim	sim	yes	stub,open5gs,kaluza	C3,C4	Q4	no_ddds	gtpu pcap NR-U DL DATA DELIVERY STATUS
+ksim-p2.ocudu-inactivity-release	kaluza-sim	-	OCUDU's inactivity timer released the UE to CM-IDLE	interop	sim	sim	yes	stub,open5gs,kaluza	C3,C5	Q4	-	event nas.mm.cm_idle with no ksim-ctl release
+ksim-p2.ocudu-paging	kaluza-sim	-	a downlink ping to the idle UE was paged through OCUDU's CU-CP and our DU, and answered	interop	sim	dn	yes	stub,open5gs,kaluza	C3,C5	Q4	-	f1ap Paging; ping answered from CM-IDLE
+ksim-p2.ocudu-dereg	kaluza-sim	-	the UE de-registered through OCUDU, and OCUDU released its F1 context	interop	sim	sim	yes	stub,open5gs,kaluza	C3,C5	Q4	-	event nas.dereg.accept; f1ap UEContextReleaseCommand
+ksim-p2.ocudu-e1-cuup	kaluza-sim	-	OCUDU's CU-UP completed E1 Setup with our CU-CP and set up, modified and released bearer contexts	interop	sim	sim	yes	stub	C4	Q5	-	e1ap pcap; ping over the DRB
+ksim-p2.ocudu-e1-cucp	kaluza-sim	-	our CU-UP completed E1 Setup with OCUDU's CU-CP and served its bearer contexts	interop	sim	sim	yes	stub	C5	Q5	-	e1ap pcap; ping over the DRB
+ksim-p2.e1-inactivity	kaluza-sim	-	the CU-UP's E1 inactivity notification led the CU-CP to release the UE with user-inactivity	interop	sim	sim	yes	stub	split,C4,C5	Q5	no_inactivity_notification	e1ap BearerContextInactivityNotification; ngap or f1ap release with user-inactivity
+ksim-p2.ocudu-100	kaluza-sim	-	100 UEs registered with one session each through OCUDU's CU-CP	interop	sim	sim	yes	stub,kaluza	C3	Q7	-	ksim-ctl ues; 100 sessions
+ksim-p2.as-nea1-nia1	kaluza-sim	-	with NEA1 and NIA1 first at the CU-CP the AS SECURITY MODE COMMAND selected them, and SRB1, SRB2 and the DRB verify	security	sim	sim	yes	stub,open5gs,kaluza	aio,split	Q8	nia1_wrong_fresh	event rrc.smc.complete alg=nia1/nea1; ping over the DRB; no PDCP integrity failure
+ksim-p2.nas-nea1-nia1	kaluza-sim	-	with NEA1 and NIA1 selected for NAS the UE protects and verifies NAS with them	security	sim	sim	yes	stub	aio,split	Q8	-	event nas.smc.complete alg; nas pcap
+ksim-p2.up-integrity-required	kaluza-sim	-	with UP integrity required the DRB carries a MAC-I in both directions and a ping crosses it	up-security	sim	sim	yes	stub	aio,split	Q9	up_integrity_ignored	pdcp-nr MAC-I on the DRB; ping
+ksim-p2.up-integrity-preferred	kaluza-sim	-	with UP integrity preferred the CU-CP applies its local policy and reports it in the Security Result	up-security	sim	sim	yes	stub	aio,split	Q9	up_result_misreported	ngap SecurityResult in the setup response transfer
+ksim-p2.up-confidentiality-not-needed	kaluza-sim	-	with UP confidentiality not-needed the DRB runs unciphered at both ends (cipheringDisabled)	up-security	sim	sim	yes	stub	aio,split	Q9	confidentiality_forced	uu pcap cipheringDisabled; plaintext DRB payload
+ksim-p2.up-required-unmet	kaluza-sim	-	a session whose required UP integrity cannot be met is refused with the TS 38.413 cause	up-security	sim	sim	yes	stub	aio,split	Q9	up_required_accepted	ngap PDUSessionResourceSetupUnsuccessfulTransfer cause
+ksim-p2.up-indication-absent	kaluza-sim	-	a session set up with no Security Indication runs on the CU-CP's default policy and says so in an event	up-security	sim	sim	yes	stub,kaluza	aio,split	Q9	up_absent_silent	event ran.up_security.default
+ksim-p2.ul-classifier	kaluza-sim	-	an uplink packet that matches a QoS rule's packet filter goes on that rule's QFI	qos	sim	sim	yes	stub	aio,split	Q10	classifier_default_only	uu pcap SDAP UL QFI; event ue.qos.classified
+ksim-p2.ul-classifier-precedence	kaluza-sim	-	of two matching QoS rules, the one with the lower precedence value wins	qos	sim	sim	yes	stub	aio,split	Q10	precedence_reversed	SDAP UL QFI
+ksim-p2.core-default-rule	kaluza-sim	-	with the core's default QoS rule alone every uplink packet goes on its QFI	qos	sim	sim	yes	stub,open5gs,kaluza	aio,split	Q10	-	SDAP UL QFI = the default rule's QFI
+ksim-p2.multi-drb	kaluza-sim	-	two QoS flows mapped to two DRBs each carry their own traffic	qos	sim	sim	yes	stub	aio,split	Q10	single_drb	f1ap/e1ap two DRBs; per-DRB counters
+ksim-p2.modify-add-flow	kaluza-sim	-	a PDU Session Resource Modify that adds a QoS flow reconfigures E1, F1 and the UE, and the new flow carries traffic	qos	sim	core-side	yes	stub	aio,split	Q10	modify_ack_only	e1ap/f1ap modification; rrc reconfiguration; SDAP QFI
+ksim-p2.modify-release-flow	kaluza-sim	-	a modify that releases a QoS flow removes it at the UE, the CU-UP and the DU	qos	sim	core-side	yes	stub	aio,split	Q10	-	e1ap/f1ap modification; UE rules
+ksim-p2.rqos-derived-rule	kaluza-sim	-	a downlink packet with RQI set makes the UE derive a QoS rule, and its reply goes on that QFI	qos	sim	core-side	yes	stub	aio,split	Q11	rqi_ignored	event ue.qos.derived; SDAP UL QFI
+ksim-p2.rqos-timer	kaluza-sim	-	the derived QoS rule is removed when the RQ timer expires	qos	sim	core-side	yes	stub	aio,split	Q11	rq_timer_never	event ue.qos.derived_expired
+ksim-p2.rqos-capability	kaluza-sim	-	the UE indicates reflective QoS in its 5GSM capability	qos	sim	sim	yes	stub,kaluza	aio,split	Q11	-	nas pcap 5GSM capability RqoS=1
+ksim-p2.unknown-qfi	kaluza-sim	-	a downlink packet with a QFI the UE has no rule for is discarded and counted	qos	sim	core-side	yes	stub	aio,split	Q11	unknown_qfi_accepted	event ue.sdap.unknown_qfi; counter
+ksim-p2.sdap-end-marker	kaluza-sim	-	when a QoS flow is remapped to another DRB the UE sends an SDAP end-marker on the old one	qos	sim	core-side	yes	stub	aio,split	Q11	no_end_marker	uu pcap SDAP end-marker control PDU
+ksim-p2.gbr-setup	kaluza-sim	-	a GBR QoS flow is admitted with its GFBR and MFBR and gets a DRB of its own	qos	sim	subscription	yes	stub,open5gs	aio,split	Q11	gbr_as_nongbr	ngap GBR-QosInformation; e1ap/f1ap GBR flow; DRB
+ksim-p2.gbr-refused	kaluza-sim	-	a GBR flow beyond the cell's capacity budget is refused with the TS 38.413 cause	qos	sim	core-side	yes	stub	aio,split	Q11	gbr_no_admission	ngap failed-to-setup list cause
+ksim-p2.gbr-notify	kaluza-sim	-	with notification control, a GFBR that can no longer be met is notified as not fulfilled and later as fulfilled again	qos	sim	fault	yes	stub	aio,split	Q11	notify_missing	ngap PDUSessionResourceNotify
+ksim-p2.pcsc-register	kaluza-sim	-	a UE registers with its card behind PC/SC (pcscd's vpcd reader)	card	sim	sim	yes	stub	aio,split	Q1	pcsc_no_get_response	event nas.reg.complete; sim pcap through the PC/SC transport
+ksim-p2.bridge-refuses-admin	kaluza-sim	-	the card bridge refuses VERIFY ADM1 and writes to AF20/AF30 unless started with --admin	card	sim	sim	yes	stub	aio	Q1	bridge_admin_open	ksim-sim serve --pcsc status words 6982
+ksim-p2.burn-verify	kaluza-sim	-	ksim-sim burn checked the ADM1 retry counter, wrote the card and verified it with one AUTHENTICATE	card	sim	sim	yes	card	-	Q1	-	the burn's report (K_FPR only)
+ksim-p2.real-card-register	kaluza-sim	-	a UE registers with the real sysmoISIM card imsi-001010000300100 through PC/SC	card	sim	sim	yes	stub,open5gs,kaluza	aio,split	Q1	-	event nas.reg.complete; sim pcap (redacted)
+ksim-p2.real-card-bridge	kaluza-sim	-	a UE on kaluza-uesim registers with the real card through the dev-PC card bridge	card	sim	sim	yes	kaluza	split	Q14	-	event nas.reg.complete; the bridge's APDU count
+ksim-p2.scale-100-attach	kaluza-sim	-	100 UEs register with one session each, 10 in parallel, within 60 s	scale	sim	sim	yes	stub,kaluza	split,C3	Q7	-	ksim-ctl --parallel 10 timing; 100 sessions
+ksim-p2.scale-100-memory	kaluza-sim	-	with 100 UEs registered with a session each the run stays within 2 GiB	scale	sim	sim	yes	stub,kaluza	split	Q7	-	metrics RSS of every role, summed
+ksim-p2.loop-lag-abort	kaluza-sim	-	a loop lag above the threshold raises platform.loop_lag and the gate ABORTs instead of failing	scale	sim	fault	yes	stub	aio,split	Q7	watchdog_silent	event platform.loop_lag; gate exit 7
+ksim-p2.metrics	kaluza-sim	-	/metrics reports per-QFI bytes and per-hop latency for a running session	scale	sim	sim	yes	stub	aio,split	Q7	-	GET /metrics
+ksim-p2.perf-dl-nea2	kaluza-sim	-	one UE with NEA2 on the DRB reaches at least 200 Mbit/s downlink	performance	sim	sim	yes	uesim	split	Q15	-	tools/perf report on kaluza-uesim against the VM-local scripted core
+ksim-p2.perf-ul-nea2	kaluza-sim	-	one UE with NEA2 on the DRB reaches at least 100 Mbit/s uplink	performance	sim	sim	yes	uesim	split	Q15	-	tools/perf report on kaluza-uesim against the VM-local scripted core
+ksim-p2.perf-nia2	kaluza-sim	-	one UE with NIA2 UP integrity at full rate reaches at least 50 Mbit/s	performance	sim	sim	yes	uesim	split	Q15	-	tools/perf report on kaluza-uesim against the VM-local scripted core
+ksim-p2.perf-100-dl	kaluza-sim	-	100 UEs reach at least 400 Mbit/s downlink in aggregate	performance	sim	sim	yes	uesim	split	Q15	-	tools/perf report on kaluza-uesim against the VM-local scripted core
+ksim-p2.perf-latency	kaluza-sim	-	the added processing latency is at most 1 ms at the median and 5 ms at the 99th percentile	performance	sim	sim	yes	uesim	split	Q15	-	tools/perf report on kaluza-uesim against the VM-local scripted core
+ksim-p2.perf-attach-100	kaluza-sim	-	100 UEs register with one session each, 10 attaches in parallel, within 60 s	performance	sim	sim	yes	uesim	split	Q15	-	tools/perf report on kaluza-uesim against the VM-local scripted core
+ksim-p2.perf-memory	kaluza-sim	-	100 UEs with a session each stay within 2 GiB	performance	sim	sim	yes	uesim	split	Q15	-	tools/perf report on kaluza-uesim against the VM-local scripted core

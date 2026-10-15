@@ -14,5 +14,5 @@ The files are unmodified; `MANIFEST.sha256` holds their hashes and CI checks the
 the copy needs from OCUDU's own `security.h`.
 
 Use: the SNOW 3G keystream generator and UIA2's f9, under kaluza-sim's
-128-NEA1/128-NIA1 wrappers (`src/crypto/snow3g.cpp`). SNOW 3G is subject to the
+128-NEA1/128-NIA1 wrappers (in `src/crypto/nea.cpp`). SNOW 3G is subject to the
 GSMA restricted usage undertaking held by the repository owner.

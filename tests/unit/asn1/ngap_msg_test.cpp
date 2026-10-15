@@ -15,7 +15,11 @@
 #include <set>
 #include <sstream>
 
+#include "codec/asn1/msg/jer.hpp"
 #include "ngap_samples.hpp"
+
+#include "NGAP_NGAP-PDU.h"
+#include "NGAP_PDUSessionResourceSetupRequestTransfer.h"
 
 namespace ksim::ngap {
 namespace {
@@ -92,6 +96,54 @@ TEST(NgapMsg, InputsOutOfRangeAreRefused) {
     EXPECT_FALSE(encode(ics));
     EXPECT_FALSE(encode(DownlinkNasTransport{std::uint64_t{1} << 40, 1, {0x7e}}));
     EXPECT_FALSE(encode(InitialUeMessage{}));   // no NAS PDU
+}
+
+// A GBR QoS flow is refused as unsupported until P2 Q11 builds GBR (KS-NGAP-D2): before,
+// gBR-QosInformation was ignored and the flow set up as non-GBR.
+TEST(NgapMsg, AGbrQosFlowIsRefusedUntilGbrIsBuilt) {
+    const auto all = samples::all();
+    const auto it = std::find_if(all.begin(), all.end(), [](const auto& s) {
+        return std::holds_alternative<PduSessionResourceSetupRequest>(s.pdu);
+    });
+    ASSERT_NE(it, all.end());
+    const auto& req = std::get<PduSessionResourceSetupRequest>(it->pdu);
+    auto wire = encode(req);
+    ASSERT_TRUE(wire);
+    ASSERT_TRUE(decode(*wire));
+    auto pdu = jer::decode(asn_DEF_NGAP_NGAP_PDU, *wire, asn1::Rules::aper);
+    ASSERT_TRUE(pdu);
+    bool edited = false;
+    for (auto& e : (*pdu)["initiatingMessage"]["value"]["PDUSessionResourceSetupRequest"]["protocolIEs"]) {
+        if (e.at("id").get<int>() != 74) {   // PDUSessionResourceSetupListSUReq
+            continue;
+        }
+        for (auto& item : e["value"]["PDUSessionResourceSetupListSUReq"]) {
+            auto& hex_transfer = item["pDUSessionResourceSetupRequestTransfer"];
+            auto raw = from_hex(hex_transfer.get<std::string>());
+            ASSERT_TRUE(raw);
+            auto t = jer::decode(asn_DEF_NGAP_PDUSessionResourceSetupRequestTransfer, *raw, asn1::Rules::aper);
+            ASSERT_TRUE(t);
+            for (auto& ie : (*t)["protocolIEs"]) {
+                if (ie.at("id").get<int>() != 136) {   // QosFlowSetupRequestList
+                    continue;
+                }
+                auto& p = ie["value"]["QosFlowSetupRequestList"][0]["qosFlowLevelQosParameters"];
+                p["qosCharacteristics"]["nonDynamic5QI"]["fiveQI"] = 1;
+                p["gBR-QosInformation"] = {{"maximumFlowBitRateDL", 128000}, {"maximumFlowBitRateUL", 128000},
+                                           {"guaranteedFlowBitRateDL", 64000}, {"guaranteedFlowBitRateUL", 64000}};
+                edited = true;
+            }
+            auto back = jer::encode(asn_DEF_NGAP_PDUSessionResourceSetupRequestTransfer, *t, asn1::Rules::aper);
+            ASSERT_TRUE(back) << back.error().what;
+            hex_transfer = to_hex(*back);
+        }
+    }
+    ASSERT_TRUE(edited);
+    auto gbr = jer::encode(asn_DEF_NGAP_NGAP_PDU, *pdu, asn1::Rules::aper);
+    ASSERT_TRUE(gbr) << gbr.error().what;
+    auto d = decode(*gbr);
+    ASSERT_FALSE(d);
+    EXPECT_EQ(d.error().code, Errc::unsupported);
 }
 
 /// The external NGAP corpus: (pdu name, octets).

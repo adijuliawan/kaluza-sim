@@ -93,7 +93,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
   - Never `-march=native`: the dev PC's i7 has instructions Zen 3 lacks (the same lesson as OCUDU in the kaluza-gnb2 VM).
   - Both hosts run Ubuntu 26.04 on Linux 7.0.0-34, so shared libraries match. P0 confirms this with a smoke run.
 - **No build trees in the VM.** It has 11 GB free and 4 vCPUs.
-- **Deploy:** `tools/deploy-uesim.sh` rsyncs to `kaluza-uesim:~/kaluza-sim/<git-describe>/` and switches a `current` symlink:
+- **Deploy:** `tools/deploy-uesim.sh --window-agreed` streams a tar to `kaluza-uesim:~/ksim/releases/<git-describe>/` and re-points the `~/ksim/current` symlink (as built in P1 N9):
   - the `apps/` binaries;
   - `topologies/`, `personas/`, and the card *templates*;
   - never secrets.
@@ -105,13 +105,20 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 
 ## 6. Running alongside UERANSIM and the core's gates
 
-- **Lifecycle.** `ksim run -c topologies/<file>.yaml --run-dir …` starts a systemd unit, so the run survives SSH loss. `ksim stop` ends it. Stop with `pkill -x` only, never `pkill -f`.
+- **Lifecycle.** `ksim run -c topologies/<file>.yaml --run-dir …` runs in the foreground as built in P1; P2 (Q6) adds the systemd unit that lets a run survive SSH loss. `ksim stop` ends it. Stop with `pkill -x` only, never `pkill -f`.
 - **One RAN at a time.** UERANSIM and kaluza-sim stay installed side by side, but **only one runs against the core in a given gate window.**
   - kaluza-sim uses its own IMSI range (`001010000300000…`), addresses and gNB IDs, so a crossed run can't corrupt the other's subscribers.
   - A gate that counts NG associations or RAN UEs would still see both.
 - **Windows.** Runs happen in windows agreed with the kaluza-core session: never during another session's set, never during a UPF-VPP W5 scoring freeze.
   - Since kaluza-core-e9 ended there is no standing coordinator: kaluza-sim agrees each window with whichever kaluza-core session is active, and asks the user when none is (P1 working agreement, 2026-10-15).
   - P1's windows: **W0** (N9) imports imsi-001010000300000..099 through the provisioning API, then NG Setup, registration of 1–3 UEs, AS SMC and deregistration; **W1** (N11) sessions, a ping to the DN, an MTU probe, two sessions; **W2/W3** (N18) the full P1 row set. The sub-blocks of that import: 000–049 default, 050–059 SMS (`smsSubscribed` true), 060–069 `subsRegTimer` 120 s (each re-registers every 2 min while registered, so they stay out of rows that count AMF log lines), 070–079 EAP-AKA′, 080–099 spare.
+  - **P2's windows** (the P2 plan, 2026-10-15; each agreed with the active kaluza-core session with a start and an end):
+    - **LW1** (Q7): split mode on the VM (`ksim-mid`, .30/.31), the P1 row set, then 100 UEs (imsi-…0000..099), 10 attaches in parallel, one `internet` session each, low-rate pings; netd v3 and the packages of D7 installed in its setup.
+    - **LW2** (Q7): OCUDU `ocucp` at .36 and `ocuup` at .37 in our namespaces (ADR 0012), with our DU and up to 100 UEs.
+    - **LW3** (Q15): the throughput set inside the VM against the scripted core on 127.0.0.x. Nothing crosses `ens19` or the trunk, but it needs the VM free of core sets.
+    - **LW4** (Q14): the real card imsi-001010000300100 through the dev-PC bridge (§7).
+    - **LW5** (Q14): the full P2 row set in split mode.
+    - After each: every session released, every UE switched off, no `ksim-` or OCUDU process or namespace left.
 - **The dev-PC guard.** The real AMF listens on the dev PC itself (172.30.30.1:38412), so `ksim` refuses any peer in 172.30.0.0/16 unless it runs with `--lab` on `kaluza-uesim`, and the scripted core binds 127.0.0.x only ([ADR 0009](adr/0009-p1-runtime-shape.md), point 11). vmnet8 (192.168.134.0/24, host-only) is allowed for the Open5GS control.
 - **W0 and later lab runs (P1 N9).** Steps 1–3 run once per release or provisioning change:
   1. `tools/deploy-uesim.sh --window-agreed --secrets` installs a release under `~/ksim/releases` and sends the sealed cards and the KEK.
@@ -141,7 +148,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 - **CPU.** The 4 vCPUs are shared with UERANSIM and n3iwue when those run, and with whatever else the Proxmox host is doing.
   - kaluza-sim needs no real-time pinning, since its L2 is ideal.
   - Its loop-lag watchdog makes a run ABORT, not FAIL, under contention.
-  - **P2 measures the performance targets here.** If they miss, resizing VM 105 is your decision then.
+  - **P2 measures the performance targets here** (Q15, window LW3, against the scripted core inside the VM). If they miss, resizing VM 105 is your decision then.
 
 ## 7. Real cards: the card bridge
 
@@ -168,8 +175,25 @@ kaluza-core answered the open items on 2026-10-14, and the user decided the thre
 | V-UPF `PLANE_NEIGHBOURS` entries for .30–.39 (a V-UPF roll, §4) | a kaluza-core session | **Done** 2026-10-14, 15:59 KST |
 | kaluza-sim's own Keycloak client, exempt from key-entry step-up, plus an mTLS client certificate ([ADR 0008](adr/0008-subscriber-provisioning-api.md)) | a kaluza-core session | **Done** 2026-10-14, 16:11 KST: `kaluza-sim-key-entry`, credentials in `~/.config/kaluza-sim/provisioning/` |
 | Import the sim subscriber ranges | 001/01: kaluza-sim, through the UDR's provisioning API. 999/70: kaluza-sim writes the seed file; a kaluza-core session merges it and rolls the home UDR in a window ([`sim-uicc.md`](sim-uicc.md) §8) | 001/01 at P1; 999/70 before the first roaming scenario |
-| Lab windows | ask the core session | At P1 |
+| Lab windows | ask the core session | At P1; P2's LW1–LW5 (§6) |
 | A second TAC served by the AMF (000007), for mobility-registration rows | a kaluza-core session | Comes with wave 40, before P3 needs it |
 | SUCI Profile A/B key ids for the sim cards | your decision | When P1 reaches its SUCI rows; the null scheme until then |
 | The SMF's `ims` pool (10.49.0.0/24) holds about 250 concurrent IMS sessions | a kaluza-core session, if ever needed | Enough for v1's ~100 UEs. A 1000-UE `ims` run needs a bigger pool |
-| Measure kaluza-uesim against the performance targets (P2); resize only if they miss | P2, then your decision | Open |
+| Measure kaluza-uesim against the performance targets (P2); resize only if they miss | P2 Q15, then your decision | Open. Calibration on the dev PC at P2 Q0: 100 UEs register with a session each in 1.4 s at 45 MB (KS-PLAT-T48) |
+
+**kaluza-core-df's answers for P2 (2026-10-15 ~21:50 KST):**
+
+| Topic | Answer |
+|---|---|
+| Schedule | No core set planned in the next days; W5/39A undated, no freeze announced; a full-lab roll and set (~5 h) would be announced |
+| OCUDU pin | `d9d2263f4d` (`ran/ocudu-fork`), built from an exported tree in our own directory, x86-64-v3; never built in `ran/ocudu-fork` |
+| OCUDU at .36/.37 against kaluza-core | No AMF change: NG Setup has no allow-list and TAC 000001 is served; gNB ID 0x1A1/22 collides with nothing; .36 and .37 are V-UPF neighbours. One RAN at a time |
+| 100 UEs | Fine in a window: the `internet` pool is 10.45/16, no SMF or eUPF cap near 100, PostgreSQL at 113/400 connections. 10 attaches in parallel; release every session and switch every UE off at the end; tell df the start and end |
+| Throughput | Fine inside the VM against our scripted core on 127.0.0.x; agreed as a window, since gates run UERANSIM/n3iwue there |
+| UP security | The SMF sends no Security Indication and ignores `upSecurity`, so every session takes the gNB's default (a core gap, TS 23.501 §5.10.3; an SMF change is the user's call) |
+| GBR and RQI | No GBR path for a sim subscriber without IMS; the SMF refuses reflective QoS while eUPF sends RQI 0 (register QS-G). Those rows run on the stub (GBR also on Open5GS) |
+| NAS algorithms | The AMF prefers NEA 2,1,0 and NIA 2,1,0, with no NEA3/NIA3 |
+| Real cards | No spare card in kaluza-core's UDR; a card the user burns as imsi-001010000300100 (our range) is provisioned through the API after telling df |
+| netd on the VM | A bridge and veths inside kaluza-uesim are fine (P-64 hits only the dev PC's VMware guests); 10.250.0.0/24 is unused; keep `ksim-mid` uplink-free and off `ens19` |
+
+**The user's P2 decisions on the lab (2026-10-15):** OCUDU runs on the dev PC (loopback, never while a B220 cell runs) and on the VM inside our namespaces (D4). kaluza-sim installs `ksim-netd` on kaluza-uesim inside agreed windows; the user installs it on the dev PC (D6). kaluza-sim may `apt install` iperf3 on the VM, plus exactly the libraries the deploy's ldd check names for `ocucp`/`ocuup`, each recorded here (D7).

@@ -11,8 +11,8 @@ This guard requires:
 
 - each name used in the code is registered, and each registered name is used;
 - names are lower-case identifiers, registered once;
-- the row a mutant targets exists in gates/rows/p1.tsv ('-' for a mutant that
-  only a procedure test kills);
+- the row a mutant targets exists in a phase's row set, gates/rows/p1.tsv or
+  gates/rows/p2.tsv ('-' for a mutant that only a procedure test kills);
 - KSIM_MUTANT is always given a literal.
 """
 
@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import Violation, main, read_text, repo_files, run_self_test, under  # noqa: E402
 
 REGISTRY = Path("tests/mutants.tsv")
-ROWS = Path("gates/rows/p1.tsv")
+ROWS = (Path("gates/rows/p1.tsv"), Path("gates/rows/p2.tsv"))
 CODE_SUFFIXES = {".cpp", ".hpp", ".h", ".cc", ".ipp"}
 SCANNED = ("src", "apps")
 EXEMPT = ("src/platform/mutation.hpp", "src/platform/mutation.cpp")
@@ -36,10 +36,12 @@ USE_ANY = re.compile(r"\bKSIM_MUTANT\s*\(\s*([^\s)])")
 
 
 def row_ids(root: Path) -> set[str]:
-    path = root / ROWS
-    if not path.is_file():
-        return set()
-    return {ln.split("\t", 1)[0] for ln in path.read_text().splitlines() if ln and not ln.startswith("#")}
+    out: set[str] = set()
+    for rel in ROWS:
+        path = root / rel
+        if path.is_file():
+            out |= {ln.split("\t", 1)[0] for ln in path.read_text().splitlines() if ln and not ln.startswith("#")}
+    return out
 
 
 def check(root: Path) -> list[Violation]:
@@ -60,7 +62,7 @@ def check(root: Path) -> list[Violation]:
                                      f"'{name}' needs a row (or '-') and a description"))
             elif cols[1] != "-" and cols[1] not in rows:
                 out.append(Violation(REGISTRY.as_posix(), n, "mutant-row",
-                                     f"'{name}' targets row '{cols[1]}', which is not in {ROWS.as_posix()}"))
+                                     f"'{name}' targets row '{cols[1]}', which is in no row set ({', '.join(r.as_posix() for r in ROWS)})"))
             if not NAME.match(name):
                 out.append(Violation(REGISTRY.as_posix(), n, "mutant-name", f"'{name}' is not a lower-case identifier"))
             if name in registered:

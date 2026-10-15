@@ -7,7 +7,7 @@
 #   gates/run.sh <core> [gate …]       core: a gates/cores/<core>.env
 #
 # It starts ksim-corestub when the core is the stub, then `ksim run` with the
-# core's topology, runs each gate (default: every gates/verification/ksim-p1-*.sh)
+# core's topology, runs each gate (default: the phase's gates, KSIM_PHASE)
 # with RUN and CORE set, stops ksim and the stub, and prints RUN_DIR. The run
 # directory keeps the manifest, events, pcaps and rows.tsv.
 #
@@ -21,6 +21,8 @@
 #   KSIM_LAB=1    pass --lab (kaluza-uesim only; the guard enforces it)
 #   KSIM_TOPOLOGY_FILE
 #                 a topology instead of the core's (the privileged netns hook writes one)
+#   KSIM_PHASE    p1 (default): the gates ksim-p1-*.sh scored against gates/rows/p1.tsv;
+#                 p2: the gates ksim-p1-*.sh and ksim-p2-*.sh against gates/rows/p2.tsv (P2 Q0)
 
 set -u
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -109,7 +111,19 @@ if [ "${KSIM_SIM_TRACE:-0}" = 1 ]; then
     done
 fi
 
-[ $# -gt 0 ] || set -- "$ROOT"/gates/verification/ksim-p1-*.sh
+: "${KSIM_PHASE:=p1}"
+case "$KSIM_PHASE" in
+    p1) KSIM_ROWS="$ROOT/gates/rows/p1.tsv" ;;
+    p2) KSIM_ROWS="$ROOT/gates/rows/p2.tsv" ;;
+    *) echo "KSIM_PHASE is p1 or p2" >&2; exit 2 ;;
+esac
+export KSIM_ROWS
+if [ $# -eq 0 ]; then
+    set -- "$ROOT"/gates/verification/ksim-p1-*.sh
+    if [ "$KSIM_PHASE" = p2 ]; then
+        for g in "$ROOT"/gates/verification/ksim-p2-*.sh; do [ -f "$g" ] && set -- "$@" "$g"; done
+    fi
+fi
 rc=0
 for g in "$@"; do
     echo "== $(basename "$g") on $core"

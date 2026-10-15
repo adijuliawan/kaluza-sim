@@ -16,8 +16,8 @@
 // SecurityModeCommand's own MAC-I checked once it knows the keys (§5.9 NOTE 1).
 //
 // Passive (rule R4): time from the injected TimerService, I/O through the
-// injected sinks. Not in P1: ROHC, EHC, UDC, discard timers, duplication,
-// re-establishment and the status report procedure (P3 with handover).
+// injected sinks. Not built: ROHC, EHC, UDC, discard timers, duplication,
+// re-establishment and the status report procedure (P3, with handover).
 
 #pragma once
 

@@ -4,7 +4,7 @@
 // The UE's SDAP entity for one PDU session (P1 N6; TS 37.324 j00 §5): uplink
 // QoS flows to DRBs by the configured mapping, or the default DRB (§5.2.1);
 // the UL header added and the DL header read where RRC configured them.
-// Reflective QoS (RDI, RQI) is reported, not acted on (P3; ADR 0003 lists it).
+// Reflective QoS (RDI, RQI) is reported, not acted on until P2 Q11 (ADR 0003 lists it).
 
 #pragma once
 

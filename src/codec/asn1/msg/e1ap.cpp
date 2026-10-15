@@ -158,6 +158,9 @@ QosFlow read_flow(const json& j) {
     if (!c.contains("non-Dynamic-5QI")) {
         throw jer::NotP1("a dynamic 5QI");
     }
+    if (p.contains("gBR-QoS-Flow-Information")) {
+        throw jer::NotP1("a GBR QoS flow");   // until P2 Q11 (KS-NGAP-D2)
+    }
     f.five_qi = c.at("non-Dynamic-5QI").at("fiveQI").get<std::uint16_t>();
     const json& arp = p.at("nGRANallocationRetentionPriority");
     f.arp_priority = arp.at("priorityLevel").get<std::uint8_t>();

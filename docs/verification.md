@@ -68,6 +68,19 @@ It also requires every mutant killed, every readable EF read by pySim-shell, no 
 - **The exit check:** `tools/p1_exit.sh` takes each row's newest result per real core across its runs (`runs/open5gs-*`, `runs/lab/kaluza-*`). It reads the component run's `checks.txt`, `build/mutants-run/last` and `build/pysim/last`, and prints `P1_EXIT=PASS|PENDING|FAIL`.
 - **CI:** hooks 68 (mutants) and 90 (`--stub-only`) run in `ci full`.
 
+### 3.2 P2's exit accounting
+
+P2's rows are `gates/rows/p2.tsv` ([ADR 0011](adr/0011-p2-runtime-shape.md), [ADR 0012](adr/0012-ocudu-interop-peer.md)): the P1 row set again, scored per **mode**, plus kaluza-sim's own `ksim-p2.*` rows (interop, AS security, the UP security policy, QoS, cards, scale, performance). The modes are `aio`, `split` (C2: our own DU, CU-CP and CU-UP over real F1/E1) and the OCUDU combinations `C3` (OCUDU's CU-CP and CU-UP), `C4` (OCUDU's CU-UP) and `C5` (OCUDU's CU-CP). `tools/p2_exit.py` keeps p1_exit's newest-result-per-row rule, keyed by (core, mode), and requires:
+
+| What | Requirement |
+|---|---|
+| The P1 rows in split mode | stub: every row PASS (CI); Open5GS: PASS or ALLOWED; kaluza-core: PASS or a KF |
+| OCUDU | every C3 row PASS or ALLOWED by `gates/allow/ocudu.tsv` on the stub and on kaluza-core (window LW2); every C4 and C5 row PASS or ALLOWED on the stub |
+| Performance | each `requirements.md` §3.5 target met on kaluza-uesim (window LW3), or the user's recorded decision |
+| The rest | every P2 stub row PASS; the 100-UE rows; the PC/SC rows (vpcd in CI, the real card); every mutant killed; no malformed frame; no canary hit; no exit run with NULL AS algorithms |
+
+Rows the cores cannot serve are scored where they can be (the user, 2026-10-15, and kaluza-core-df's facts): reflective QoS and the UP security policy on the stub (and Open5GS where its SMF sends the IE), GBR on the stub and Open5GS. On kaluza-core those sessions record the gNB default they get.
+
 ## 4. Parity crosswalk (P4)
 
 - **Baseline:** the 1,633 rows of the 23 gates that start a UERANSIM gNB, in `/home/amadeus/Development/kaluza-core/docs/compliance/smf/phase-2/rows-k3s-963130e1-native-eupf-75d3202.tsv` (`phase-2-final`).
