@@ -207,6 +207,18 @@ ExecOut run_exec(AllInOne& aio, const std::string& sel, const std::vector<std::s
 }
 
 /// iputils ping's summary: "3 packets transmitted, 3 received, …" and "rtt min/avg/max/mdev = a/b/c/d ms".
+/// A reply's value as text ("" when absent): a reply keeps every value as a
+/// string. Out of line, since gcc's -Wnull-dereference misreads json's
+/// value() and get() once they are inlined into the route lambdas.
+[[gnu::noinline]] std::string kv_text(const Reply& r, const char* key) {
+    const auto it = r.kv.find(key);
+    if (it == r.kv.end()) {
+        return {};
+    }
+    const std::string* s = it->get_ptr<const std::string*>();
+    return s != nullptr ? *s : std::string();
+}
+
 void add_ping_summary(Reply& r, const std::string& out) {
     std::smatch m;
     static const std::regex counts(R"((\d+) packets transmitted, (\d+) (?:packets )?received)");
@@ -583,7 +595,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                 r.exit = Exit::failed;
                 const std::string first = x.err.substr(0, x.err.find('\n'));
                 r.set("CAUSE", "ping could not be run" + (first.empty() ? std::string() : ": " + first));
-            } else if (!r.kv.contains("RECEIVED") || r.kv.value("RECEIVED", std::int64_t{0}) == 0) {
+            } else if (const std::string got = kv_text(r, "RECEIVED"); got.empty() || got == "0") {
                 r.exit = Exit::failed;
                 r.set("CAUSE", x.timed_out ? "timeout" : "no echo reply");
             }
@@ -592,7 +604,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         Reply r = run_ue_command(aio, req,
                                  UeCommand{[p](UeDevice& u) { return u.ping(p); }, {"ue.ping.done"}, {}, {}, "ping"});
         r.set("MODE", "inject");
-        if (r.exit == Exit::ok && r.kv.value("RECEIVED", std::string("0")) == "0" && r.kv.contains("SENT")) {
+        if (const std::string got = kv_text(r, "RECEIVED"); r.exit == Exit::ok && (got.empty() || got == "0") && r.kv.contains("SENT")) {
             r.exit = Exit::failed;   // cli.md §2: no reply at all is a failed ping
             r.set("CAUSE", "no echo reply");
         }
@@ -666,7 +678,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             return unsound();
         }
         Reply r = *s;
-        if (r.exit != Exit::ok || r.kv.value("MODE", std::string()) != "netns" || r.kv.value("NETNS", std::string()).empty()) {
+        if (r.exit != Exit::ok || kv_text(r, "MODE") != "netns" || kv_text(r, "NETNS").empty()) {
             return r;
         }
         // The kernel's own view of the namespace: every address on every link.
