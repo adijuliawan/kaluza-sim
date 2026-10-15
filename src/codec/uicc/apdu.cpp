@@ -306,6 +306,11 @@ Result<AuthResult> decode_auth_result(ByteView d, AuthContext ctx) {
                 if (!kc) {
                     return kc.error();
                 }
+                if (kc->len != 8) {
+                    // TS 31.102 7.1.2.1: Kc is 8 octets when present (an empty one,
+                    // which the encoder would not write back, found by fuzz_codecs).
+                    return err(Errc::malformed, 0, "AUTHENTICATE: Kc is not 8 octets");
+                }
                 a.kc = *kc;
             }
         } else {

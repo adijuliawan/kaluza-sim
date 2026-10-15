@@ -54,6 +54,7 @@ struct UeDeviceConfig {
     bool allow_null_integrity = false;        // D1: the bisect switch only
     std::uint64_t seed = 0;
     std::string netns;                        // with an IUeNet: "ksim-ue-<index>"
+    std::optional<proc::ue::MmTimerValues> mm_timers;   // the defaults of TS 24.501 10.2 unless set
 };
 
 /// A session's interface as `ifaces` shows it.
@@ -105,6 +106,11 @@ public:
     Result<void> power_off_abrupt();
     /// SERVICE REQUEST for signalling (cli.md service-request).
     Result<void> service_request();
+    /// The UICC taken out of or put back into the reader (TS 24.501 5.5.2.2.1).
+    Result<void> sim(bool present);
+    /// Airplane mode: on, a registered UE de-registers as for switch-off and the
+    /// radio goes off (the card keeps its state); off, the UE powers on again.
+    Result<void> airplane(bool on);
     Result<void> ps_establish(const proc::ue::SessionRequest& r);
     Result<void> ps_release(std::uint8_t psi);
     Result<void> ping(const PingRequest& p);
@@ -148,7 +154,9 @@ private:
         std::uint64_t dl = 0;
     };
 
-    void poll_registration(int left);
+    /// Registration once 5GMM leaves `waiting` (5GMM-NULL at power on,
+    /// NO-SUPI once a UICC is put back) with a valid USIM.
+    void poll_registration(int left, proc::ue::MmState waiting = proc::ue::MmState::null);
     void on_dl_ip(std::uint8_t psi, Bytes packet);
     void on_ul_ip(std::uint8_t psi, ByteView packet);
     /// Sends an uplink packet on its session's DRB; in 5GMM-IDLE it is held and
@@ -180,6 +188,8 @@ private:
     std::uint64_t noise_ = 0;
     std::map<std::uint8_t, std::vector<Bytes>> held_;   // uplink waiting for a service request
     bool powered_ = false;
+    bool sim_present_ = true;
+    bool airplane_ = false;
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };
 

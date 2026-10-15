@@ -115,6 +115,8 @@ TEST(Apdu, Authenticate) {
     EXPECT_EQ(g->res, hex("01020304"));
     EXPECT_EQ(encode_auth_gsm(g->res, g->kc.in(gsm)), gsm);
     EXPECT_EQ(decode_auth_result(hex("dd00"), AuthContext::umts).error().code, Errc::malformed);
+    // A Kc present but not 8 octets (TS 31.102 7.1.2.1): the fuzzer's empty one.
+    EXPECT_EQ(decode_auth_result(hex("db0004000cdb00040020a50000"), AuthContext::umts).error().code, Errc::malformed);
 }
 
 // Keys and PINs never reach the JSON: CK, IK and Kc by length, PIN data by length.

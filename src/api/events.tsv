@@ -10,10 +10,10 @@ nas.mm.power_on	24.501 5.2.2.2.1	the UE powered its card and read the subscripti
 nas.mm.state	24.501 5.1.3.2.1	a 5GMM state change; from, to (the spec's names), clause (from the entity's transition table), why
 nas.mm.status	24.501 7	a 5GMM STATUS sent or received; direction=ul|dl, cause
 nas.timer.expiry	24.501 10.2	a UE NAS timer ran out; timer (T3510, T3511, T3502, T3516, T3520, T3521)
-nas.reg.request	24.501 5.5.1.2.2	a REGISTRATION REQUEST sent; type=initial|mobility|periodic, identity=suci|5g-guti, attempt (the attempt counter plus one), protected=integrity|plain (4.4.6)
+nas.reg.request	24.501 5.5.1.2.2	a REGISTRATION REQUEST sent; type=initial|mobility|periodic, identity=suci|5g-guti, attempt (the attempt counter plus one), protected=integrity|plain (4.4.6), nssai (the requested S-NSSAIs' SSTs)
 nas.reg.accept	24.501 5.5.1.2.4	a REGISTRATION ACCEPT taken; guti, tai_count, t3512_s, allowed_nssai (SSTs), sms_allowed
 nas.reg.complete	24.501 5.5.1.2.4	a REGISTRATION COMPLETE sent for the 5G-GUTI the accept assigned
-nas.reg.reject	24.501 5.5.1.2.5	a REGISTRATION REJECT taken; cause
+nas.reg.reject	24.501 5.5.1.2.5	a REGISTRATION REJECT taken; cause, protected
 nas.reg.abort	24.501 5.5.1.2.7	a registration attempt ended without an accept; reason=T3510|released|reject, attempt (the counter after it)
 nas.auth.response	24.501 5.4.1.3.3	an AUTHENTICATION RESPONSE sent; ngksi, stored=1 when it repeated the stored RES* for a repeated RAND
 nas.auth.failure	24.501 5.4.1.3.7	a challenge the UE did not accept; cause (#20, #21, #26, #71), consecutive
@@ -110,7 +110,7 @@ nas.mm.identity	24.501 5.4.3.3	an IDENTITY RESPONSE sent; type (the identity typ
 nas.mm.usim_error	31.102 5.1.1	a write to the USIM the card refused; fid, what
 nas.sr.request	24.501 5.6.1.2	a SERVICE REQUEST sent; type (service type value), uplink (the uplink data status bitmap), s_tmsi
 nas.sr.accept	24.501 5.6.1.4	a SERVICE ACCEPT taken; type, uplink, pending_uplink, pdu_session_status (the network's bitmap)
-nas.sr.reject	24.501 5.6.1.5	a SERVICE REJECT taken; cause
+nas.sr.reject	24.501 5.6.1.5	a SERVICE REJECT taken; cause, protected
 nas.sr.abort	24.501 5.6.1.7	a service request ended without an accept; why=T3517|released
 nas.sr.blocked	24.501 5.6.1.7	a service request the UE may not start; why=T3346
 nas.dereg.network	24.501 5.5.2.3.2	a network-initiated DEREGISTRATION REQUEST taken and accepted; reregistration, cause
@@ -118,3 +118,12 @@ rrc.power	sim	the UE's radio switched on or off; on=1|0
 ran.du.rlf	38.473 8.3.2	the DU stopped hearing a UE (radio link supervision, ledger A-12): it asks the CU for the release; du_ue, rnti
 ran.gnb.restart	sim	ksim-ctl gnb restart: the DU, CU-CP and CU-UP stopped and started again, the cell off the air meanwhile; off_air_ms
 ue.power	sim	the UE device switched on or off; state=on|off, mode
+nas.auth.eap.response	24.501 5.4.1.2.2.3	an EAP-response to an EAP-request/AKA'-challenge; subtype=challenge|authentication-reject|synchronization-failure|client-error|notification, error, why, sent (0 when the third error in a row ended the procedure instead)
+nas.auth.eap.success	24.501 5.4.1.2.2.8	EAP-success taken (in a SECURITY MODE COMMAND or an AUTHENTICATION RESULT): the run's K_AUSF and K_SEAF are the anchor keys
+nas.auth.eap.failure	24.501 5.4.1.2.2.11	EAP-failure taken in an AUTHENTICATION RESULT: the partial context and the run's keys are deleted
+nas.auth.eap.discard	24.501 5.4.1.2.4.2	an EAP message that does not parse or is not a request was discarded (RFC 3748 4.1); what
+nas.mm.t3247	24.501 5.3.20.2	T3247 started by a reject without integrity protection; seconds (30 to 60 minutes), cause
+nas.mm.t3247.expiry	24.501 5.3.20.2	T3247 ran out: the TAs forbidden by unprotected rejects are allowed again; usim=valid|invalid
+nas.mm.usim	24.501 5.5.2.2.1	the UICC removed or inserted, as 5GMM sees it; state=removed|inserted
+ue.sim	sim	ksim-ctl ue sim: the UICC taken out of or put back into the reader; present
+ue.airplane	sim	ksim-ctl ue airplane: airplane mode switched; on

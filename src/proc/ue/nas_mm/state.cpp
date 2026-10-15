@@ -67,6 +67,25 @@ constexpr std::array kTransitions{
     MmTransition{S::deregistered_limited_service, S::null, "power off"},
     MmTransition{S::deregistered_plmn_search, S::null, "power off"},
     MmTransition{S::deregistered_no_supi, S::null, "power off"},
+    // N12 follow-up: §5.3.20 for a service reject; the network de-registration's
+    // causes (§5.5.2.3.2, §5.5.2.3.4 b), also met during the UE's own (§5.5.2.2.6 d).
+    MmTransition{S::service_request_initiated, S::deregistered_limited_service, "5.3.20.2"},
+    MmTransition{S::registered_normal_service, S::deregistered_plmn_search, "5.5.2.3.2"},
+    MmTransition{S::registered_normal_service, S::deregistered_limited_service, "5.5.2.3.2"},
+    MmTransition{S::registered_normal_service, S::deregistered_attempting_registration, "5.5.2.3.2, 5.5.2.3.4 b"},
+    MmTransition{S::registered_initiated, S::deregistered_attempting_registration, "5.5.2.3.4 b"},
+    MmTransition{S::service_request_initiated, S::deregistered_no_supi, "5.5.2.3.2"},
+    MmTransition{S::service_request_initiated, S::deregistered_plmn_search, "5.5.2.3.2"},
+    MmTransition{S::service_request_initiated, S::deregistered_attempting_registration, "5.5.2.3.2, 5.5.2.3.4 b"},
+    MmTransition{S::deregistered_initiated, S::deregistered_plmn_search, "5.5.2.2.6 d"},
+    MmTransition{S::deregistered_initiated, S::deregistered_limited_service, "5.5.2.2.6 d"},
+    MmTransition{S::deregistered_initiated, S::deregistered_attempting_registration, "5.5.2.2.6 d"},
+    // The UICC removed and inserted again (§5.5.2.2.1, 5.2.2.2.1).
+    MmTransition{S::deregistered_normal_service, S::deregistered_no_supi, "5.5.2.2.1"},
+    MmTransition{S::deregistered_limited_service, S::deregistered_no_supi, "5.5.2.2.1"},
+    MmTransition{S::deregistered_attempting_registration, S::deregistered_no_supi, "5.5.2.2.1"},
+    MmTransition{S::deregistered_plmn_search, S::deregistered_no_supi, "5.5.2.2.1"},
+    MmTransition{S::deregistered_no_supi, S::deregistered_normal_service, "5.2.2.2.1"},
 };
 
 } // namespace

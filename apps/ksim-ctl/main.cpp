@@ -19,7 +19,7 @@
 //     ue <sel> events [--since N] [--follow] [--filter PREFIX]
 //     wait <event> … (any subject)      events …
 //     gnb <name> ue-list | amf-list | ue-release <ue sel> [--cause C] | restart
-//     ue <sel> service-request [--wait DUR]
+//     ue <sel> service-request [--wait DUR] | sim remove|insert | airplane on|off
 //     stub [release --ue SUPI --psi N [--cause C] | ping-ue --ue SUPI --psi N [--seq N]
 //           | deregister --ue SUPI [--rereg] | restart | t3512 --seconds N]   (--socket <stub ctl>)
 //
@@ -319,6 +319,16 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
     }
     if (cmd == "ifaces") {
         return call(c, "GET", base + "/ifaces");
+    }
+    if (cmd == "sim" && f.words.size() >= 2 && (f.words[1] == "remove" || f.words[1] == "insert")) {
+        json body = json::object();
+        body["action"] = f.words[1];
+        return call(c, "POST", base + "/sim", body);
+    }
+    if (cmd == "airplane" && f.words.size() >= 2 && (f.words[1] == "on" || f.words[1] == "off")) {
+        json body = json::object();
+        body["state"] = f.words[1];
+        return call(c, "POST", base + "/airplane", body);
     }
     if (cmd == "ps-establish") {
         auto w = wait_flag(f, err);

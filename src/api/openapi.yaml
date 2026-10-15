@@ -88,6 +88,21 @@ paths:
         nas.sr.accept (exit 0), nas.sr.reject or nas.sr.abort (exit 1)
       parameters: [{$ref: "#/components/parameters/sel"}]
       responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/sim:
+    post:
+      summary: >-
+        N12: action=remove takes the UICC out of the reader (a registered UE
+        de-registers, then 5GMM-DEREGISTERED.NO-SUPI); action=insert puts it back (read
+        again, then a registration)
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/airplane:
+    post:
+      summary: >-
+        N12: state=on de-registers as for switch-off and turns the radio off; state=off
+        powers the UE on again
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
   /v1/ue/{sel}/ps:
     get:
       summary: >-

@@ -440,6 +440,24 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         }
         return Reply::fail(Exit::usage, "power on|off");
     });
+    server.post("/v1/ue/:sel/sim", [&aio](const Request& req) {
+        const std::string action = req.arg("action");
+        if (action != "remove" && action != "insert") {
+            return Reply::fail(Exit::usage, "sim remove|insert");
+        }
+        const bool present = action == "insert";
+        return run_ue_command(aio, req,
+                              UeCommand{[present](UeDevice& u) { return u.sim(present); }, {}, {}, {}, "sim"});
+    });
+    server.post("/v1/ue/:sel/airplane", [&aio](const Request& req) {
+        const std::string state = req.arg("state");
+        if (state != "on" && state != "off") {
+            return Reply::fail(Exit::usage, "airplane on|off");
+        }
+        const bool on = state == "on";
+        return run_ue_command(aio, req,
+                              UeCommand{[on](UeDevice& u) { return u.airplane(on); }, {}, {}, {}, "airplane"});
+    });
     server.post("/v1/ue/:sel/service-request", [&aio](const Request& req) {
         return run_ue_command(aio, req,
                               UeCommand{[](UeDevice& u) { return u.service_request(); },

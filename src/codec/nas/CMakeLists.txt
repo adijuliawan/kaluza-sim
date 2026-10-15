@@ -18,7 +18,7 @@ file(GLOB _nas_inputs CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/spec/nas/24501/*.
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_nas_inputs}
              "${PROJECT_SOURCE_DIR}/tools/nasgen.py")
 
-add_library(ksim_codec_nas STATIC nas.cpp sms.cpp build.cpp ie/ie.cpp "${_tables}")
+add_library(ksim_codec_nas STATIC nas.cpp sms.cpp build.cpp eap.cpp ie/ie.cpp "${_tables}")
 add_library(ksim::codec_nas ALIAS ksim_codec_nas)
 target_include_directories(ksim_codec_nas PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_codec_nas PUBLIC ksim::platform PRIVATE ksim::warnings)

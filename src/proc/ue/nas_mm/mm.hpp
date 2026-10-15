@@ -64,6 +64,7 @@
 #include "platform/coro.hpp"
 #include "platform/event.hpp"
 #include "platform/executor.hpp"
+#include "platform/rng.hpp"
 #include "platform/secret.hpp"
 #include "proc/ue/nas_mm/ports.hpp"
 #include "proc/ue/nas_mm/state.hpp"
@@ -73,8 +74,8 @@
 namespace ksim::proc::ue {
 
 /// The UE's 5GMM timers (§10.2, Table 10.2.2) the entity runs.
-enum class MmTimer : std::uint8_t { t3502, t3510, t3511, t3516, t3520, t3521, t3512, t3517, t3346 };
-inline constexpr std::size_t kMmTimerCount = 9;
+enum class MmTimer : std::uint8_t { t3502, t3510, t3511, t3516, t3520, t3521, t3512, t3517, t3346, t3247 };
+inline constexpr std::size_t kMmTimerCount = 10;
 const char* mm_timer_name(MmTimer t) noexcept;
 
 /// Default values from Table 10.2.2.
@@ -87,6 +88,8 @@ struct MmTimerValues {
     Millis t3521 = 15'000;
     Millis t3512 = 3'240'000;   // 54 min, when the network gives none
     Millis t3517 = 15'000;
+    Millis t3247_min = 1'800'000;   // §5.3.20.2: uniformly in 30 to 60 minutes
+    Millis t3247_max = 3'600'000;
 };
 
 /// What 5GMM asks of 5GSM (N12): the sessions it holds, for the PDU session
@@ -124,6 +127,7 @@ struct MmConfig {
     std::vector<nas::ie::Snssai> requested_nssai;
     std::string imeisv;                            // 16 digits
     bool follow_on_request = false;
+    std::uint64_t seed = 0;                        // the run's, for T3247's draw (keyed by the SUPI)
     MmTimerValues timers;
     /// Each 5GMM message in clear, as sent before protection and as taken
     /// after its integrity check and deciphering, for the run's Uu capture.
@@ -162,6 +166,12 @@ public:
     /// with no signalling pending, a mobility registration follows (§5.5.1.3.2 f)
     /// naming the sessions whose user plane was up (bit n for PSI n).
     void on_connection_failure(std::uint16_t up_psis);
+    /// The UICC removed (N12 follow-up): a registered UE de-registers (§5.5.2.2.1,
+    /// nothing written to the card), then 5GMM-DEREGISTERED.NO-SUPI; the forbidden
+    /// lists, the rejected NSSAI and the §5.3.20 counters go with the UICC.
+    void usim_removed();
+    /// The UICC inserted again: it is read as at power on.
+    void usim_inserted();
     /// The cell the UE camps on: its TAI is the current TAI (§5.3.13).
     void on_camped(std::uint32_t tac);
 
@@ -219,13 +229,22 @@ private:
     coro::Task<void> read_card(std::shared_ptr<bool> alive);
     coro::Task<void> run_aka(std::shared_ptr<bool> alive, std::uint64_t gen, nas::ie::NgKsi ngksi, Bytes rand,
                              Bytes autn, Bytes abba);
+    // EAP-AKA' (§5.4.1.2, TS 33.501 6.1.3.1; N12 follow-up)
+    void on_eap_request(nas::ie::NgKsi ngksi, Bytes abba, Bytes eap_wire);
+    coro::Task<void> run_eap_aka(std::shared_ptr<bool> alive, std::uint64_t gen, nas::ie::NgKsi ngksi, Bytes abba,
+                                 Bytes eap_wire);
+    /// AUTHENTICATION RESPONSE with an EAP-response; an error response pauses the
+    /// retransmission timers and starts T3520 (§5.4.1.2.2.4).
+    void send_eap_wire(const Bytes& eap_wire, bool error, const char* subtype, const char* why);
+    void on_eap_result(const Bytes& eap_wire);   // EAP-success or EAP-failure (SMC, AUTHENTICATION RESULT)
+    void on_authentication_result(const nas::Message& m);
 
     enum class RegType : std::uint8_t { initial = 1, mobility = 2, periodic = 3 };
     void start_registration(RegType type = RegType::initial);
     /// §4.4.6: the initial message as it goes, protected with the current context.
     Result<Bytes> protect_initial(const nas::Message& m);
     void on_service_accept(const nas::Message& m);
-    void on_service_reject(const nas::Message& m);
+    void on_service_reject(const nas::Message& m, bool integrity_ok);
     void on_network_deregistration(const nas::Message& m);
     void on_configuration_update(const nas::Message& m);
     void on_identity_request(const nas::Message& m);
@@ -253,7 +272,12 @@ private:
     void on_authentication_request(const nas::Message& m);
     void on_authentication_reject(bool integrity_ok);
     void on_registration_accept(const nas::Message& m);
-    void on_registration_reject(const nas::Message& m);
+    void on_registration_reject(const nas::Message& m, bool integrity_ok);
+    /// §5.3.20.2 for a REGISTRATION REJECT or SERVICE REJECT that came without
+    /// integrity protection: true when it handled the cause itself.
+    bool unprotected_reject(std::uint8_t cause);
+    void forbid_current_ta(bool unprotected);
+    void deregistered_with_cause(std::uint8_t cause);   // §5.5.2.3.2, §5.5.2.3.4 b
     void on_deregistration_accept();
     void on_dl_nas_transport(const nas::Message& m);
     void reject_security_mode(std::uint8_t cause);
@@ -279,6 +303,7 @@ private:
     IEventSink& events_;
     MmConfig cfg_;
     std::shared_ptr<bool> alive_;
+    Rng rng_;   // T3247's draws
 
     MmState state_ = MmState::null;
     UpdateStatus update_ = UpdateStatus::u2_not_updated;
@@ -319,8 +344,24 @@ private:
     bool update_registration_pending_ = false;   // a configuration update asked for one
     std::vector<nas::ie::Plmn> forbidden_plmns_;
     std::vector<nas::ie::Tai> forbidden_tais_;
+    // §5.3.20.2: the TAs forbidden by non-integrity-protected rejects (T3247
+    // takes them off again) and the "SIM/USIM considered invalid for GPRS
+    // services" events, at most kMaxInvalidEvents (UE implementation-specific, at most 10).
+    std::vector<nas::ie::Tai> unprotected_tais_;
+    int invalid_events_ = 0;
+    static constexpr int kMaxInvalidEvents = 3;
+    bool reject_unprotected_ = false;   // the reject being handled came without integrity protection
+    bool usim_present_ = true;          // false from a UICC removal to its insertion
+    // §5.5.1.2.5 #62, §4.6.2.2: S-NSSAIs the network rejected, not asked for again
+    // until power-off (P1 keeps one list for every rejection cause).
+    std::vector<nas::ie::RejectedNssai::Entry> rejected_nssai_;
     SecretBytes kausf_;
     SecretBytes kseaf_;
+    struct EapKeys {   // an EAP-AKA' run's anchor keys, valid from its EAP-success (§5.4.1.2.2.3)
+        SecretBytes kausf;
+        SecretBytes kseaf;
+    };
+    std::optional<EapKeys> eap_pending_;
     std::deque<CardWrite> card_jobs_;
     bool card_busy_ = false;
     std::size_t nsc_record_size_ = 62;

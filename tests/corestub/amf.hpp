@@ -54,6 +54,8 @@ struct Profile {
     enum class Registration : std::uint8_t { accept, reject, silent, accept_plain };
     Registration registration = Registration::accept;
     std::uint8_t reject_cause = 0;
+    bool reject_unprotected = false;           // the reject at once, before authentication (§5.3.20)
+    std::optional<std::uint8_t> rejected_sst;  // a Rejected NSSAI entry with the reject (#62)
     std::optional<int> t3346_s;              // T3346 value in a #22 reject (N12)
     std::uint8_t service_reject_cause = 0;   // a SERVICE REQUEST rejected with this cause (N12)
     bool silent_service_request = false;     // a SERVICE REQUEST left unanswered (T3517)
@@ -68,6 +70,13 @@ struct Profile {
     enum class Deregistration : std::uint8_t { accept, silent };
     Deregistration deregistration = Deregistration::accept;
     bool reauthenticate = false;   // a registration that verifies is authenticated anyway
+    // EAP-AKA' instead of 5G AKA (TS 33.501 6.1.3.1; the challenge kinds apply as
+    // for 5G AKA). The two faults touch the first challenge only.
+    bool eap_aka_prime = false;
+    std::string eap_network_name;      // AT_KDF_INPUT other than the serving network name
+    bool eap_bad_at_mac = false;       // AT_MAC corrupted: the UE answers with a client error
+    std::uint16_t eap_kdf = 1;         // the first challenge's AT_KDF (not 1: an incorrect AUTN to the UE)
+    bool eap_result_message = false;   // EAP-success in an AUTHENTICATION RESULT before the SMC
     SessionProfile session;   // the SMF's (N10)
 
     /// Reads a profile; unknown keys are an error (YamlError with the path).
@@ -103,7 +112,9 @@ public:
     bool release_session(std::uint8_t psi, std::uint8_t cause);
     bool modify_session(std::uint8_t psi, std::uint32_t ambr_mbps);
     /// Network-initiated de-registration (§5.5.2.3.1) of a registered, connected UE.
-    bool network_deregister(bool reregistration_required);
+    /// With a 5GMM cause when not 0 (§5.5.2.3.1). Also while a UE de-registration
+    /// waits unanswered (Deregistration::silent), for the collision of §5.5.2.2.6 d.
+    bool network_deregister(bool reregistration_required, std::uint8_t cause = 0);
     /// Whether this context is the UE's that `id` (a 5G-GUTI) or `s_tmsi` names.
     bool owns(const nas::ie::MobileIdentity& id) const;
     bool owns_s_tmsi(std::uint64_t s_tmsi) const;
@@ -147,6 +158,8 @@ private:
     void start_challenge();
     void on_authentication_response(const nas::Message& m);
     void on_authentication_failure(const nas::Message& m);
+    Result<Bytes> eap_challenge(const std::string& snn);
+    void on_eap_response(const nas::Message& m);
     void send_security_mode_command();
     void on_security_mode_complete(const nas::Message& m, proc::ue::Sht sht);
     void on_security_mode_reject(const nas::Message& m);
@@ -196,6 +209,8 @@ private:
     // N12
     bool connected_ = false;
     std::uint8_t reg_type_ = 1;
+    std::uint8_t eap_id_ = 0;      // the last EAP-request's identifier
+    bool eap_fault_ = false;       // the last challenge carried a profile fault
     std::uint16_t reg_uplink_ = 0;   // the REGISTRATION REQUEST's Uplink data status
     std::uint16_t reg_up_ = 0;       // the sessions whose user plane the accept brought back
     std::optional<std::uint32_t> initial_count_;   // the COUNT of a verified initial message

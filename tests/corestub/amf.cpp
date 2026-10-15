@@ -7,6 +7,8 @@
 #include <utility>
 
 #include "codec/nas/build.hpp"
+#include "codec/nas/eap.hpp"
+#include "crypto/eap_aka_prime.hpp"
 #include "crypto/keys5g.hpp"
 
 namespace ksim::corestub {
@@ -26,6 +28,7 @@ constexpr std::uint8_t kDeregistrationRequestUe = 0x45;
 constexpr std::uint8_t kDeregistrationAcceptUe = 0x46;
 constexpr std::uint8_t kAuthenticationRequest = 0x56;
 constexpr std::uint8_t kAuthenticationResponse = 0x57;
+constexpr std::uint8_t kAuthenticationResult = 0x5A;
 constexpr std::uint8_t kAuthenticationReject = 0x58;
 constexpr std::uint8_t kAuthenticationFailure = 0x59;
 constexpr std::uint8_t kSecurityModeCommand = 0x5D;
@@ -98,7 +101,7 @@ Profile::Challenge challenge_named(const std::string& s, const Yaml& at) {
 Profile Profile::from_yaml(const Yaml& y) {
     y.only({"challenges", "ea", "ia", "imeisv_request", "rinmr", "tamper_replayed_capabilities", "registration",
             "reject_cause", "tmsi", "amf_region", "amf_set", "amf_pointer", "tacs", "allowed_sst", "t3512_s",
-            "t3502_s", "deregistration", "session"});
+            "t3502_s", "deregistration", "session", "eap_aka_prime"});
     Profile p;
     if (y.has("challenges")) {
         p.challenges.clear();
@@ -111,6 +114,7 @@ Profile Profile::from_yaml(const Yaml& y) {
     p.ia = static_cast<std::uint8_t>(y.get<int>("ia", p.ia));
     p.imeisv_request = y.get<bool>("imeisv_request", p.imeisv_request);
     p.rinmr = y.get<bool>("rinmr", p.rinmr);
+    p.eap_aka_prime = y.get<bool>("eap_aka_prime", p.eap_aka_prime);
     p.tamper_replayed_capabilities = y.get<bool>("tamper_replayed_capabilities", p.tamper_replayed_capabilities);
     const std::string r = y.get<std::string>("registration", "accept");
     if (r == "accept") {
@@ -384,6 +388,14 @@ void Amf::on_registration_request(const nas::Message& m, bool initial, Sht sht, 
     if (supi_.empty() || p_.registration == Profile::Registration::silent) {
         return;
     }
+    if (p_.registration == Profile::Registration::reject && p_.reject_unprotected) {
+        nas::Message r = make(kRegistrationReject);
+        put(r, "5GMM cause", Bytes{p_.reject_cause});
+        send(r, false);   // no security context yet: plain
+        state_ = State::released;
+        release();
+        return;
+    }
     if (verified && !p_.reauthenticate) {
         // The UE proved its context (§4.4.6): no new authentication (TS 33.501 6.1.1),
         // and K_gNB comes from this message's COUNT (TS 33.501 6.8.1.2.2).
@@ -456,12 +468,16 @@ void Amf::on_service_request(const nas::Message& m, bool initial, bool verified)
     }
 }
 
-bool Amf::network_deregister(bool reregistration_required) {
-    if (state_ != State::registered || !ctx_ || !connected_) {
+bool Amf::network_deregister(bool reregistration_required, std::uint8_t cause) {
+    const bool waiting = state_ == State::idle && p_.deregistration == Profile::Deregistration::silent;
+    if ((state_ != State::registered && !waiting) || !ctx_ || !connected_) {
         return false;
     }
     nas::Message d = make(kDeregistrationRequestUeTerminated);
     put(d, "De-registration type", ie::DeregistrationType{false, reregistration_required, 1}.encode());
+    if (cause != 0) {
+        put(d, "5GMM cause", Bytes{cause});
+    }
     state_ = State::deregistering;
     send(d, true);
     return true;
@@ -496,7 +512,11 @@ void Amf::start_challenge() {
     }
     if (kind == Profile::Challenge::reject) {
         av_kind_ = kind;
-        send(make(kAuthenticationReject), ctx_.has_value());
+        nas::Message rj = make(kAuthenticationReject);
+        if (p_.eap_aka_prime) {
+            put(rj, "EAP message", Bytes{4, eap_id_, 0, 4});   // EAP-failure (RFC 3748 4.2)
+        }
+        send(rj, ctx_.has_value());
         state_ = State::released;
         release();
         return;
@@ -505,6 +525,7 @@ void Amf::start_challenge() {
     AvOptions o;
     o.corrupt_mac = kind == Profile::Challenge::bad_mac;
     o.separation_bit = kind != Profile::Challenge::non_5g;
+    o.eap = p_.eap_aka_prime;
     if (kind == Profile::Challenge::stale_sqn) {
         o.seq = 0;   // never fresh: the USIM has accepted SEQ 0 or later (TS 33.102 C.2.2)
     }
@@ -520,8 +541,18 @@ void Amf::start_challenge() {
     nas::Message r = make(kAuthenticationRequest);
     put(r, "ngKSI", ngksi_.encode());
     put(r, "ABBA", kAbba);
-    put(r, "Authentication parameter RAND (5G authentication challenge)", av_->rand);
-    put(r, "Authentication parameter AUTN (5G authentication challenge)", av_->autn);
+    if (p_.eap_aka_prime) {
+        // §5.4.1.2.2.2: EAP-Request/AKA'-Challenge with AT_KDF 1 and the SNN in AT_KDF_INPUT.
+        auto e = eap_challenge(snn ? *snn : std::string());
+        check(e.has_value(), "RFC 5448 3", "the stub built its EAP-Request/AKA'-Challenge");
+        if (!e) {
+            return;
+        }
+        put(r, "EAP message", *e);
+    } else {
+        put(r, "Authentication parameter RAND (5G authentication challenge)", av_->rand);
+        put(r, "Authentication parameter AUTN (5G authentication challenge)", av_->autn);
+    }
     state_ = State::authenticating;
     send(r, false);
     t3560_expiries_ = 0;
@@ -538,6 +569,10 @@ void Amf::on_authentication_response(const nas::Message& m) {
         return;
     }
     stop_t3560();
+    if (p_.eap_aka_prime) {
+        on_eap_response(m);
+        return;
+    }
     const bool valid = *av_kind_ == Profile::Challenge::ok || *av_kind_ == Profile::Challenge::lose_response;
     check(valid, "5.4.1.3.7", "the UE answers only a valid challenge with a response");
     const Bytes* r = nas::get(m, "Authentication response parameter");
@@ -576,6 +611,104 @@ void Amf::on_authentication_failure(const nas::Message& m) {
     start_challenge();
 }
 
+Result<Bytes> Amf::eap_challenge(const std::string& snn) {
+    // RFC 5448 3.1, RFC 4187 9.3: AT_RAND, AT_AUTN, AT_KDF, AT_KDF_INPUT, then AT_MAC under K_aut.
+    const bool first = challenges_ == 1;
+    const std::string name = first && !p_.eap_network_name.empty() ? p_.eap_network_name : snn;
+    eap_id_ = static_cast<std::uint8_t>(eap_id_ + 1);
+    eap::Packet p{eap::Code::request, eap_id_, eap::kTypeAkaPrime, eap::Subtype::challenge,
+                  {eap::at_rand(av_->rand), eap::at_autn(av_->autn), eap::at_kdf(first ? p_.eap_kdf : 1),
+                   eap::at_kdf_input(name),
+                   eap::at_mac_zero()}};
+    auto wire = eap::encode(p);
+    if (!wire) {
+        return wire.error();
+    }
+    const auto off = eap::mac_offset(*wire);
+    if (!off) {
+        return make_error(Errc::internal, 0, "stub: no AT_MAC");
+    }
+    auto mac = crypto::eap_aka_prime::at_mac(av_->k_aut, *wire);
+    if (first && p_.eap_bad_at_mac) {
+        mac[15] ^= 0x01;
+    }
+    std::copy(mac.begin(), mac.end(), wire->begin() + static_cast<std::ptrdiff_t>(*off));
+    eap_fault_ = first && (p_.eap_bad_at_mac || !p_.eap_network_name.empty() || p_.eap_kdf != 1);
+    return wire;
+}
+
+void Amf::on_eap_response(const nas::Message& m) {
+    const Bytes* e = nas::get(m, "EAP message");
+    check(e != nullptr, "5.4.1.2.4.3", "the AUTHENTICATION RESPONSE to an EAP-request carries the EAP-response");
+    auto p = e != nullptr ? eap::decode(*e) : Result<eap::Packet>(make_error(Errc::truncated, 0, "absent"));
+    check(p && p->code == eap::Code::response && p->type == eap::kTypeAkaPrime && p->id == eap_id_,
+          "RFC 3748 4.1, RFC 5448 3", "an EAP-AKA' response with the request's identifier");
+    if (!p) {
+        return;
+    }
+    const Profile::Challenge kind = *av_kind_;
+    std::string expected = "challenge";
+    if (p_.eap_bad_at_mac && eap_fault_) {
+        expected = "client-error";   // §5.4.1.2.2.4: another error
+    } else if (eap_fault_ || kind == Profile::Challenge::bad_mac || kind == Profile::Challenge::non_5g) {
+        expected = "authentication-reject";   // the SNN check or AUTN
+    } else if (kind == Profile::Challenge::stale_sqn) {
+        expected = "synchronization-failure";
+    }
+    std::string got = "?";
+    switch (p->subtype) {
+    case eap::Subtype::challenge: got = "challenge"; break;
+    case eap::Subtype::authentication_reject: got = "authentication-reject"; break;
+    case eap::Subtype::synchronization_failure: got = "synchronization-failure"; break;
+    case eap::Subtype::client_error: got = "client-error"; break;
+    default: break;
+    }
+    check(got == expected, "5.4.1.2.2.3, 5.4.1.2.2.4", "the EAP-response fits the challenge", got + ", expected " + expected);
+    if (got == "synchronization-failure") {
+        const eap::Attribute* a = p->find(eap::Attr::auts);
+        const auto auts = a != nullptr ? eap::auts_of(*a) : std::nullopt;
+        check(auts.has_value(), "RFC 4187 9.6", "AKA'-Synchronization-Failure carries AT_AUTS");
+        check(p->find(eap::Attr::kdf) != nullptr, "RFC 5448 3.2", "AKA'-Synchronization-Failure copies AT_KDF");
+        if (auts) {
+            auto ok = home_.resync(supi_, av_->rand, *auts);
+            check(ok && *ok, "TS 33.102 6.3.5", "MAC-S in AUTS verifies");
+            ++resyncs_;
+        }
+    }
+    if (got != "challenge") {
+        start_challenge();   // the home network's policy (TS 33.501 6.1.3.1): another challenge
+        return;
+    }
+    // AT_MAC under K_aut over the response, and AT_RES against XRES (RFC 4187 9.4).
+    Bytes zeroed = *e;
+    const auto off = eap::mac_offset(zeroed);
+    const eap::Attribute* mac_a = p->find(eap::Attr::mac);
+    const auto mac = mac_a != nullptr ? eap::value16(*mac_a) : std::nullopt;
+    bool mac_ok = false;
+    if (off && mac) {
+        std::fill_n(zeroed.begin() + static_cast<std::ptrdiff_t>(*off), 16, std::uint8_t{0});
+        const auto want = crypto::eap_aka_prime::at_mac(av_->k_aut, zeroed);
+        mac_ok = std::equal(want.begin(), want.end(), mac->begin());
+    }
+    check(mac_ok, "RFC 4187 10.15, RFC 5448 3.4.1", "AT_MAC of the response verifies under K_aut");
+    const eap::Attribute* res_a = p->find(eap::Attr::res);
+    const auto res = res_a != nullptr ? eap::res_of(*res_a) : std::nullopt;
+    const bool res_ok = res.has_value() && ct_equal(av_->xres, *res);
+    check(res_ok, "TS 33.501 6.1.3.1 step 8", "RES equals XRES");
+    if (!mac_ok || !res_ok) {
+        return;
+    }
+    if (p_.eap_result_message) {
+        // The EAP result on its own (8.2.3), then the command without it.
+        nas::Message r = make(kAuthenticationResult);
+        put(r, "ngKSI", ngksi_.encode());
+        put(r, "EAP message", Bytes{3, eap_id_, 0, 4});
+        put(r, "ABBA", kAbba);
+        send(r, false);
+    }
+    send_security_mode_command();
+}
+
 void Amf::send_security_mode_command() {
     if (!av_ || !ue_caps_) {
         return;
@@ -594,6 +727,11 @@ void Amf::send_security_mode_command() {
     }
     if (p_.rinmr) {
         put(c, "Additional 5G security information", ie::Additional5gSecurityInformation{true, false}.encode());
+    }
+    if (p_.eap_aka_prime && !p_.eap_result_message) {
+        // TS 33.501 6.1.3.1 step 11: EAP-success and ABBA with the command.
+        put(c, "EAP message", Bytes{3, eap_id_, 0, 4});
+        put(c, "ABBA", kAbba);
     }
     auto plain = nas::encode(c);
     if (!plain) {
@@ -740,6 +878,11 @@ void Amf::send_registration_result() {
         put(r, "5GMM cause", Bytes{p_.reject_cause});
         if (p_.t3346_s) {
             put(r, "T3346 value", timer2(*p_.t3346_s).encode());
+        }
+        if (p_.rejected_sst) {
+            ie::RejectedNssai rn;
+            rn.list.push_back(ie::RejectedNssai::Entry{0, *p_.rejected_sst, std::nullopt});
+            put(r, "Rejected NSSAI", rn.encode());
         }
         send(r, true);
         state_ = State::released;

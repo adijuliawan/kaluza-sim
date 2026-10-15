@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 
+#include "codec/nas/eap.hpp"
 #include "codec/nas/ie/ie.hpp"
 #include "proc/ue/nas_sec/nas_sec.hpp"
 
@@ -68,7 +69,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     }
     namespace ie = ksim::nas::ie;
     const ByteView in(data + 1, size - 1);
-    switch (data[0] % 24) {
+    switch (data[0] % 25) {
     case 0: round_trip<ie::MobileIdentity>(in); break;
     case 1: round_trip<ie::TaiList>(in); break;
     case 2: round_trip<ie::Nssai>(in); break;
@@ -91,6 +92,33 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     case 19: round_trip<ie::NasSecurityAlgorithms>(in); break;
     case 20: round_trip<ie::Abba>(in); break;
     case 21: round_trip<ie::EapMessage>(in); break;
+    case 22: {
+        // An EAP packet (N12 follow-up): what decodes encodes, and that encoding is stable.
+        auto p = ksim::eap::decode(in);
+        if (p) {
+            auto e1 = ksim::eap::encode(*p);
+            if (e1) {
+                auto p2 = ksim::eap::decode(*e1);
+                if (!p2) {
+                    std::abort();
+                }
+                auto e2 = ksim::eap::encode(*p2);
+                if (!e2) {
+                    std::abort();
+                }
+                same(*e1, *e2);
+                (void)ksim::eap::mac_offset(*e1);
+            }
+            for (const auto& a : p->attrs) {
+                (void)ksim::eap::value16(a);
+                (void)ksim::eap::res_of(a);
+                (void)ksim::eap::auts_of(a);
+                (void)ksim::eap::kdf_of(a);
+                (void)ksim::eap::network_name_of(a);
+            }
+        }
+        break;
+    }
     default: {
         // The downlink check: a fresh copy of the context each time, so one
         // input's COUNT does not shape the next.

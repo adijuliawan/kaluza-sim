@@ -8,6 +8,8 @@
 #include <utility>
 
 #include "codec/nas/build.hpp"
+#include "codec/nas/eap.hpp"
+#include "crypto/eap_aka_prime.hpp"
 #include "crypto/kdf.hpp"
 #include "crypto/keys5g.hpp"
 #include "platform/mutation.hpp"
@@ -30,6 +32,7 @@ constexpr std::uint8_t kDeregistrationAcceptUe = 0x46;
 constexpr std::uint8_t kAuthenticationRequest = 0x56;
 constexpr std::uint8_t kAuthenticationResponse = 0x57;
 constexpr std::uint8_t kAuthenticationReject = 0x58;
+constexpr std::uint8_t kAuthenticationResult = 0x5A;
 constexpr std::uint8_t kAuthenticationFailure = 0x59;
 constexpr std::uint8_t kSecurityModeCommand = 0x5D;
 constexpr std::uint8_t kSecurityModeComplete = 0x5E;
@@ -116,12 +119,26 @@ const char* mm_timer_name(MmTimer t) noexcept {
     case MmTimer::t3512: return "T3512";
     case MmTimer::t3517: return "T3517";
     case MmTimer::t3346: return "T3346";
+    case MmTimer::t3247: return "T3247";
     }
     return "?";
 }
 
+namespace {
+
+std::uint64_t fnv1a(std::string_view s) {
+    std::uint64_t h = 0xcbf29ce484222325ULL;
+    for (const char c : s) {
+        h = (h ^ static_cast<std::uint8_t>(c)) * 0x100000001b3ULL;
+    }
+    return h;
+}
+
+} // namespace
+
 Mm::Mm(Executor& ex, uicc::Terminal& card, INasLower& lower, IEventSink& events, MmConfig cfg)
-    : ex_(ex), card_(card), lower_(lower), events_(events), cfg_(std::move(cfg)), alive_(std::make_shared<bool>(true)) {}
+    : ex_(ex), card_(card), lower_(lower), events_(events), cfg_(std::move(cfg)), alive_(std::make_shared<bool>(true)),
+      rng_(cfg_.seed, {0x3247, fnv1a(cfg_.id)}) {}
 
 Mm::~Mm() {
     *alive_ = false;
@@ -157,6 +174,8 @@ void Mm::power_on() {
     update_registration_pending_ = false;
     forbidden_plmns_.clear();   // §5.3.13: the lists go when the UE is switched off
     forbidden_tais_.clear();
+    unprotected_tais_.clear();
+    rejected_nssai_.clear();    // §4.6.2.2: until switching off
     update_ = UpdateStatus::u2_not_updated;
     connected_ = false;
     ++gen_;
@@ -293,8 +312,17 @@ void Mm::start_registration(RegType type) {
     const ie::MobileIdentity id = identity();
     put(m, "5GS mobile identity", id.encode());
     put(m, "UE security capability", cfg_.security.encode());
-    if (!cfg_.requested_nssai.empty()) {
-        put(m, "Requested NSSAI", ie::Nssai{cfg_.requested_nssai}.encode());
+    std::vector<ie::Snssai> requested;
+    for (const auto& s : cfg_.requested_nssai) {
+        const bool rejected = std::any_of(rejected_nssai_.begin(), rejected_nssai_.end(), [&](const auto& r) {
+            return r.sst == s.sst && r.sd == s.sd;
+        });
+        if (!rejected) {
+            requested.push_back(s);   // §5.5.1.2.5 #62: a rejected S-NSSAI is not asked for again
+        }
+    }
+    if (!requested.empty()) {
+        put(m, "Requested NSSAI", ie::Nssai{requested}.encode());
     }
     if (with_context && cfg_.sm_hooks.active) {
         ie::PsiBitmap status{cfg_.sm_hooks.active()};
@@ -329,7 +357,14 @@ void Mm::start_registration(RegType type) {
                  {{"type", reg_type_name(static_cast<std::uint8_t>(type))},
                   {"identity", guti_ ? "5g-guti" : "suci"},
                   {"protected", with_context ? "integrity" : "plain"},
-                  {"attempt", str(attempts_ + 1)}});
+                  {"attempt", str(attempts_ + 1)},
+                  {"nssai", [&] {
+                       std::string n;
+                       for (const auto& s : requested) {
+                           n += (n.empty() ? "" : ",") + str(s.sst);
+                       }
+                       return n;
+                   }()}});
     set_state(MmState::registered_initiated, "registration request");
     send_wire(std::move(*wire));
     start(MmTimer::t3510, cfg_.timers.t3510);
@@ -484,7 +519,7 @@ void Mm::on_registration_accept(const nas::Message& m) {
     flush_pending_sm();
 }
 
-void Mm::on_registration_reject(const nas::Message& m) {
+void Mm::on_registration_reject(const nas::Message& m, bool integrity_ok) {
     if (state_ != MmState::registered_initiated) {
         send_status(kNotCompatibleWithState);
         return;
@@ -493,7 +528,11 @@ void Mm::on_registration_reject(const nas::Message& m) {
     const std::uint8_t cause = (c != nullptr && !c->empty()) ? (*c)[0] : 111;
     stop(MmTimer::t3510);
     paused_t3510_ = false;
-    events_.emit("nas.reg.reject", cfg_.id, {{"cause", str(cause)}});
+    events_.emit("nas.reg.reject", cfg_.id, {{"cause", str(cause)}, {"protected", integrity_ok ? "1" : "0"}});
+    reject_unprotected_ = !integrity_ok;
+    if (!integrity_ok && unprotected_reject(cause)) {
+        return;
+    }
     switch (cause) {
     case kIllegalUe:
     case kIllegalMe:
@@ -504,21 +543,21 @@ void Mm::on_registration_reject(const nas::Message& m) {
         set_state(MmState::deregistered_no_supi, "registration reject #3, #6 or #7");
         return;
     case kPlmnNotAllowed:
+    case 73:   // serving network not authorized: as #11 for 3GPP access (no equivalent PLMNs kept)
         update_ = UpdateStatus::u3_roaming_not_allowed;
         delete_registration_data(true);
         attempts_ = 0;
         forbidden_plmns_.push_back(cfg_.plmn);   // §5.5.1.2.5: the forbidden PLMN list
         persist_loci();
-        set_state(MmState::deregistered_plmn_search, "registration reject #11");
+        set_state(MmState::deregistered_plmn_search, cause == kPlmnNotAllowed ? "registration reject #11" : "registration reject #73");
         return;
     case kTaNotAllowed:
     case kRoamingNotAllowedInTa:
     case kNoSuitableCells:
         update_ = UpdateStatus::u3_roaming_not_allowed;
-        // §5.5.1.2.5: the current TAI goes on the forbidden TA lists of §5.3.13.
-        if (const auto& here = current_tai_ ? current_tai_ : last_tai_; here) {
-            forbidden_tais_.push_back(*here);
-        }
+        // §5.5.1.2.5: the current TAI goes on the forbidden TA lists of §5.3.13
+        // (§5.3.20.2: remembered as an unprotected reject's when it came so).
+        forbid_current_ta(reject_unprotected_);
         delete_registration_data(true);
         attempts_ = 0;
         persist_loci();
@@ -544,8 +583,24 @@ void Mm::on_registration_reject(const nas::Message& m) {
         attempts_ = 0;
         set_state(MmState::deregistered_limited_service, "registration reject #27");
         return;
+    case 62: {
+        // §5.5.1.2.5 #62 "no network slices available": 5U2, the counter reset, the
+        // rejected NSSAI kept (§4.6.2.2), ATTEMPTING-REGISTRATION.
+        update_ = UpdateStatus::u2_not_updated;
+        attempts_ = 0;
+        if (const Bytes* r = nas::get(m, "Rejected NSSAI")) {
+            if (auto rn = ie::RejectedNssai::decode(*r)) {
+                for (const auto& e : rn->list) {
+                    rejected_nssai_.push_back(e);
+                }
+            }
+        }
+        persist_loci();
+        set_state(MmState::deregistered_attempting_registration, "registration reject #62");
+        return;
+    }
     default:
-        // §5.5.1.2.7 d. N12 gives #22, #62, #72 and the rest their own handling.
+        // §5.5.1.2.7 d, which also covers #72 over 3GPP access (§5.5.1.2.5).
         if (cause == 95 || cause == 96 || cause == 97 || cause == 99 || cause == 111) {
             attempts_ = kMaxAttempts;
         }
@@ -616,7 +671,8 @@ void Mm::on_deregistration_accept() {
     paused_t3521_ = false;
     events_.emit("nas.dereg.accept", cfg_.id, {});
     entering_deregistered();
-    set_state(MmState::deregistered_normal_service, "de-registration accept");
+    set_state(usim_present_ ? MmState::deregistered_normal_service : MmState::deregistered_no_supi,
+              "de-registration accept");
 }
 
 // ---- 5G AKA (§5.4.1.3) ---------------------------------------------------------------
@@ -626,10 +682,19 @@ void Mm::on_authentication_request(const nas::Message& m) {
     const Bytes* abba_v = nas::get(m, "ABBA");
     const Bytes* rand_v = nas::get(m, "Authentication parameter RAND (5G authentication challenge)");
     const Bytes* autn_v = nas::get(m, "Authentication parameter AUTN (5G authentication challenge)");
+    if (const Bytes* eap_v = nas::get(m, "EAP message");
+        eap_v != nullptr && rand_v == nullptr && ngksi_v != nullptr && abba_v != nullptr) {
+        // EAP based primary authentication (§5.4.1.2): EAP-AKA'.
+        auto ngksi = ie::NgKsi::decode(*ngksi_v);
+        if (!ngksi) {
+            send_status(kInvalidMandatory);
+            return;
+        }
+        on_eap_request(*ngksi, *abba_v, *eap_v);
+        return;
+    }
     if (ngksi_v == nullptr || abba_v == nullptr || rand_v == nullptr || autn_v == nullptr) {
-        // EAP-AKA' (an EAP message instead of RAND and AUTN) is N12.
-        send_status(rand_v == nullptr && nas::get(m, "EAP message") != nullptr ? kTypeNotImplemented
-                                                                                : kInvalidMandatory);
+        send_status(kInvalidMandatory);
         return;
     }
     auto ngksi = ie::NgKsi::decode(*ngksi_v);
@@ -716,6 +781,230 @@ coro::Task<void> Mm::run_aka(std::shared_ptr<bool> alive, std::uint64_t gen, ie:
     send(r);
 }
 
+// ---- EAP-AKA' (§5.4.1.2; TS 33.501 6.1.3.1, Annex F; RFC 5448, RFC 9048) -------------
+
+namespace {
+
+constexpr std::uint16_t kKdfCkIkPrime = 1;              // RFC 5448 3.1
+constexpr std::uint16_t kClientErrorUnableToProcess = 0;  // RFC 4187 10.20
+
+const char* eap_subtype_name(std::uint8_t s) {
+    switch (static_cast<eap::Subtype>(s)) {
+    case eap::Subtype::challenge: return "challenge";
+    case eap::Subtype::authentication_reject: return "authentication-reject";
+    case eap::Subtype::synchronization_failure: return "synchronization-failure";
+    case eap::Subtype::identity: return "identity";
+    case eap::Subtype::notification: return "notification";
+    case eap::Subtype::reauthentication: return "reauthentication";
+    case eap::Subtype::client_error: return "client-error";
+    }
+    return "?";
+}
+
+} // namespace
+
+void Mm::on_eap_request(ie::NgKsi ngksi, Bytes abba, Bytes eap_wire) {
+    // §5.4.1.2.2.4: a new EAP-request stops T3520 and is processed as normal.
+    const bool consecutive = running(MmTimer::t3520);
+    stop(MmTimer::t3520);
+    if (!consecutive) {
+        auth_failures_ = 0;
+    }
+    auto p = eap::decode(eap_wire);
+    if (!p || p->code != eap::Code::request) {
+        // RFC 3748 4.1: an EAP packet that does not parse is silently discarded.
+        events_.emit("nas.auth.eap.discard", cfg_.id, {{"what", p ? "not a request" : p.error().what}});
+        return;
+    }
+    if (p->type == eap::kTypeAkaPrime && p->subtype == eap::Subtype::notification) {
+        // §5.4.1.2.2.6: an AKA'-Notification is answered with one (RFC 4187 9.10).
+        const auto e = eap::encode(eap::Packet{eap::Code::response, p->id, eap::kTypeAkaPrime,
+                                               eap::Subtype::notification, {}});
+        if (e) {
+            send_eap_wire(*e, false, "notification", "");
+        }
+        return;
+    }
+    if (p->type != eap::kTypeAkaPrime || p->subtype != eap::Subtype::challenge) {
+        // P1 runs EAP-AKA' challenges only: an AKA'-Identity, or another method,
+        // gets a client error (TS 33.501 Table F.2-1 for AT_PERMANENT_REQ).
+        const auto e = eap::encode(eap::Packet{eap::Code::response, p->id, eap::kTypeAkaPrime,
+                                               eap::Subtype::client_error,
+                                               {eap::at_client_error_code(kClientErrorUnableToProcess)}});
+        if (e) {
+            send_eap_wire(*e, true, "client-error", "not an EAP-AKA' challenge");
+        }
+        return;
+    }
+    if (ctx_ && !ngksi.mapped && ctx_->ngksi().value == ngksi.value) {
+        send_authentication_failure(kNgKsiInUse, {});   // §5.4.1.2.4.5 a
+        return;
+    }
+    coro::spawn(run_eap_aka(alive_, gen_, ngksi, std::move(abba), std::move(eap_wire)));
+}
+
+coro::Task<void> Mm::run_eap_aka(std::shared_ptr<bool> alive, std::uint64_t gen, ie::NgKsi ngksi, Bytes abba,
+                                 Bytes eap_wire) {
+    auto p = eap::decode(eap_wire);
+    if (!p) {
+        co_return;
+    }
+    const std::uint8_t id = p->id;
+    auto reply = [this, id](eap::Subtype st, std::vector<eap::Attribute> attrs, bool error, const char* why) {
+        auto e = eap::encode(eap::Packet{eap::Code::response, id, eap::kTypeAkaPrime, st, std::move(attrs)});
+        if (e) {
+            send_eap_wire(*e, error, eap_subtype_name(static_cast<std::uint8_t>(st)), why);
+        }
+    };
+    const auto snn = crypto::keys5g::serving_network_name(cfg_.plmn.mcc, cfg_.plmn.mnc);
+    const eap::Attribute* rand_a = p->find(eap::Attr::rand);
+    const eap::Attribute* autn_a = p->find(eap::Attr::autn);
+    const eap::Attribute* mac_a = p->find(eap::Attr::mac);
+    const auto rand = rand_a != nullptr ? eap::value16(*rand_a) : std::nullopt;
+    const auto autn = autn_a != nullptr ? eap::value16(*autn_a) : std::nullopt;
+    const auto mac = mac_a != nullptr ? eap::value16(*mac_a) : std::nullopt;
+    if (!snn || !rand || !autn || !mac) {
+        reply(eap::Subtype::client_error, {eap::at_client_error_code(kClientErrorUnableToProcess)}, true,
+              "a challenge without RAND, AUTN or MAC");
+        co_return;
+    }
+    // §5.4.1.2.2.12 a: a first AT_KDF other than 1 is handled as an incorrect AUTN
+    // (RFC 5448 3.2), so no KDF negotiation.
+    std::vector<eap::Attribute> kdfs;
+    for (const auto& a : p->attrs) {
+        if (a.type == static_cast<std::uint8_t>(eap::Attr::kdf)) {
+            kdfs.push_back(a);
+        }
+    }
+    if (kdfs.empty() || eap::kdf_of(kdfs.front()) != kKdfCkIkPrime) {
+        reply(eap::Subtype::authentication_reject, {}, true, "the key derivation function is not 1");
+        co_return;
+    }
+    // §5.4.1.2.2.2 a, b: the network name is this PLMN's serving network name.
+    const eap::Attribute* kin = p->find(eap::Attr::kdf_input);
+    if (kin == nullptr || eap::network_name_of(*kin) != *snn) {
+        reply(eap::Subtype::authentication_reject, {}, true, "the serving network name check failed");
+        co_return;
+    }
+    if (((*autn)[6] & 0x80) == 0) {
+        // TS 33.501 6.1.3.1 step 1: an AV for EAP-AKA' has the separation bit set too.
+        reply(eap::Subtype::authentication_reject, {}, true, "the AMF separation bit is 0");
+        co_return;
+    }
+    auto out = co_await card_.authenticate(*rand, *autn);
+    if (!*alive || gen != gen_) {
+        co_return;
+    }
+    if (out && out->kind == uicc::AuthOutcome::Kind::sync_failure) {
+        std::vector<eap::Attribute> attrs{eap::at_auts(out->auts)};
+        attrs.insert(attrs.end(), kdfs.begin(), kdfs.end());   // RFC 5448 3.2: a copy of the AT_KDFs
+        reply(eap::Subtype::synchronization_failure, std::move(attrs), true, "the SQN is not fresh");
+        co_return;
+    }
+    if (!out || out->kind != uicc::AuthOutcome::Kind::success) {
+        reply(eap::Subtype::authentication_reject, {}, true, "the USIM did not accept AUTN");
+        co_return;
+    }
+    // CK' and IK' (TS 33.501 A.3), then MK and its keys for the IMSI as the identity (Annex F.3).
+    const ByteView sqn_xor_ak = ByteView(*autn).subspan(0, 6);
+    auto prime = crypto::keys5g::ck_ik_prime(out->ck, out->ik, *snn, sqn_xor_ak);
+    crypto::eap_aka_prime::Keys keys = crypto::eap_aka_prime::derive(prime.ck_prime, prime.ik_prime, supi_);
+    // AT_MAC over the request with its MAC zeroed (RFC 4187 10.15).
+    const auto off = eap::mac_offset(eap_wire);
+    Bytes zeroed = eap_wire;
+    if (off) {
+        std::fill_n(zeroed.begin() + static_cast<std::ptrdiff_t>(*off), 16, std::uint8_t{0});
+    }
+    const auto expect = crypto::eap_aka_prime::at_mac(keys.k_aut, zeroed);
+    if (!off || !ct_equal(SecretBytes::copy_of(expect), *mac)) {   // constant time
+        reply(eap::Subtype::client_error, {eap::at_client_error_code(kClientErrorUnableToProcess)}, true,
+              "AT_MAC does not verify");
+        co_return;
+    }
+    SecretBytes kausf = crypto::eap_aka_prime::kausf(keys);
+    SecretBytes kseaf = crypto::keys5g::kseaf(kausf, *snn);
+    auto kamf = crypto::keys5g::kamf(kseaf, supi_, abba);
+    if (!kamf) {
+        co_return;
+    }
+    // §5.4.1.2.2.3: a partial context for the ngKSI; the anchor keys count from EAP-success.
+    partial_ = Partial{ngksi, std::move(*kamf)};
+    eap_pending_ = EapKeys{std::move(kausf), std::move(kseaf)};
+    auto resp = eap::encode(eap::Packet{eap::Code::response, id, eap::kTypeAkaPrime, eap::Subtype::challenge,
+                                        {eap::at_res(out->res.expose()), eap::at_mac_zero()}});   // RES goes on the wire
+    if (!resp) {
+        co_return;
+    }
+    if (const auto roff = eap::mac_offset(*resp)) {
+        const auto m = crypto::eap_aka_prime::at_mac(keys.k_aut, *resp);
+        std::copy(m.begin(), m.end(), resp->begin() + static_cast<std::ptrdiff_t>(*roff));
+    }
+    auth_failures_ = 0;
+    resume_retransmission_timers();
+    send_eap_wire(*resp, false, "challenge", "");
+}
+
+void Mm::send_eap_wire(const Bytes& eap_wire, bool error, const char* subtype, const char* why) {
+    if (error) {
+        // §5.4.1.2.2.4: the retransmission timers stop and T3520 starts; three in a
+        // row and the network failed the check (§5.4.1.2.4.5 e).
+        if (running(MmTimer::t3510)) {
+            stop(MmTimer::t3510);
+            paused_t3510_ = true;
+        }
+        if (running(MmTimer::t3521)) {
+            stop(MmTimer::t3521);
+            paused_t3521_ = true;
+        }
+        ++auth_failures_;
+        if (auth_failures_ >= 3) {
+            events_.emit("nas.auth.eap.response", cfg_.id, {{"subtype", subtype}, {"error", "1"}, {"why", why}, {"sent", "0"}});
+            network_failed_authentication();
+            return;
+        }
+    }
+    nas::Message r = make(kAuthenticationResponse);
+    put(r, "EAP message", eap_wire);
+    events_.emit("nas.auth.eap.response", cfg_.id, {{"subtype", subtype}, {"error", error ? "1" : "0"}, {"why", why}, {"sent", "1"}});
+    send(r);
+    if (error) {
+        start(MmTimer::t3520, cfg_.timers.t3520);
+    }
+}
+
+void Mm::on_eap_result(const Bytes& eap_wire) {
+    auto p = eap::decode(eap_wire);
+    if (!p || (p->code != eap::Code::success && p->code != eap::Code::failure)) {
+        events_.emit("nas.auth.eap.discard", cfg_.id, {{"what", "not an EAP result"}});
+        return;
+    }
+    if (p->code == eap::Code::success) {
+        // TS 33.501 6.1.3.1 step 11: K_AUSF and K_SEAF of this run are the anchor keys now.
+        if (eap_pending_) {
+            kausf_ = std::move(eap_pending_->kausf);
+            kseaf_ = std::move(eap_pending_->kseaf);
+            eap_pending_.reset();
+        }
+        events_.emit("nas.auth.eap.success", cfg_.id, {});
+        return;
+    }
+    // EAP-failure: the run's keys and partial context go.
+    eap_pending_.reset();
+    partial_.reset();
+    events_.emit("nas.auth.eap.failure", cfg_.id, {});
+}
+
+void Mm::on_authentication_result(const nas::Message& m) {
+    // §5.4.1.2.2.8, §5.4.1.2.2.11, 8.2.3: an EAP result outside a SECURITY MODE COMMAND.
+    const Bytes* e = nas::get(m, "EAP message");
+    if (e == nullptr) {
+        send_status(kInvalidMandatory);
+        return;
+    }
+    stop(MmTimer::t3520);
+    on_eap_result(*e);
+}
+
 void Mm::send_authentication_failure(std::uint8_t cause, Bytes auts) {
     // §5.4.1.3.7 c-f: the retransmission timers stop, T3520 starts.
     if (running(MmTimer::t3510)) {
@@ -779,6 +1068,7 @@ void Mm::on_authentication_reject(bool integrity_ok) {
     paused_t3510_ = paused_t3521_ = false;
     ++gen_;
     clear_stored_challenge();
+    eap_pending_.reset();   // §5.4.1.2.2.11: an EAP-failure takes the run's keys too
     update_ = UpdateStatus::u3_roaming_not_allowed;
     delete_registration_data(true);
     attempts_ = 0;
@@ -855,6 +1145,9 @@ void Mm::on_security_mode_command(ByteView wire) {
         return;
     }
     clear_stored_challenge();
+    if (const Bytes* e = nas::get(*m, "EAP message")) {
+        on_eap_result(*e);   // TS 33.501 6.1.3.1 step 11: EAP-success with the command
+    }
     ctx_ = std::move(*candidate);
     partial_.reset();
 
@@ -1002,11 +1295,14 @@ void Mm::on_plain(const nas::Message& m, bool integrity_ok) {
     case kAuthenticationReject:
         on_authentication_reject(integrity_ok);
         return;
+    case kAuthenticationResult:
+        on_authentication_result(m);
+        return;
     case kRegistrationAccept:
         on_registration_accept(m);
         return;
     case kRegistrationReject:
-        on_registration_reject(m);
+        on_registration_reject(m, integrity_ok);
         return;
     case kDeregistrationAcceptUe:
         on_deregistration_accept();
@@ -1018,7 +1314,7 @@ void Mm::on_plain(const nas::Message& m, bool integrity_ok) {
         on_service_accept(m);
         return;
     case kServiceReject:
-        on_service_reject(m);
+        on_service_reject(m, integrity_ok);
         return;
     case kDeregistrationRequestUeTerminated:
         on_network_deregistration(m);
@@ -1048,6 +1344,45 @@ void Mm::on_plain(const nas::Message& m, bool integrity_ok) {
 
 void Mm::on_camped(std::uint32_t tac) { current_tai_ = ie::Tai{cfg_.plmn, tac}; }
 
+void Mm::usim_removed() {
+    usim_present_ = false;
+    // The lists that go with the UICC (§5.3.13, §5.3.20.2, §4.6.2.2).
+    forbidden_plmns_.clear();
+    forbidden_tais_.clear();
+    unprotected_tais_.clear();
+    rejected_nssai_.clear();
+    invalid_events_ = 0;
+    events_.emit("nas.mm.usim", cfg_.id, {{"state", "removed"}});
+    if (state_ == MmState::null) {
+        return;
+    }
+    const bool registered = state_ == MmState::registered_initiated || is_registered(state_);
+    if (registered) {
+        deregister(false);   // §5.5.2.2.1: due to USIM removal; NO-SUPI once it ends
+        usim_valid_ = false;
+        return;
+    }
+    usim_valid_ = false;
+    set_state(MmState::deregistered_no_supi, "USIM removed");
+}
+
+void Mm::usim_inserted() {
+    usim_present_ = true;
+    events_.emit("nas.mm.usim", cfg_.id, {{"state", "inserted"}});
+    if (state_ != MmState::deregistered_no_supi) {
+        return;   // off: power on reads it; otherwise the de-registration still ends first
+    }
+    // As at power on: the new card's subscription and what it keeps (TS 31.102 4.4.11).
+    guti_.reset();
+    tai_list_.reset();
+    last_tai_.reset();
+    ctx_.reset();
+    partial_.reset();
+    supi_.clear();
+    ++gen_;
+    coro::spawn(read_card(alive_));
+}
+
 void Mm::on_connection_failure(std::uint16_t up_psis) {
     recovery_pending_ = true;
     recovery_up_ = up_psis;
@@ -1071,7 +1406,8 @@ void Mm::on_released() {
         paused_t3521_ = false;
         events_.emit("nas.dereg.abort", cfg_.id, {{"reason", "released"}});
         entering_deregistered();
-        set_state(MmState::deregistered_normal_service, "released before the de-registration accept");
+        set_state(usim_present_ ? MmState::deregistered_normal_service : MmState::deregistered_no_supi,
+                  "released before the de-registration accept");
     } else if (state_ == MmState::service_request_initiated) {
         stop(MmTimer::t3517);   // §5.6.1.7 a: the lower layers failed
         events_.emit("nas.sr.abort", cfg_.id, {{"why", "released"}});
@@ -1212,7 +1548,76 @@ void Mm::on_service_accept(const nas::Message& m) {
     flush_pending_sm();
 }
 
-void Mm::on_service_reject(const nas::Message& m) {
+void Mm::forbid_current_ta(bool unprotected) {
+    const auto& here = current_tai_ ? current_tai_ : last_tai_;
+    if (!here) {
+        return;
+    }
+    if (std::find(forbidden_tais_.begin(), forbidden_tais_.end(), *here) == forbidden_tais_.end()) {
+        forbidden_tais_.push_back(*here);
+    }
+    if (unprotected && std::find(unprotected_tais_.begin(), unprotected_tais_.end(), *here) == unprotected_tais_.end()) {
+        unprotected_tais_.push_back(*here);   // §5.3.20.2: T3247's expiry takes it off again
+    }
+}
+
+bool Mm::unprotected_reject(std::uint8_t cause) {
+    // §5.3.20.2 for 3GPP access, the UE in its HPLMN (the sim's ranges are home
+    // subscriptions) and not configured for T3245.
+    static constexpr std::uint8_t kListed[] = {3, 6, 7, 11, 12, 13, 15, 27, 31, 36, 62, 72, 73, 80};
+    if (std::find(std::begin(kListed), std::end(kListed), cause) == std::end(kListed)) {
+        return false;
+    }
+    stop(MmTimer::t3510);
+    stop(MmTimer::t3517);
+    paused_t3510_ = false;
+    if (!running(MmTimer::t3247)) {
+        const auto ms = static_cast<Millis>(rng_.uniform(cfg_.timers.t3247_min, cfg_.timers.t3247_max));
+        start(MmTimer::t3247, ms);
+        events_.emit("nas.mm.t3247", cfg_.id, {{"seconds", str(ms / 1000)}, {"cause", str(cause)}});
+    }
+    auto limited = [this](const char* why) {
+        update_ = UpdateStatus::u3_roaming_not_allowed;
+        delete_registration_data(true);
+        attempts_ = 0;
+        forbid_current_ta(true);
+        persist_loci();
+        if (cfg_.sm_hooks.release_all && is_registered(state_)) {
+            cfg_.sm_hooks.release_all();
+        }
+        set_state(MmState::deregistered_limited_service, why);
+    };
+    switch (cause) {
+    case kIllegalUe:
+    case kIllegalMe:
+    case kServicesNotAllowed:
+        if (invalid_events_ >= kMaxInvalidEvents) {
+            return false;   // the counter is at its maximum: the USIM is invalid as usual
+        }
+        ++invalid_events_;   // 1) ii): the USIM stays valid, the TA is forbidden instead
+        limited("unprotected reject #3, #6 or #7");
+        return true;
+    case kPlmnNotAllowed:
+    case 36:
+    case 73:
+        limited("unprotected reject #11, #36 or #73 in the HPLMN");   // 3) a)
+        return true;
+    case 31:
+        events_.emit("nas.sec.discard", cfg_.id, {{"message", "reject #31"}, {"verdict", "unprotected"}});   // 7)
+        return true;
+    case 62:
+        // 8) the "should" alternative: 5U3, the TA forbidden, another TA searched for.
+        update_ = UpdateStatus::u3_roaming_not_allowed;
+        forbid_current_ta(true);
+        persist_loci();
+        set_state(MmState::deregistered_limited_service, "unprotected reject #62");
+        return true;
+    default:
+        return false;   // 2), 5), 6), 9): as for a protected reject (12, 13, 15 remembered)
+    }
+}
+
+void Mm::on_service_reject(const nas::Message& m, bool integrity_ok) {
     if (state_ != MmState::service_request_initiated) {
         send_status(kNotCompatibleWithState);
         return;
@@ -1220,8 +1625,12 @@ void Mm::on_service_reject(const nas::Message& m) {
     stop(MmTimer::t3517);
     const Bytes* c = nas::get(m, "5GMM cause");
     const std::uint8_t cause = c != nullptr && !c->empty() ? (*c)[0] : 111;
-    events_.emit("nas.sr.reject", cfg_.id, {{"cause", str(cause)}});
+    events_.emit("nas.sr.reject", cfg_.id, {{"cause", str(cause)}, {"protected", integrity_ok ? "1" : "0"}});
     sr_uplink_ = 0;
+    reject_unprotected_ = !integrity_ok;
+    if (!integrity_ok && unprotected_reject(cause)) {
+        return;
+    }
     switch (cause) {
     case kUeIdentityNotDerived:
     case kImplicitlyDeregistered:
@@ -1277,18 +1686,37 @@ void Mm::on_network_deregistration(const nas::Message& m) {
     }
     const Bytes* c = nas::get(m, "5GMM cause");
     const std::uint8_t cause = c != nullptr && !c->empty() ? (*c)[0] : 0;
+    // §5.5.2.2.6 d: met during the UE's own normal de-registration (a switch-off
+    // left the UE in 5GMM-NULL, where nothing is taken), the request is treated
+    // as below, but "re-registration required" needs no new registration.
+    const bool collision = state_ == MmState::deregistered_initiated;
     for (MmTimer tm : {MmTimer::t3510, MmTimer::t3517, MmTimer::t3521, MmTimer::t3512}) {
         stop(tm);
     }
+    paused_t3521_ = false;
     // §5.5.2.3.2: the accept, a local release of the PDU sessions, 5GMM-DEREGISTERED.
     send(make(kDeregistrationAcceptUeTerminated));
     if (cfg_.sm_hooks.release_all) {
         cfg_.sm_hooks.release_all();
     }
     events_.emit("nas.dereg.network", cfg_.id,
-                 {{"reregistration", dt->reregistration_required ? "1" : "0"}, {"cause", cause != 0 ? str(cause) : ""}});
+                 {{"reregistration", dt->reregistration_required ? "1" : "0"},
+                  {"cause", cause != 0 ? str(cause) : ""},
+                  {"collision", collision ? "1" : "0"}});
+    if (const Bytes* r = nas::get(m, "Rejected NSSAI")) {
+        if (auto rn = ie::RejectedNssai::decode(*r)) {
+            rejected_nssai_.insert(rejected_nssai_.end(), rn->list.begin(), rn->list.end());   // §4.6.2.2
+        }
+    }
     entering_deregistered();
+    if (!dt->reregistration_required) {
+        deregistered_with_cause(cause);
+        return;
+    }
     set_state(MmState::deregistered_normal_service, "network de-registration");
+    if (collision) {
+        return;   // §5.5.2.2.6 d: the UE need not register again
+    }
     if (dt->reregistration_required && !KSIM_MUTANT("dereg_no_reregistration")) {
         // An initial registration once the network has released the connection.
         reregister_pending_ = true;
@@ -1301,7 +1729,68 @@ void Mm::on_network_deregistration(const nas::Message& m) {
     }
 }
 
+void Mm::deregistered_with_cause(std::uint8_t cause) {
+    // §5.5.2.3.2 for "re-registration not required", 3GPP access, in the HPLMN.
+    switch (cause) {
+    case kIllegalUe:
+    case kIllegalMe:
+    case kServicesNotAllowed:
+        update_ = UpdateStatus::u3_roaming_not_allowed;
+        delete_registration_data(true);
+        usim_valid_ = false;
+        persist_loci();
+        set_state(MmState::deregistered_no_supi, "network de-registration #3, #6 or #7");
+        return;
+    case kPlmnNotAllowed:
+    case 73:
+        update_ = UpdateStatus::u3_roaming_not_allowed;
+        delete_registration_data(true);
+        attempts_ = 0;
+        forbidden_plmns_.push_back(cfg_.plmn);
+        persist_loci();
+        set_state(MmState::deregistered_plmn_search, "network de-registration #11 or #73");
+        return;
+    case kTaNotAllowed:
+    case kRoamingNotAllowedInTa:
+    case kNoSuitableCells:
+        update_ = UpdateStatus::u3_roaming_not_allowed;
+        delete_registration_data(true);
+        attempts_ = 0;
+        forbid_current_ta(false);
+        persist_loci();
+        set_state(MmState::deregistered_limited_service, "network de-registration #12, #13 or #15");
+        return;
+    case kN1ModeNotAllowed:
+        update_ = UpdateStatus::u3_roaming_not_allowed;
+        delete_registration_data(true);
+        attempts_ = 0;
+        set_state(MmState::deregistered_limited_service, "network de-registration #27");
+        return;
+    case 62:
+        update_ = UpdateStatus::u2_not_updated;
+        attempts_ = 0;
+        persist_loci();
+        set_state(MmState::deregistered_attempting_registration, "network de-registration #62");
+        return;
+    default:
+        // §5.5.2.3.4 b: other causes, or none: 5U2, the TAI list and the last
+        // visited TAI deleted (the 5G-GUTI too: one access only), T3502, then
+        // 5GMM-DEREGISTERED.ATTEMPTING-REGISTRATION.
+        update_ = UpdateStatus::u2_not_updated;
+        delete_registration_data(true);
+        persist_loci();
+        start(MmTimer::t3502, t3502_net_ ? *t3502_net_ : cfg_.timers.t3502);
+        set_state(MmState::deregistered_attempting_registration, "network de-registration, no re-registration");
+        return;
+    }
+}
+
 void Mm::on_configuration_update(const nas::Message& m) {
+    if (state_ == MmState::deregistered_initiated) {
+        // §5.5.2.2.6 e: during the UE's de-registration the command is ignored.
+        events_.emit("nas.sec.discard", cfg_.id, {{"message", "CONFIGURATION UPDATE COMMAND"}, {"verdict", "de-registration runs"}});
+        return;
+    }
     stop(MmTimer::t3346);   // §5.4.4.3
     ie::ConfigurationUpdateIndication ind;
     if (const Bytes* i = nas::get(m, "Configuration update indication")) {
@@ -1391,6 +1880,9 @@ void Mm::on_identity_request(const nas::Message& m) {
 // ---- the USIM (TS 31.102 4.4.11) --------------------------------------------------------
 
 void Mm::card_job(CardWrite w) {
+    if (!usim_present_) {
+        return;   // the UICC is out: nothing to write to
+    }
     card_jobs_.push_back(std::move(w));
     if (!card_busy_) {
         card_busy_ = true;
@@ -1635,6 +2127,23 @@ void Mm::on_expiry(MmTimer t) {
             start_registration(RegType::initial);
         }
         return;
+    case MmTimer::t3247: {
+        // §5.3.20.2: the TAs the unprotected rejects forbade are allowed again, the
+        // USIM valid again while the counter is under its maximum, and a registration
+        // if one is still needed.
+        for (const auto& tai : unprotected_tais_) {
+            forbidden_tais_.erase(std::remove(forbidden_tais_.begin(), forbidden_tais_.end(), tai), forbidden_tais_.end());
+        }
+        unprotected_tais_.clear();
+        if (invalid_events_ < kMaxInvalidEvents && !supi_.empty()) {
+            usim_valid_ = true;
+        }
+        events_.emit("nas.mm.t3247.expiry", cfg_.id, {{"usim", usim_valid_ ? "valid" : "invalid"}});
+        if (is_deregistered(state_) && usim_valid_) {
+            start_registration(RegType::initial);
+        }
+        return;
+    }
     case MmTimer::t3521:
         // §5.5.2.2.6 c: four retransmissions, then abort on the fifth expiry.
         if (state_ != MmState::deregistered_initiated) {
@@ -1653,7 +2162,8 @@ void Mm::on_expiry(MmTimer t) {
             connected_ = false;
         }
         events_.emit("nas.dereg.abort", cfg_.id, {{"reason", "T3521"}});
-        set_state(MmState::deregistered_normal_service, "fifth T3521 expiry");
+        set_state(usim_present_ ? MmState::deregistered_normal_service : MmState::deregistered_no_supi,
+                  "fifth T3521 expiry");
         return;
     }
 }

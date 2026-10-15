@@ -171,6 +171,78 @@ TEST(Idle, Ts38413_8_7_1_AfterAnAmfRestartTheGnbSetsUpAgainAndTheUeCarriesOnRegi
     EXPECT_EQ(n.failures(), "");
 }
 
+TEST(Idle, Ts24501_5_5_2_2_1_TakingTheUiccOutDeregistersAndPuttingItBackRegistersAgain) {
+    Net n;
+    n.register_ue();
+    n.establish();
+    ASSERT_TRUE(n.ue->sim(false));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.ue->mm_state() == proc::ue::MmState::deregistered_no_supi; },
+                                 n.loop.now() + 3'000)) << n.failures();
+    EXPECT_EQ(n.amf.nas()->count_uplink("DEREGISTRATION REQUEST"), 1u);
+    EXPECT_EQ(n.named("nas.dereg.accept").size(), 1u);   // a normal de-registration, answered
+    EXPECT_TRUE(n.ue->sessions().empty());
+    EXPECT_FALSE(n.ue->sim(false).has_value());           // out already
+    ASSERT_TRUE(n.ue->sim(true));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.named("nas.reg.complete").size() == 2; }, n.loop.now() + 10'000))
+        << n.failures();
+    EXPECT_EQ(n.failures(), "");   // nothing was written to the absent card
+}
+
+TEST(Idle, AirplaneModeDeregistersAsForSwitchOffAndComesBackWithTheGuti) {
+    Net n;
+    n.register_ue();
+    ASSERT_TRUE(n.ue->airplane(true));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.nas()->count_uplink("DEREGISTRATION REQUEST") == 1; },
+                                 n.loop.now() + 3'000));
+    EXPECT_EQ(field(*n.last("nas.dereg.sent"), "switch_off"), "1");
+    EXPECT_EQ(field(*n.last("rrc.power"), "on"), "0");
+    n.loop.run_until([] { return false; }, n.loop.now() + 1'000);
+    ASSERT_TRUE(n.ue->airplane(false));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.named("nas.reg.complete").size() == 2; }, n.loop.now() + 10'000))
+        << n.failures();
+    EXPECT_EQ(field(*n.last("nas.reg.request"), "identity"), "5g-guti");
+    EXPECT_EQ(field(*n.last("nas.reg.request"), "protected"), "integrity");
+    EXPECT_EQ(n.failures(), "");
+}
+
+TEST(Idle, Ts24501_5_5_2_3_4_b_ANetworkDeregistrationWithoutCauseOrReregistrationWaitsForT3502) {
+    Net n;
+    n.register_ue();
+    ASSERT_TRUE(n.amf.nas()->network_deregister(false));
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("nas.dereg.network").empty(); }, n.loop.now() + 2'000));
+    EXPECT_EQ(n.ue->mm_state(), proc::ue::MmState::deregistered_attempting_registration);
+    EXPECT_EQ(n.named("nas.reg.request").size(), 1u);
+    // T3502 (12 min unless the network gave one) runs out: a new registration.
+    ASSERT_TRUE(n.loop.run_until([&] { return n.named("nas.reg.request").size() == 2; }, n.loop.now() + 730'000));
+    EXPECT_EQ(field(*n.last("nas.mm.state"), "to"), "5GMM-REGISTERED-INITIATED");
+}
+
+TEST(Idle, Ts24501_5_5_2_3_2_ANetworkDeregistrationWithCause3MakesTheUsimInvalid) {
+    Net n;
+    n.register_ue();
+    ASSERT_TRUE(n.amf.nas()->network_deregister(false, 3));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.ue->mm_state() == proc::ue::MmState::deregistered_no_supi; },
+                                 n.loop.now() + 2'000));
+    EXPECT_EQ(field(*n.last("nas.dereg.network"), "cause"), "3");
+}
+
+TEST(Idle, Ts24501_5_5_2_2_6_d_ANetworkDeregistrationDuringTheUesOwnIsAcceptedWithoutReregistering) {
+    corestub::Profile p;
+    p.deregistration = corestub::Profile::Deregistration::silent;   // the UE's request goes unanswered
+    Net n(p);
+    n.register_ue();
+    ASSERT_TRUE(n.ue->deregister(false));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.ue->mm_state() == proc::ue::MmState::deregistered_initiated; },
+                                 n.loop.now() + 1'000));
+    ASSERT_TRUE(n.amf.nas()->network_deregister(true));
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("nas.dereg.network").empty(); }, n.loop.now() + 2'000));
+    EXPECT_EQ(field(*n.last("nas.dereg.network"), "collision"), "1");
+    EXPECT_EQ(n.ue->mm_state(), proc::ue::MmState::deregistered_normal_service);
+    n.loop.run_until([] { return false; }, n.loop.now() + 20'000);   // past T3521 and the re-registration delay
+    EXPECT_EQ(n.named("nas.reg.request").size(), 1u);   // the UE need not register again
+    EXPECT_TRUE(n.named("nas.dereg.abort").empty());   // T3521 stopped
+}
+
 TEST(Idle, Ts24501_5_5_2_3_ANetworkDeregistrationWithReregistrationRequiredIsFollowedByARegistration) {
     Net n;
     n.register_ue();
@@ -335,6 +407,84 @@ TEST(Idle, Ts24501_5_5_1_2_5_Reject15PutsTheCurrentTaOnTheForbiddenList) {
     ASSERT_NE(n.last("nas.reg.blocked"), nullptr);
     EXPECT_EQ(field(*n.last("nas.reg.blocked"), "why"), "forbidden TA");
     EXPECT_EQ(n.failures(), "");
+}
+
+TEST(Idle, Ts24501_5_3_20_2_AnUnprotectedReject3LeavesTheUsimValidAndForbidsTheTaUntilT3247) {
+    corestub::Profile p;
+    p.registration = corestub::Profile::Registration::reject;
+    p.reject_cause = 3;
+    p.reject_unprotected = true;
+    Net n(p);
+    n.start();
+    ASSERT_TRUE(n.ue->power_on());
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("nas.mm.t3247").empty(); }, n.loop.now() + 5'000));
+    EXPECT_EQ(field(*n.last("nas.reg.reject"), "protected"), "0");
+    EXPECT_EQ(n.ue->mm_state(), proc::ue::MmState::deregistered_limited_service);   // not NO-SUPI
+    const long secs = std::stol(field(*n.last("nas.mm.t3247"), "seconds"));
+    EXPECT_GE(secs, 1800);
+    EXPECT_LE(secs, 3600);
+    (void)n.ue->register_initial();
+    n.loop.run_until([] { return false; }, n.loop.now() + 60'000);
+    EXPECT_EQ(n.named("nas.reg.request").size(), 1u);   // the current TA is forbidden
+    EXPECT_EQ(field(*n.last("nas.reg.blocked"), "why"), "forbidden TA");
+    // T3247's expiry (the TA allowed again, a new registration) is the next tests', with a short T3247.
+}
+
+/// T3247 drawn from one to two minutes, so the tests that do not check its range run quickly.
+proc::ue::MmTimerValues short_t3247() {
+    proc::ue::MmTimerValues t;
+    t.t3247_min = 60'000;
+    t.t3247_max = 120'000;
+    return t;
+}
+
+TEST(Idle, Ts24501_5_3_20_2_TheFourthUnprotectedReject3MakesTheUsimInvalid) {
+    corestub::Profile p;
+    p.registration = corestub::Profile::Registration::reject;
+    p.reject_cause = 3;
+    p.reject_unprotected = true;
+    Net n(p, nullptr, short_t3247());
+    n.start();
+    ASSERT_TRUE(n.ue->power_on());
+    // Three events are allowed (kMaxInvalidEvents); each T3247 brings the next attempt.
+    ASSERT_TRUE(n.loop.run_until([&] { return n.ue->mm_state() == proc::ue::MmState::deregistered_no_supi; },
+                                 n.loop.now() + Millis{4} * 130'000));
+    EXPECT_EQ(n.named("nas.reg.reject").size(), 4u);
+    const auto expiries = n.named("nas.mm.t3247.expiry");
+    ASSERT_EQ(expiries.size(), 3u);
+    EXPECT_EQ(field(expiries.front(), "usim"), "valid");   // under the maximum, the USIM is valid again
+}
+
+TEST(Idle, Ts24501_5_3_20_2_AnUnprotectedReject11InTheHplmnIsLimitedServiceNotAForbiddenPlmn) {
+    corestub::Profile p;
+    p.registration = corestub::Profile::Registration::reject;
+    p.reject_cause = 11;
+    p.reject_unprotected = true;
+    Net n(p, nullptr, short_t3247());
+    n.start();
+    ASSERT_TRUE(n.ue->power_on());
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("nas.mm.t3247").empty(); }, n.loop.now() + 5'000));
+    EXPECT_EQ(n.ue->mm_state(), proc::ue::MmState::deregistered_limited_service);
+    ASSERT_TRUE(n.loop.run_until([&] { return n.named("nas.reg.request").size() == 2; }, n.loop.now() + 130'000));
+    EXPECT_TRUE(n.named("nas.reg.blocked").empty() ||
+                field(*n.last("nas.reg.blocked"), "why") != "forbidden PLMN");   // the PLMN was not forbidden
+}
+
+TEST(Idle, Ts24501_5_5_1_2_5_Reject62KeepsTheRejectedSnssaiOutOfTheNextRequest) {
+    corestub::Profile p;
+    p.registration = corestub::Profile::Registration::reject;
+    p.reject_cause = 62;
+    p.rejected_sst = 1;
+    Net n(p);
+    n.start();
+    ASSERT_TRUE(n.ue->power_on());
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("nas.reg.reject").empty(); }, n.loop.now() + 5'000));
+    EXPECT_EQ(field(*n.last("nas.reg.reject"), "protected"), "1");
+    EXPECT_EQ(n.ue->mm_state(), proc::ue::MmState::deregistered_attempting_registration);
+    EXPECT_EQ(field(n.named("nas.reg.request").front(), "nssai"), "1");
+    (void)n.ue->register_initial();
+    ASSERT_TRUE(n.loop.run_until([&] { return n.named("nas.reg.request").size() == 2; }, n.loop.now() + 5'000));
+    EXPECT_EQ(field(*n.last("nas.reg.request"), "nssai"), "");   // §4.6.2.2: not asked for again
 }
 
 TEST(Idle, Ts24501_5_6_1_5_ServiceReject22WithT3346KeepsTheUeRegisteredAndHoldsTheNextRequest) {

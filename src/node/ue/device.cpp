@@ -48,6 +48,10 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     proc::ue::MmConfig mc;
     mc.id = subject;
     mc.plmn = cfg_.plmn;
+    mc.seed = cfg_.seed;
+    if (cfg_.mm_timers) {
+        mc.timers = *cfg_.mm_timers;
+    }
     mc.requested_nssai = cfg_.nssai;
     mc.imeisv = cfg_.imeisv;
     if (taps.nas) {
@@ -219,10 +223,10 @@ Result<void> UeDevice::power_on() {
     return {};
 }
 
-void UeDevice::poll_registration(int left) {
+void UeDevice::poll_registration(int left, proc::ue::MmState waiting) {
     // The card read is asynchronous; registration starts once 5GMM leaves
-    // 5GMM-NULL with a valid USIM. The RRC holds it until the UE camps.
-    if (mm_->state() != proc::ue::MmState::null) {
+    // `waiting` with a valid USIM. The RRC holds it until the UE camps.
+    if (mm_->state() != waiting) {
         if (mm_->usim_valid()) {
             mm_->register_initial();
         }
@@ -231,9 +235,9 @@ void UeDevice::poll_registration(int left) {
     if (left == 0) {
         return;
     }
-    ex_.start_timer(kPollMs, [this, alive = alive_, left] {
+    ex_.start_timer(kPollMs, [this, alive = alive_, left, waiting] {
         if (*alive) {
-            poll_registration(left - 1);
+            poll_registration(left - 1, waiting);
         }
     });
 }
@@ -276,6 +280,57 @@ Result<void> UeDevice::power_off_abrupt() {
     powered_ = false;
     events_.emit("ue.power", subject(), {{"state", "off"}, {"mode", "abrupt"}});
     return {};
+}
+
+Result<void> UeDevice::sim(bool present) {
+    if (present == sim_present_) {
+        return make_error(Errc::invalid_argument, 0, present ? "the UICC is in already" : "the UICC is out already");
+    }
+    sim_present_ = present;
+    events_.emit("ue.sim", subject(), {{"present", present ? "1" : "0"}});
+    if (!present) {
+        transport_.insert(nullptr);
+        if (powered_) {
+            if (proc::ue::is_registered(mm_->state()) || mm_->state() == proc::ue::MmState::registered_initiated) {
+                sm_->release_all_local("deregistration");   // the de-registration takes the sessions
+                held_.clear();
+            }
+            mm_->usim_removed();
+        }
+        return {};
+    }
+    transport_.insert(card_.get());
+    if (powered_) {
+        const bool was_no_supi = mm_->state() == proc::ue::MmState::deregistered_no_supi;
+        mm_->usim_inserted();
+        if (was_no_supi) {
+            poll_registration(kPollTries, proc::ue::MmState::deregistered_no_supi);
+        }
+    }
+    return {};
+}
+
+Result<void> UeDevice::airplane(bool on) {
+    if (on == airplane_) {
+        return make_error(Errc::invalid_argument, 0, on ? "airplane mode is on already" : "airplane mode is off already");
+    }
+    if (on) {
+        if (!powered_) {
+            return make_error(Errc::invalid_argument, 0, "the UE is off");
+        }
+        airplane_ = true;
+        events_.emit("ue.airplane", subject(), {{"on", "1"}});
+        if (proc::ue::is_registered(mm_->state()) || mm_->state() == proc::ue::MmState::registered_initiated) {
+            return deregister(true);   // the switch-off de-registration, the radio off once it is out
+        }
+        rrc_->power(false);
+        mm_->power_off_abrupt();   // nothing registered: nothing to signal or to write
+        powered_ = false;
+        return {};
+    }
+    airplane_ = false;
+    events_.emit("ue.airplane", subject(), {{"on", "0"}});
+    return power_on();
 }
 
 Result<void> UeDevice::service_request() {

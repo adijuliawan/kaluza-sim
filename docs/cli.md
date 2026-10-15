@@ -8,7 +8,7 @@
 - **Verbs:**
   - `nodes`, `info`, `version`, `capabilities`, `faults list`, `ues`, `stop`;
   - `ue <sel> status|power on|power off --switch-off|--abrupt|register|deregister normal|switch-off|wait|events` (N8, `--abrupt` N12);
-  - `ue <sel> ps-list|ps-establish ipv4|ps-release|ping` (N10), `ifaces|exec` and `ping --df` (N11), `service-request` (N12);
+  - `ue <sel> ps-list|ps-establish ipv4|ps-release|ping` (N10), `ifaces|exec` and `ping --df` (N11), `service-request`, `sim remove|insert` and `airplane on|off` (N12);
   - `wait`, `events`;
   - `gnb <name> ue-list|amf-list` (N8), `ue-release <ue> [--cause C]|restart` (N12);
   - `stub release|ping-ue` (N10) and `stub deregister [--rereg]|t3512 --seconds N|restart` (N12), with `--socket` on `ksim-corestub`'s control socket.

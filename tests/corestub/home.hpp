@@ -31,12 +31,16 @@ struct Av {
     Bytes autn;
     SecretBytes xres_star;
     SecretBytes kamf;
+    // EAP-AKA' (TS 33.501 6.1.3.1): XRES and K_aut; K_AMF then comes from EMSK.
+    SecretBytes xres;
+    SecretBytes k_aut;
 };
 
 struct AvOptions {
     bool corrupt_mac = false;       // a MAC the USIM must refuse (#20)
     bool separation_bit = true;     // AMF bit 0 (#26 when clear)
     std::optional<std::uint64_t> seq;   // a SEQ of the test's choosing (a stale one gives #21)
+    bool eap = false;                   // an AV' for EAP-AKA': CK' and IK' replace CK and IK
 };
 
 class Home {
