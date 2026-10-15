@@ -125,6 +125,10 @@ void close_all_but(std::vector<int> keep) {
         static const char* env[] = {"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C",
                                     "HOME=/", nullptr};
         ::execvpe(args[0], args.data(), const_cast<char* const*>(env));   // NOLINT(cppcoreguidelines-pro-type-const-cast)
+        // Why the command did not start goes to its stderr (W1: EPERM from the bounding set).
+        const int e = errno;
+        const std::string why = "ksim-netd: exec " + argv[0] + ": " + std::strerror(e) + "\n";
+        (void)!::write(2, why.data(), why.size());
         ::_exit(127);
     }
     ::close(fds[0]);

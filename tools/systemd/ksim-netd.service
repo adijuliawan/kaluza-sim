@@ -22,8 +22,13 @@ RestartSec=2
 # host (ip netns, the gc check). The capability set is the limit instead:
 # NET_ADMIN and SYS_ADMIN for namespaces, links, TUNs and mounts; SETUID and
 # SETGID so exec (P1 N11) can drop to the asking user, which it always does.
+# NET_RAW is in the bounding set only so that exec can start binaries that
+# carry it as a file capability, ping above all: the kernel refuses to exec a
+# capability-dumb binary (effective bit) whose capabilities the bounding set
+# withholds (EPERM), while no-new-privileges still keeps the command from
+# gaining it (W1, 2026-10-15; ping uses the namespace's ping socket instead).
 NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_NET_RAW
 AmbientCapabilities=
 
 [Install]

@@ -41,7 +41,7 @@ echo "-- a ping to the DN ($DN_ADDR)"
 png=$(ctl ue "$UE" ping "$DN_ADDR" --psi "$psi" -c 3 --interval 200)
 sent=$(printf '%s\n' "$png" | kv SENT)
 got=$(printf '%s\n' "$png" | kv RECEIVED)
-echo "   $mode ping: sent=$sent received=$got rtt_avg_ms=$(printf '%s\n' "$png" | kv RTT_AVG_MS)"
+echo "   $mode ping: sent=$sent received=$got rtt_avg_ms=$(printf '%s\n' "$png" | kv RTT_AVG_MS)$(printf '%s\n' "$png" | sed -n 's/^CAUSE=/ cause=/p')"
 
 if [ "$mode" = netns ]; then
     ifs=$(ctl ue "$UE" ifaces)   # after the ping: the counters

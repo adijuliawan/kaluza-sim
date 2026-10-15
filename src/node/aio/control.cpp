@@ -578,7 +578,12 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             r.set("IFACE", mode->second);
             add_ping_summary(r, x.out);
             r.set("EXIT_CODE", static_cast<std::int64_t>(x.code()));
-            if (!r.kv.contains("RECEIVED") || r.kv.value("RECEIVED", std::int64_t{0}) == 0) {
+            if (x.code() == 126 || x.code() == 127) {
+                // The command never ran (exit 126/127): say why, not "no echo reply".
+                r.exit = Exit::failed;
+                const std::string first = x.err.substr(0, x.err.find('\n'));
+                r.set("CAUSE", "ping could not be run" + (first.empty() ? std::string() : ": " + first));
+            } else if (!r.kv.contains("RECEIVED") || r.kv.value("RECEIVED", std::int64_t{0}) == 0) {
                 r.exit = Exit::failed;
                 r.set("CAUSE", x.timed_out ? "timeout" : "no echo reply");
             }
