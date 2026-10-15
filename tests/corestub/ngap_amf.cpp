@@ -345,6 +345,18 @@ void NgapAmf::relink(Ue& ue) {
             send_ics(*u, std::move(accept), std::move(kgnb), smf_.reactivate(u->nas->supi(), psis));
         }
     };
+    link.connected_service_accept = [this, id](Bytes accept, std::uint16_t psis) {
+        Ue* u = by_amf(id);
+        if (u == nullptr) {
+            return;
+        }
+        auto items = smf_.reactivate(u->nas->supi(), psis);
+        for (const auto& it : items) {
+            u->setups.push_back(it.psi);
+        }
+        ngap::PduSessionResourceSetupRequest r{u->amf_ue, u->ran_ue, std::move(accept), std::move(items), std::nullopt};
+        send(r, stream_of(*u));
+    };
     link.session_setup = [this, id](Bytes nas, ngap::SessionSetupItem item) {
         Ue* u = by_amf(id);
         if (u == nullptr) {

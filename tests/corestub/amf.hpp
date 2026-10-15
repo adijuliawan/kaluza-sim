@@ -104,6 +104,8 @@ public:
         /// N12: the SERVICE ACCEPT in an INITIAL CONTEXT SETUP REQUEST with K_gNB
         /// and the sessions (bit n for PSI n) whose user plane comes back.
         std::function<void(Bytes accept, SecretBytes kgnb, std::uint16_t psis)> service_accept;
+        /// N18: SERVICE ACCEPT to a UE in CM-CONNECTED with the user plane of these sessions.
+        std::function<void(Bytes accept, std::uint16_t psis)> connected_service_accept;
         /// N13: the UE's SMS CP messages to the SMSF; whether its subscription has SMS.
         std::function<void(Bytes cp)> sms_uplink;
         std::function<bool()> sms_subscribed;
@@ -174,6 +176,7 @@ private:
     void start_challenge();
     void on_authentication_response(const nas::Message& m);
     void on_identity_response(const nas::Message& m);
+    void on_connected_service_request(const nas::Message& m);
 public:
     /// A plain IDENTITY REQUEST for the SUCI, now (a test of §4.4.4.2).
     void send_plain_identity_request();

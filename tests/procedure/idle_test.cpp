@@ -73,6 +73,32 @@ TEST(Idle, Ts24501_5_6_1_AnUplinkPingFromIdleGoesAfterAServiceRequest) {
     EXPECT_EQ(n.failures(), "");
 }
 
+TEST(Idle, Ts24501_5_6_1_1_b_UplinkDataInCmConnectedWithoutUserPlaneAsksForIt) {
+    // KS-NAS-D5 (kaluza-core W3): connected for signalling only, the session has
+    // no user plane; uplink data then needs a SERVICE REQUEST on that connection.
+    Net n;
+    n.register_ue();
+    n.establish();
+    to_idle(n);
+    ASSERT_TRUE(n.ue->service_request());   // signalling: the session's user plane stays down
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("nas.sr.accept").empty(); }, n.loop.now() + 3'000));
+    ASSERT_TRUE(n.cucp.sessions_of(n.amf.ids(0)->ran).empty());
+    node::PingRequest p;
+    p.dst = {10, 60, 0, 1};
+    p.count = 2;
+    p.interval = 300;
+    ASSERT_TRUE(n.ue->ping(p));
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("ue.ping.done").empty(); }, n.loop.now() + 6'000));
+    EXPECT_EQ(field(*n.last("ue.ping.done"), "received"), "2");
+    const Event* r = n.last("nas.sr.request");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(field(*r, "connected"), "1");
+    EXPECT_EQ(field(*r, "type"), "1");   // data
+    EXPECT_EQ(n.named("nas.sr.accept").size(), 2u);
+    EXPECT_EQ(n.cucp.sessions_of(n.amf.ids(0)->ran), std::vector<std::uint8_t>{1});
+    EXPECT_EQ(n.failures(), "");
+}
+
 TEST(Idle, Ts23502_4_2_3_3_DownlinkForTheIdleUePagesItAndIsAnswered) {
     Net n;
     n.register_ue();

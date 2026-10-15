@@ -203,6 +203,7 @@ void Mm::power_on() {
     update_ = UpdateStatus::u2_not_updated;
     connected_ = false;
     secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
+    up_pending_ = 0;
     ++gen_;
     coro::spawn(read_card(alive_));
 }
@@ -498,6 +499,7 @@ void Mm::on_registration_accept(const nas::Message& m) {
         send_status(kInvalidMandatory);
         return;
     }
+    up_pending_ |= reg_uplink_;   // the network brings these back with the accept (§5.5.1.3.4)
     reg_uplink_ = 0;   // answered (§5.5.1.3.4: the reactivation result, if any, says how)
     stop(MmTimer::t3510);
     paused_t3510_ = false;
@@ -709,6 +711,7 @@ void Mm::deregister(bool switch_off) {
         // release would drop it (F-46); the radio goes off once it is sent.
         connected_ = false;
         secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
+        up_pending_ = 0;
         set_state(MmState::null, "switch off");
         return;
     }
@@ -1096,6 +1099,7 @@ void Mm::network_failed_authentication() {
         lower_.release_local();
         connected_ = false;
         secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
+        up_pending_ = 0;
     }
 }
 
@@ -1455,6 +1459,7 @@ void Mm::on_released() {
     const std::uint16_t recovery_up = std::exchange(recovery_up_, std::uint16_t{0});
     connected_ = false;
     secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
+    up_pending_ = 0;
     kgnb_count_.reset();   // the next connection's K_gNB comes from its own initial message or SMC
     // §5.4.1.3.3 d and §5.4.1.3.7: entering 5GMM-IDLE ends the stored challenge and T3520.
     clear_stored_challenge();
@@ -1521,6 +1526,7 @@ void Mm::power_off_abrupt() {
     ++gen_;
     connected_ = false;
     secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
+    up_pending_ = 0;
     pending_sm_.clear();
     sr_uplink_ = 0;
     events_.emit("nas.mm.power_off", cfg_.id, {{"mode", "abrupt"}});
@@ -1535,6 +1541,41 @@ Result<void> Mm::service_request(std::uint8_t type, std::uint16_t uplink) {
     }
     if (connected_) {
         flush_pending_sm();
+        // §5.6.1.1 b: in 5GMM-CONNECTED too, uplink data for a session with no
+        // user-plane resources asks for them; the request goes over the
+        // connection the UE has, protected (kaluza-core W3: an AMF that keeps the
+        // connection after a periodic update, KS-NAS-D5).
+        // Sessions whose user plane the network is already bringing back (an
+        // accepted request named them) wait for it instead.
+        uplink = static_cast<std::uint16_t>(uplink & ~up_pending_);
+        if (type != ie::ServiceType::data || uplink == 0 || state_ != MmState::registered_normal_service) {
+            if (state_ == MmState::service_request_initiated) {
+                sr_uplink_ |= uplink;
+            }
+            return {};
+        }
+        if (!guti_) {
+            return {};   // checked above; kept for the reader of this branch
+        }
+        nas::Message c = make(kServiceRequest);
+        put(c, "ngKSI", current_ngksi().encode());
+        put(c, "Service type", ie::ServiceType{type}.encode());
+        ie::MobileIdentity st;
+        st.type = ie::MobileIdentity::Type::s_tmsi;
+        st.amf_set = guti_->amf_set;
+        st.amf_pointer = guti_->amf_pointer;
+        st.tmsi = guti_->tmsi;
+        put(c, "5G-S-TMSI", st.encode());
+        put(c, "Uplink data status", ie::PsiBitmap{uplink}.encode());
+        if (cfg_.sm_hooks.active) {
+            put(c, "PDU session status", ie::PsiBitmap{cfg_.sm_hooks.active()}.encode());
+        }
+        sr_type_ = type;
+        sr_uplink_ = uplink;
+        events_.emit("nas.sr.request", cfg_.id, {{"type", str(type)}, {"uplink", str(uplink)}, {"connected", "1"}});
+        set_state(MmState::service_request_initiated, "service request (connected)");
+        send(c);
+        start(MmTimer::t3517, cfg_.timers.t3517);
         return {};
     }
     if (state_ == MmState::service_request_initiated) {
@@ -1608,6 +1649,7 @@ void Mm::on_service_accept(const nas::Message& m) {
     if (synced && cfg_.sm_hooks.sync) {
         cfg_.sm_hooks.sync(network);   // §5.6.1.4: sessions the network does not hold go locally
     }
+    up_pending_ |= sr_uplink_;   // and these with the SERVICE ACCEPT
     sr_uplink_ = 0;
     flush_pending_sm();
 }
@@ -2188,6 +2230,7 @@ void Mm::on_expiry(MmTimer t) {
             lower_.release_local();
             connected_ = false;
             secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
+            up_pending_ = 0;
         }
         clear_stored_challenge();
         stop(MmTimer::t3520);
@@ -2228,6 +2271,7 @@ void Mm::on_expiry(MmTimer t) {
             lower_.release_local();
             connected_ = false;
             secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
+            up_pending_ = 0;
         }
         set_state(MmState::registered_normal_service, "T3517 expiry");
         return;
@@ -2270,6 +2314,7 @@ void Mm::on_expiry(MmTimer t) {
             lower_.release_local();
             connected_ = false;
             secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
+            up_pending_ = 0;
         }
         events_.emit("nas.dereg.abort", cfg_.id, {{"reason", "T3521"}});
         set_state(usim_present_ ? MmState::deregistered_normal_service : MmState::deregistered_no_supi,

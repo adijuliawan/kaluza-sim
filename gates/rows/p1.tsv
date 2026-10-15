@@ -6,6 +6,8 @@
 # (kaluza-core docs/compliance/smf/phase-2/rows-k3s-963130e1-native-eupf-75d3202.tsv). The text is
 # kept verbatim: it is the UE_IMPL parity contract. Only the names are taken; no gate code.
 # Rows named ksim-p1.* are kaluza-sim's own (sim behaviour the reference gates cannot see).
+# N18 correction: smsf.022 needs SMS added to a subscription on the core, a core-side trigger kaluza-sim
+# has none of on kaluza-core in P1 (the user, 2026-10-15), so its cores are the stub's (Open5GS: D3).
 #
 #   observable  sim: kaluza-sim's own evidence (events, ksim-ctl output, its pcaps) decides the row;
 #               core: only the core's state, logs or metrics can (not a kaluza-sim row; P4 parity)
@@ -159,7 +161,7 @@ smsf.018	kaluza-smsf	18	★ the SMSF registered after the AMF (TS 23.502 4.13.3.
 smsf.019	kaluza-smsf	19	★★ UE 3 (not subscribed): SMS over NAS not allowed, and registered all the same	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	UE 3 registered, sms_allowed=0
 smsf.020	kaluza-smsf	20	★ ...and no SMSF holds it	core	core	-	no:core	-	-	-	-
 smsf.021	kaluza-smsf	21	★ SMS requested = 0 on an update: not allowed, the SMSF deactivated, the UDR document gone	core	core	-	no:core	-	-	-	-
-smsf.022	kaluza-smsf	22	...and requested again: activated, allowed	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	registration update with SMS requested again: sms_allowed=1
+smsf.022	kaluza-smsf	22	...and requested again: activated, allowed	sms	sim	sim	yes	stub;open5gs=allow	N13	-	registration update with SMS requested again: sms_allowed=1
 smsf.023	kaluza-smsf	23	UE 1: the submit went (sms-send)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	ksim-ctl ue sms-send exit 0
 smsf.024	kaluza-smsf	24	★★ UE 1: RP-ACK for its submit (the SMSC took it)	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	sms_rp_da_empty	event sms.rp.ack for the MO
 smsf.025	kaluza-smsf	25	★★ UE 2: delivered once, the same text	sms	sim	sim	yes	stub,kaluza;open5gs=allow	N13	-	UE 2 sms-list: one DELIVER, same text

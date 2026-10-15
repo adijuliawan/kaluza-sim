@@ -68,9 +68,13 @@ else
 fi
 
 echo "-- the AMF restarted"
-if on_stub; then
+if on_stub || [ -n "${AMF_RESTART:-}" ]; then
     seq=$(ctl info | kv EVENT_SEQ)
-    stub restart >/dev/null || abort "the stub did not take restart"
+    if on_stub; then
+        stub restart >/dev/null || abort "the stub did not take restart"
+    else
+        $AMF_RESTART >/dev/null || abort "AMF_RESTART failed"   # N17: the rig's amfd, from our copy
+    fi
     st=$(ctl wait ran.amf.status --since "$seq" --timeout 10s | kv EVENT)
     row amf-ueransim.063 '^ran.amf.status$' "$st"
     ng=$(ctl wait ran.ng.setup --since "$seq" --timeout 30s | kv EVENT)
@@ -87,7 +91,7 @@ if on_stub; then
     row amf-ueransim.069 '^received=[1-9]' "received=$(printf '%s\n' "$png" | kv RECEIVED)"
 else
     for r in amf-ueransim.063 amf-ueransim.064 amf-ueransim.065 amf-ueransim.066 amf-ueransim.069; do
-        skip_row "$r" "no AMF restart trigger on $CORE in this run (Open5GS: N17)"
+        skip_row "$r" "no AMF restart trigger on $CORE (AMF_RESTART)"
     done
 fi
 release_all "$UE"

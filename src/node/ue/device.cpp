@@ -48,7 +48,10 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     up.kgnb = [this] { return mm_->kgnb(); };
     up.s_tmsi = [this] { return mm_->s_tmsi(); };
     up.paged = [this] { mm_->on_paged(); };
-    up.bearers_up = [this] { flush_held(); };
+    up.bearers_up = [this] {
+        mm_->on_user_plane();
+        flush_held();
+    };
     up.dl_data = [this](std::uint8_t psi, std::optional<sdap::DlHeader>, Bytes sdu) { on_dl_ip(psi, std::move(sdu)); };
     rrc_ = std::make_unique<proc::ue::UeRrc>(ex_, Rng(cfg_.seed, {cfg_.index, 1}), events, rc, up, std::move(to_air));
     proc::ue::MmConfig mc;

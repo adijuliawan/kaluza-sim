@@ -169,6 +169,8 @@ public:
     void on_nas(ByteView wire);
     /// The N1 signalling connection was released, or the lower layers failed.
     void on_released();
+    /// The lower layers set up user-plane bearers: what the network was bringing back is here.
+    void on_user_plane() noexcept { up_pending_ = 0; }
     /// "RRC Connection failure" from the lower layers, before on_released:
     /// with no signalling pending, a mobility registration follows (§5.5.1.3.2 f)
     /// naming the sessions whose user plane was up (bit n for PSI n).
@@ -337,6 +339,7 @@ private:
     bool usim_valid_ = false;
     bool connected_ = false;
     bool secure_exchange_ = false;   // §4.4.4.2, for the current NAS signalling connection
+    std::uint16_t up_pending_ = 0;   // sessions whose user plane the network is bringing back
     std::string supi_;
     std::string msin_;
     nas::ie::Plmn home_;

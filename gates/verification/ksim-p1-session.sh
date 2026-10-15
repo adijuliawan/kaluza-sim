@@ -90,7 +90,7 @@ else
     _seq=$(ctl info | kv EVENT_SEQ)
     probe=$(ctl ue "$UE" ps-establish ipv4 --dnn ksim-backoff $SLICE --wait 15s)
     pbo=$(ctl ue "$UE" wait nas.sm.backoff --since "$_seq" --timeout 3s | kv SECONDS)
-    skip_row ksim-p1.backoff "no reject-then-accept trigger on $CORE: an unserved DNN got $(printf '%s\n' "$probe" | kv RESULT) cause=$(printf '%s\n' "$probe" | kv CAUSE) backoff=${pbo:-none}"
+    skip_row ksim-p1.backoff "no reject-then-accept trigger on $CORE: an unserved DNN got $(printf '%s\n' "$probe" | kv RESULT) cause=$(printf '%s\n' "$probe" | kv CAUSE) mm_cause=$(printf '%s\n' "$probe" | kv MM_CAUSE) psi=$(printf '%s\n' "$probe" | kv PSI) backoff=${pbo:-none}"
 fi
 
 release_all "$UE"

@@ -260,17 +260,38 @@ std::string imsi_list(const Block& b) {
     return s;
 }
 
+/// The DNNs of a comma-separated --dnn list (N17: internet,ims for the session gate).
+std::vector<std::string> dnn_list(const std::string& dnns) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (char c : dnns + ",") {
+        if (c == ',') {
+            if (!cur.empty()) {
+                out.push_back(cur);
+            }
+            cur.clear();
+        } else {
+            cur.push_back(c);
+        }
+    }
+    return out;
+}
+
 /// The fork's subscriber document (misc/db/open5gs-dbctl-pgsql subscriber_doc
-/// at 741c29d8d: Milenage with OPc, AMF 8000, one slice, one session, 1 Gbps).
-nlohmann::json subscriber_doc(const std::string& imsi, unsigned sst, const std::string& sd, const std::string& dnn) {
+/// at 741c29d8d: Milenage with OPc, AMF 8000, one slice, 1 Gbps), one session
+/// per DNN, the first the default.
+nlohmann::json subscriber_doc(const std::string& imsi, unsigned sst, const std::string& sd, const std::string& dnns) {
     using nlohmann::json;
     const json ambr = {{"downlink", {{"value", 1000000000}, {"unit", 0}}}, {"uplink", {{"value", 1000000000}, {"unit", 0}}}};
-    json session = {{"name", dnn},
-                    {"type", 3},
-                    {"qos", {{"index", 9}, {"arp", {{"priority_level", 8}, {"pre_emption_capability", 1}, {"pre_emption_vulnerability", 2}}}}},
-                    {"ambr", ambr},
-                    {"pcc_rule", json::array()}};
-    json slice = {{"sst", sst}, {"default_indicator", true}, {"session", json::array({session})}};
+    json sessions = json::array();
+    for (const auto& dnn : dnn_list(dnns)) {
+        sessions.push_back({{"name", dnn},
+                            {"type", 3},
+                            {"qos", {{"index", 9}, {"arp", {{"priority_level", 8}, {"pre_emption_capability", 1}, {"pre_emption_vulnerability", 2}}}}},
+                            {"ambr", ambr},
+                            {"pcc_rule", json::array()}});
+    }
+    json slice = {{"sst", sst}, {"default_indicator", true}, {"session", sessions}};
     if (!sd.empty()) {
         slice["sd"] = sd;
     }
@@ -376,7 +397,7 @@ static int run_main(int argc, char** argv) {
     std::string ssh;
     std::string db_config = "~/kaluza-sim-rig/etc/udr.yaml";
     std::string sd;
-    std::string dnn = "internet";
+    std::string dnn = "internet,ims";
     unsigned sst = 1;
     bool force = false;
     bool replace = false;
@@ -411,7 +432,7 @@ static int run_main(int argc, char** argv) {
     prov_cmd->add_option("--master", master, "the range master file")->required();
     prov_cmd->add_option("--sst", sst, "the slice's SST");
     prov_cmd->add_option("--sd", sd, "the slice's SD (6 hex digits)");
-    prov_cmd->add_option("--dnn", dnn, "the session's DNN");
+    prov_cmd->add_option("--dnn", dnn, "the sessions' DNNs, comma-separated (internet,ims)");
     prov_cmd->add_flag("--replace", replace, "overwrite subscribers of the block that exist");
     prov_cmd->add_flag("--dry-run", dry_run, "kaluza: print each bundle with its keys as placeholders, send nothing");
     // P1 N14: the card on a virtual reader, and the card images.
@@ -496,7 +517,7 @@ static int run_main(int argc, char** argv) {
         return 2;
     }
     if (!safe_remote_path(db_config) || ssh.empty() || ssh.find_first_of(" ;'\"$`\\") != std::string::npos ||
-        ssh.front() == '-' || !std::regex_match(dnn, std::regex("^[A-Za-z0-9.-]{1,63}$")) ||
+        ssh.front() == '-' || !std::regex_match(dnn, std::regex("^[A-Za-z0-9.-]{1,63}(,[A-Za-z0-9.-]{1,63}){0,7}$")) ||
         (!sd.empty() && !std::regex_match(sd, std::regex("^[0-9A-Fa-f]{6}$"))) || sst > 255) {
         std::cerr << "ksim-sim: --ssh, --db-config, --dnn, --sst or --sd is not acceptable\n";
         return 2;

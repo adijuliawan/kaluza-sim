@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The Open5GS fork's allow-list (P1 N17; ADR 0010 point 3): a row FAIL on Open5GS that an entry here
+# names is scored ALLOWED. Columns: allow id, row id, reason, clause, Open5GS reference (fork 741c29d8d).
+# O5GS-1 is decision D3 (2026-10-15): the fork has no SMS over NAS, its AMF never sets "SMS over NAS allowed";
+# ksim-p1.sms-not-allowed checks the UE honours that and is not allowed here.
+O5GS-1	smsf.010	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.011	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.012	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.013	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.014	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.015	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.019	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.022	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.023	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.024	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.025	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.026	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.028	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.029	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.030	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.031	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.032	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.034	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.035	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.036	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-1	smsf.037	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed

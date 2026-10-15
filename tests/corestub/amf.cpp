@@ -473,7 +473,10 @@ void Amf::on_identity_response(const nas::Message& m) {
 }
 
 void Amf::on_service_request(const nas::Message& m, bool initial, bool verified) {
-    check(initial, "5.6.1.2", "SERVICE REQUEST is an initial NAS message");
+    if (!initial) {
+        on_connected_service_request(m);
+        return;
+    }
     ++service_requests_;
     stop_t3560();
     if (p_.silent_service_request) {
@@ -526,6 +529,40 @@ void Amf::on_service_request(const nas::Message& m, bool initial, bool verified)
     }
     if (link_.service_accept) {
         link_.service_accept(std::move(*wire), std::move(*key), up);
+    } else {
+        downlink(std::move(*wire));
+    }
+}
+
+void Amf::on_connected_service_request(const nas::Message& m) {
+    // §5.6.1.1 b, TS 23.502 4.2.3.2: a UE in CM-CONNECTED asks for the user plane
+    // of sessions that have none. SERVICE ACCEPT goes as the NAS-PDU of the PDU
+    // SESSION RESOURCE SETUP REQUEST for them (TS 38.413 9.2.1.1).
+    ++service_requests_;
+    check(state_ == State::registered && ctx_.has_value() && connected_, "5.6.1.2",
+          "a SERVICE REQUEST on a connection comes from a registered UE with a context");
+    if (state_ != State::registered || !ctx_) {
+        return;
+    }
+    std::uint16_t uplink = 0;
+    if (const Bytes* u = nas::get(m, "Uplink data status")) {
+        if (auto b = ie::PsiBitmap::decode(*u)) {
+            uplink = b->psis;
+        }
+    }
+    check(uplink != 0, "5.6.1.2", "a service request for data names its sessions");
+    const std::uint16_t held = smf_ != nullptr ? smf_->sessions_of(supi_) : 0;
+    const auto up = static_cast<std::uint16_t>(uplink & held);
+    nas::Message a = make(kServiceAccept);
+    put(a, "PDU session status", ie::PsiBitmap{held}.encode());
+    put(a, "PDU session reactivation result", ie::PsiBitmap{static_cast<std::uint16_t>(uplink & ~held)}.encode());
+    auto plain = nas::encode(a);
+    auto wire = plain ? ctx_->protect(*plain, Sht::integrity_ciphered) : Result<Bytes>(plain.error());
+    if (!wire) {
+        return;
+    }
+    if (up != 0 && link_.connected_service_accept) {
+        link_.connected_service_accept(std::move(*wire), up);
     } else {
         downlink(std::move(*wire));
     }
