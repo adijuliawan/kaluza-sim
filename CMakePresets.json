@@ -64,7 +64,8 @@
       "inherits": "gcc",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "KSIM_ARCH_FLAGS": "-march=x86-64-v3 -maes -mpclmul -mvaes -mtune=znver3"
+        "KSIM_ARCH_FLAGS": "-march=x86-64-v3 -maes -mpclmul -mvaes -mtune=znver3",
+        "KSIM_STATIC_DEPS": "ON"
       }
     },
     {

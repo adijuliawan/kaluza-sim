@@ -51,6 +51,22 @@ find_package(GTest 1.14 REQUIRED)
 find_package(fmt 10 REQUIRED)
 find_package(Threads REQUIRED)
 find_package(yaml-cpp 0.7 REQUIRED)
+# The lab VM has neither libfmt nor libyaml-cpp at run time, and packages there
+# are the user's (lab.md 5): the release-lab preset builds fmt header-only and
+# links yaml-cpp's static archive, so its binaries need neither (LDD=PASS).
+option(KSIM_STATIC_DEPS "fmt header-only and yaml-cpp static" OFF)
+if(KSIM_STATIC_DEPS)
+    set(KSIM_FMT fmt::fmt-header-only)
+    find_library(KSIM_YAML_CPP_STATIC NAMES libyaml-cpp.a REQUIRED)
+    add_library(ksim_yaml_cpp_static STATIC IMPORTED)
+    set_target_properties(ksim_yaml_cpp_static PROPERTIES
+        IMPORTED_LOCATION "${KSIM_YAML_CPP_STATIC}"
+        INTERFACE_INCLUDE_DIRECTORIES "$<TARGET_PROPERTY:yaml-cpp::yaml-cpp,INTERFACE_INCLUDE_DIRECTORIES>")
+    set(KSIM_YAML ksim_yaml_cpp_static)
+else()
+    set(KSIM_FMT fmt::fmt)
+    set(KSIM_YAML yaml-cpp::yaml-cpp)
+endif()
 find_package(nlohmann_json 3.11 REQUIRED)
 find_package(CLI11 2.4 REQUIRED)
 ksim_asn1_generate()

@@ -41,8 +41,12 @@ TEST(Bundle, ADefaultSubscriberCarriesTheCoreDocuments) {
                              "subscription-data:authentication-data:authentication-subscription",
                              "subscription-data:provisioned-data:am-data", "subscription-data:provisioned-data:sm-data",
                              "subscription-data:provisioned-data:smf-selection-subscription-data",
-                             "policy-data:ues:am-data", "policy-data:ues:sm-data"}) {
+                             "policy-data:ues:am-data", "policy-data:ues:ue-policy-set", "policy-data:ues:sm-data"}) {
         EXPECT_NE(std::find(r.begin(), r.end(), want), r.end()) << want;
+    }
+    // No document is scoped to a serving PLMN: each is the base document (the core session's review).
+    for (const auto& d : b["documents"]) {
+        EXPECT_FALSE(d.contains("servingPlmn")) << d["resource"];
     }
     EXPECT_EQ(std::count_if(r.begin(), r.end(), [](const std::string& s) { return s.find("sms") != std::string::npos; }), 0);
     // Keys in the authentication subscription only, never protected.
@@ -70,6 +74,10 @@ TEST(Bundle, AnSmsSubscriberAddsItsSmsDocuments) {
     for (const auto& d : b["documents"]) {
         if (d["resource"] == "subscription-data:provisioned-data:sms-data") {
             EXPECT_EQ(d["body"]["smsSubscribed"], true);
+        }
+        if (d["resource"] == "subscription-data:provisioned-data:sms-mng-data") {
+            EXPECT_EQ(d["body"]["mtSmsBarringRoaming"], false);
+            EXPECT_EQ(d["body"]["moSmsBarringRoaming"], false);
         }
         if (d["resource"] == "subscription-data:provisioned-data:am-data") {
             EXPECT_EQ(d["body"]["subsRegTimer"], 3600);

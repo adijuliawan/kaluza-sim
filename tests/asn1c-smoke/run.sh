@@ -31,7 +31,7 @@ done
 # vendored file: the BER-only ones do not build with BER disabled). Each listed
 # file must be byte-identical to the vendored copy, which is what gets compiled.
 mkdir -p "$W/objR"
-mapfile -t RT < <(grep -oE '[^/[:space:]]+\.c' "$W/genSA/Makefile.am.libasncodec" | grep -v '^SA_' | LC_ALL=C sort -u)
+mapfile -t RT < <(grep -oE '[^/[:space:]]+\.c\b' "$W/genSA/Makefile.am.libasncodec" | grep -v '^SA_' | LC_ALL=C sort -u)
 for f in "${RT[@]}"; do
     cmp -s "$W/genSA/$f" "$ROOT/third_party/asn1c/runtime/$f" ||
         { echo "ASN1C_SMOKE=FAIL runtime file $f differs from the vendored copy"; exit 1; }

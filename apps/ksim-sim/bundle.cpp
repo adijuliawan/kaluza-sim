@@ -9,7 +9,10 @@ namespace {
 
 using json = nlohmann::ordered_json;
 
-constexpr const char* kServingPlmn = "00101";
+// No servingPlmn on any document (kaluza-core-1e, 2026-10-15): the UDR keeps a
+// document without one as the base it serves for whatever serving PLMN the UDM
+// asks about, as for every seed UE; "00101" would make PLMN-specific copies
+// found only under that exact form.
 constexpr const char* kSlice = "1-000001";   // SST 1, SD 000001: memberId and the map keys of TS 29.503
 
 json snssai() { return {{"sst", 1}, {"sd", "000001"}}; }
@@ -68,22 +71,20 @@ json bundle(std::string_view imsi, std::string_view msisdn, std::string_view k_h
                    {"subscribedUeAmbr", ambr()},
                    {"nssai", {{"defaultSingleNssais", json::array({snssai()})}}},
                    {"subsRegTimer", p.subs_reg_timer_s}});
-    am["servingPlmn"] = kServingPlmn;
     docs.push_back(am);
     json sm = doc("subscription-data:provisioned-data:sm-data",
                   {{"singleNssai", snssai()},
                    {"dnnConfigurations",
                     {{"internet", dnn_config("IPV4V6", {"IPV4", "IPV6", "IPV4V6"}, 9)},
                      {"ims", dnn_config("IPV4", {"IPV4"}, 5)}}}});
-    sm["servingPlmn"] = kServingPlmn;
     sm["memberId"] = kSlice;
     docs.push_back(sm);
     json smf = doc("subscription-data:provisioned-data:smf-selection-subscription-data",
                    {{"subscribedSnssaiInfos",
                      {{kSlice, {{"dnnInfos", json::array({{{"dnn", "internet"}, {"defaultDnnIndicator", true}}, {{"dnn", "ims"}}})}}}}}});
-    smf["servingPlmn"] = kServingPlmn;
     docs.push_back(smf);
     docs.push_back(doc("policy-data:ues:am-data", json::object()));
+    docs.push_back(doc("policy-data:ues:ue-policy-set", json::object()));   // as every full seed UE has it
     docs.push_back(doc("policy-data:ues:sm-data",
                        {{"smPolicySnssaiData",
                          {{kSlice,
@@ -91,12 +92,11 @@ json bundle(std::string_view imsi, std::string_view msisdn, std::string_view k_h
                             {"smPolicyDnnData", {{"internet", {{"dnn", "internet"}}}, {"ims", {{"dnn", "ims"}}}}}}}}}}));
     if (p.sms) {
         json sms = doc("subscription-data:provisioned-data:sms-data", {{"smsSubscribed", true}});
-        sms["servingPlmn"] = kServingPlmn;
-        docs.push_back(sms);
+            docs.push_back(sms);
         json mng = doc("subscription-data:provisioned-data:sms-mng-data",
-                       {{"mtSmsSubscribed", true}, {"moSmsSubscribed", true}, {"mtSmsBarringAll", false}, {"moSmsBarringAll", false}});
-        mng["servingPlmn"] = kServingPlmn;
-        docs.push_back(mng);
+                       {{"mtSmsSubscribed", true}, {"moSmsSubscribed", true}, {"mtSmsBarringAll", false}, {"moSmsBarringAll", false},
+                        {"mtSmsBarringRoaming", false}, {"moSmsBarringRoaming", false}});
+            docs.push_back(mng);
     }
     return {{"ueId", supi}, {"documents", docs}};
 }
