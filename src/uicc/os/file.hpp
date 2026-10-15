@@ -31,6 +31,19 @@ struct ArrRef {
     std::uint8_t record = 0;
 };
 
+/// EFs whose contents are keys or key state, kept out of traces, `sim read`
+/// and exports (sim-uicc.md §6): EF.KEYS and EF.KEYSPS (CK, IK), the NAS
+/// security contexts 4F03 and 4F04, EF.5GAUTHKEYS 4F05, and the sysmoISIM
+/// key files AF20 (K, OPc) and AF30 (the SQN array).
+inline bool key_fid(std::uint16_t fid) noexcept {
+    switch (fid) {
+    case 0x6F08: case 0x6F09: case 0x4F03: case 0x4F04: case 0x4F05: case 0xAF20: case 0xAF30:
+        return true;
+    default:
+        return false;
+    }
+}
+
 /// Life cycle status (TS 102 221 §11.1.1.4.9).
 inline constexpr std::uint8_t kLcsActivated = 0x05;
 inline constexpr std::uint8_t kLcsDeactivated = 0x04;

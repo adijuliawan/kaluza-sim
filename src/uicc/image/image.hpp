@@ -20,7 +20,9 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 #include <string_view>
 
 #include "platform/result.hpp"
@@ -63,7 +65,19 @@ Bytes encode_acc(std::string_view imsi);
 /// One EF.MSISDN record (TS 31.102 §4.2.26) with no alpha identifier.
 Result<Bytes> encode_msisdn_record(std::string_view digits, std::size_t record_len);
 
+/// The digits of EF.IMSI, EF.ICCID and an EF.MSISDN record (the inverses of
+/// the encoders above); empty for contents that hold none.
+std::string decode_imsi(ByteView ef);
+std::string decode_iccid(ByteView ef);
+std::string decode_msisdn_record(ByteView rec);
+/// The services EF.UST marks available (TS 31.102 4.2.8), in order.
+std::vector<unsigned> services(ByteView ust);
+
 /// The first ADF whose AID starts with the USIM's RID and application code.
 os::File* usim_adf(os::Card& card) noexcept;
+
+/// The ATR of an opt-in personality (`personality:` in an image, `ksim-sim
+/// serve --personality`), or nullopt for a name it does not know.
+std::optional<Bytes> personality_atr(std::string_view name);
 
 } // namespace ksim::uicc::image

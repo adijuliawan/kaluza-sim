@@ -5,7 +5,9 @@
 // e1ap.pcapng and uu.pcapng in the run directory, each as Exported-PDU frames
 // Wireshark decodes by name ("ngap", "f1ap", "e1ap", "nr-rrc.<channel>",
 // "nas-5gs"), and gtpu.pcapng (N10) with N3 and F1-U as raw IPv4/UDP frames on
-// port 2152, so Wireshark's GTP-U dissector takes them. The Uu
+// port 2152, so Wireshark's GTP-U dissector takes them, and sim.pcapng (N14)
+// with the APDUs of the UEs whose trace is on, as GSMTAP-SIM on UDP 4729
+// (redacted by uicc/trace before they get here). The Uu
 // capture holds RRC in clear, as the UE built or took it, and NAS in clear
 // only when the run asks for it (KS-CTL-004). Frame comments carry the
 // direction and, on Uu, the SUPI.
@@ -37,13 +39,14 @@ struct CaptureStats {
     std::uint64_t e1ap = 0;
     std::uint64_t gtpu = 0;
     std::uint64_t uu = 0;
+    std::uint64_t sim = 0;
     std::uint64_t keys_zeroed = 0;
     std::uint64_t left_out = 0;   // NGAP and E1AP PDUs that did not decode, so could not be redacted
 };
 
 class Capture {
 public:
-    /// Creates the five files in `dir` (mode 0600).
+    /// Creates the six files in `dir` (mode 0600).
     static Result<std::unique_ptr<Capture>> open(const std::string& dir);
     ~Capture();
     Capture(const Capture&) = delete;
@@ -55,6 +58,8 @@ public:
     void gtpu(const Endpoint& from, const Endpoint& to, ByteView pdu);
     void rrc(std::string_view channel, ByteView pdu, const std::string& supi);
     void nas(bool uplink, ByteView plain, const std::string& supi);
+    /// A GSMTAP-SIM record (uicc/trace) of the UE's card.
+    void sim(std::uint8_t sub_type, ByteView payload, const std::string& supi);
 
     CaptureStats stats() const;
     void close();
@@ -76,6 +81,7 @@ private:
     File e1ap_;
     File gtpu_;
     File uu_;
+    File sim_;
     CaptureStats stats_;
 };
 

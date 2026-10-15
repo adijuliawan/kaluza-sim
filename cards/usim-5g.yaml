@@ -12,6 +12,9 @@
 #   EF.SMSP: TS-Service Centre Address +99900000 (RP-DA is filled from it, KS-SMS-S1), PID 00, DCS 00,
 #     validity 24 h. EF.SUCI_Calc_Info: the null scheme only (scheme 0, key index 0), no HN keys.
 #   EF.Routing_Indicator 0000. EF.USIM_SQN: SQN and delta checks on, IND length 5, delta 2^28.
+#   Service 122 brings 4F01-4F04 (the non-3GPP LOCI and NSC too, TS 31.102 4.4.11.3 and 4.4.11.5);
+#     with 123 and 133, EF.5GAUTHKEYS is 110 octets: K_AUSF, K_SEAF (3GPP), K_SEAF (non-3GPP), the
+#     SOR and UPU counters, each TLV 'FF'-filled while not valid (4.4.11.6). No 130: no EF.SUPI_NAI.
 #   AF20 and AF30 are sysmoISIM's EF.USIM_AUTH_KEY and EF.USIM_SQN layouts (usim.hpp).
 t0: true
 channels: 4
@@ -245,10 +248,25 @@ mf:
               sfi: 0x01
               arr: [0x6F06, 2]
               data: FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000001
+            - fid: 0x4F02
+              name: EF.5GSN3GPPLOCI
+              type: transparent
+              sfi: 0x02
+              arr: [0x6F06, 2]
+              data: FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF00000001
             - fid: 0x4F03
               name: EF.5GS3GPPNSC
               type: linear_fixed
               sfi: 0x03
+              arr: [0x6F06, 2]
+              sealed: true
+              record_len: 62
+              records:
+                - A000FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+            - fid: 0x4F04
+              name: EF.5GSN3GPPNSC
+              type: linear_fixed
+              sfi: 0x04
               arr: [0x6F06, 2]
               sealed: true
               record_len: 62
@@ -260,7 +278,7 @@ mf:
               sfi: 0x05
               arr: [0x6F06, 2]
               sealed: true
-              data: 80008100FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+              data: 8020FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF8120FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF8220FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF8302FFFF8402FFFF
             - fid: 0x4F06
               name: EF.UAC_AIC
               type: transparent

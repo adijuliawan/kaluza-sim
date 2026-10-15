@@ -50,12 +50,14 @@ Realistic SIM behaviour also buys protocol coverage the core cares about:
 |---|---|
 | MF | EF.ICCID 2FE2, EF.DIR 2F00 (the USIM AID, plus the ISIM AID in phase 2), EF.PL 2F05, EF.ARR 2F06 |
 | ADF.USIM | EF.IMSI 6F07, EF.AD 6FAD, EF.UST 6F38, EF.EST 6F56, EF.KEYS 6F08, EF.KEYSPS 6F09, EF.LOCI 6F7E, EF.PSLOCI 6F73, EF.FPLMN 6F7B, EF.HPPLMN 6F31, EF.PLMNwAcT 6F60, EF.OPLMNwACT 6F61, EF.HPLMNwAcT 6F62, EF.EHPLMN 6FD9, EF.ACC 6F78, EF.SPN 6F46, EF.MSISDN 6F40, EF.SMS 6F3C, EF.SMSP 6F42, EF.SMSS 6F43, EF.ARR 6F06, EF.START-HFN 6F5B, EF.THRESHOLD 6F5C |
-| DF.5GS 5FC0 | EF.5GS3GPPLOCI 4F01 (service 122), EF.5GS3GPPNSC 4F03 (122), EF.5GAUTHKEYS 4F05 (123), EF.UAC_AIC 4F06 (126), EF.SUCI_Calc_Info 4F07 (124), EF.OPL5G 4F08 (129), EF.SUPI_NAI 4F09 (130), EF.Routing_Indicator 4F0A (124). Phase 2 or later: 4F02/4F04 (non-3GPP LOCI and NSC), EF.URSP 4F0B, EF.TN3GPPSNN, EF.CAG, EF.SOR-CMCI, EF.KAUSF_DERIVATION (145) |
+| DF.5GS 5FC0 | EF.5GS3GPPLOCI 4F01, EF.5GSN3GPPLOCI 4F02, EF.5GS3GPPNSC 4F03 and EF.5GSN3GPPNSC 4F04 (all four with service 122), EF.5GAUTHKEYS 4F05 (123; 110 octets with 133), EF.UAC_AIC 4F06 (126), EF.SUCI_Calc_Info 4F07 (124), EF.OPL5G 4F08 (129), EF.Routing_Indicator 4F0A (124). EF.SUPI_NAI 4F09 only with service 130, which the P1 card leaves off. Phase 2 or later: EF.URSP 4F0B, EF.TN3GPPSNN, EF.CAG, EF.SOR-CMCI, EF.KAUSF_DERIVATION (145) |
 | Key files (write-only, ADM1) | Encoded like sysmoISIM's **EF.USIM_AUTH_KEY (AF20)**: an algorithm byte (Milenage or TUAK), K, OP/OPc. Plus **EF.USIM_SQN (AF30)**. One burn path then serves soft and real cards. Layout reference: `/home/amadeus/Development/ran/usim/pysim-src/pySim/sysmocom_sja2.py` |
 
 The FIDs and service numbers above were re-checked against TS 31.102 j60 and ETSI TS 102 221 V18.4.0 in P1 (KS-UICC-T3): all match. TS 31.102 §4.2.8 also requires service 133 (5G Security Parameters extended) whenever service 123 is available, so a card with EF.5GAUTHKEYS sets both. Services 136 (several NAS security context records) and 146 (NID) are optional and unset in P1.
 
-An opt-in `personality: sysmoISIM-SJA5` also presents that card's ATR, so stock pySim applies its card model.
+What each service brings was checked only in N14, by `ksim-sim validate`'s service table: 122 brings the non-3GPP LOCI and NSC too (§4.4.11.3, §4.4.11.5), and with 133 EF.5GAUTHKEYS is 110 octets (§4.4.11.6). The N3 template had neither (KS-UICC-D3). `ksim-sim validate <image>` checks every image against that table, the ARR references, FIDs and SFIs, record sizes and EF.DIR. It also checks that key files stay unreadable even after ADM1. pySim-shell reads every EF of the template over vpcd, PYSIM_EF_READ=39/39 (KS-UICC-T5).
+
+An opt-in `personality: sysmoISIM-SJA5` (in an image, or `ksim-sim serve --personality`) presents that card's ATR, so stock pySim applies its card model and also tries AF20 and AF30, which the card refuses (ARR 5: never).
 
 ## 4. Algorithms (`src/crypto`)
 
@@ -90,18 +92,26 @@ IApduTransport { reset(cb); transmit(capdu, cb); }
 | `Pcsc` | pcsc-lite on the blocking pool: SCardConnect (T0 or T1), SCardTransmit | Real sysmoISIM cards in the OmniKey 3x21 on the dev PC (setup: `/home/amadeus/.claude/projects/-home-amadeus-Development-ran/memory/pysim-setup-ran.md`); K stays in the card |
 | Card bridge | `ksim-sim serve --pcsc` on the dev PC exposes a real card over the vpcd framing. A UE in the lab VM connects with its `Vpcd` transport in the terminal role | Real cards for UEs running on kaluza-uesim, with no USB passthrough ([`lab.md`](lab.md) §7) |
 
+**vpcd as built (P1 N14).**
+- **Card side, `ksim-sim serve`:** connects to pcscd's vpcd driver on 35963 + n, so `Virtual PCD 00 0n` shows a card. The driver asks for the ATR every few hundred milliseconds to see that the card is still there. Only the ATR after a reset or power-on goes into the trace; a presence poll is answered and reset nothing.
+- **Terminal side, `VpcdTransport`:** one exchange at a time over a stream a card connected; a reset sends 2 then 4.
+- **Readers:** CI uses reader 1 and leaves reader 0 for people. On Ubuntu the vpcd driver listens on 0.0.0.0, not loopback; that is the package's reader.conf, not ours.
+
 A card is attached to exactly one terminal at a time, as a physical card sits in one reader. `ksim-ctl ue <n> sim remove|insert|swap` models card removal and swap ([`cli.md`](cli.md)).
 
 **AT passthrough (v1.x).** On the optional AT port, +CSIM, +CRSM and +CCHO/+CCHC/+CGLA forward APDUs to the same transport. lpac's AT backend, which uses CCHO/CGLA, can then reach the card.
 
 ## 6. Tracing
 
-A decorator on the transport emits GSMTAP type SIM (0x04), sub-type APDU or ATR, in the layout `pySim-trace.py gsmtap-udp` parses. It goes to 127.0.0.1:4729 and to the run's pcap.
+A decorator on the transport (`uicc/trace`) emits GSMTAP type SIM (0x04), sub-type APDU (0x00) or ATR (0x01), in the layout `pySim-trace.py gsmtap-udp` parses: CLA INS P1 P2 P3, the command data, the response data, SW1 SW2.
+- **Records are APDUs, not T=0 TPDUs.** An answer of 61xx or 6Cxx is held and merged with the GET RESPONSE, or the command sent again, that follows on its channel. pySim-trace's GSMTAP source takes each record as a whole APDU, and would otherwise see a SELECT ending in 61xx as failed and lose its place (KS-UICC-B9).
+- **Where records go.** In a run, `ksim-ctl ue <n> sim trace on|off` writes them to the run's `sim.pcapng`. `ksim-sim serve` writes them to `--trace-udp` (127.0.0.1:4729) and `--trace-pcap`.
+- **Selection is always followed.** The decorator tracks the selected file even while the trace is off, so a trace switched on mid-session still masks what it must.
 
 **Redaction is on by default.** These are masked:
 - CK, IK and Kc in AUTHENTICATE responses;
 - VERIFY data;
-- reads and writes of EF.5GAUTHKEYS (4F05), EF.5GS3GPPNSC (4F03), AF20 and AF30.
+- reads and writes of the key files, by FID or by SFI in the ADF and DF.5GS. Those are EF.KEYS and EF.KEYSPS (3G CK and IK), the NAS security contexts (4F03, 4F04), EF.5GAUTHKEYS (4F05), AF20 and AF30. The same set is refused by `sim read` and left out of `ksim-sim export` (`os::key_fid`).
 
 Unredacted traces need an explicit test-only flag and land in a 0600 file.
 
@@ -109,7 +119,7 @@ Unredacted traces need an explicit test-only flag and land in a 0600 file.
 
 - **Native format:** YAML, a DF/EF tree with FCP attributes and contents in hex or typed form. YAML because it is diffable and round-trips through the pySim oracle.
 - **Secrets:** K, OPc or TOPc, ADM1 and PINs live in **a separate sealed file** (AES-256-GCM under a KEK held in a 0600 file or systemd-creds), never in the YAML.
-- **Import:** from pySim-shell `fsdump --json`. **Export:** as a pySim-shell script with keys excluded. SAIP profile packages are imported later.
+- **Import:** `ksim-sim import --fsdump <file> --template <yaml> --out <yaml>` takes the contents from a pySim-shell `fsdump` (without `--json`), file by file by name, into a copy of the template. Key files and NAS state are kept from the template. **Export:** `ksim-sim export` writes a pySim-shell script (`select`, `update_binary`, `update_record`). It leaves out the key files, EF.ARR, the PINs and whatever the ARR keeps from a reader. SAIP profile packages are imported later.
 - **Templates:** `cards/usim-5g.yaml` and similar templates set UST/EST, SUCI_Calc_Info (scheme, key ID, home network public key, which is public topology config), the routing indicator, and the PLMN lists.
 
 ## 8. Test subscriber ranges and provisioning

@@ -31,6 +31,8 @@
 
 #include <CLI/CLI.hpp>
 
+#include "card.hpp"
+
 #include <cstdio>
 #include <exception>
 #include <nlohmann/json.hpp>
@@ -412,8 +414,53 @@ static int run_main(int argc, char** argv) {
     prov_cmd->add_option("--dnn", dnn, "the session's DNN");
     prov_cmd->add_flag("--replace", replace, "overwrite subscribers of the block that exist");
     prov_cmd->add_flag("--dry-run", dry_run, "kaluza: print each bundle with its keys as placeholders, send nothing");
+    // P1 N14: the card on a virtual reader, and the card images.
+    ksim::sim::ServeOptions so;
+    auto* serve_cmd = app.add_subcommand("serve", "the soft card on pcscd's vpcd reader (sim-uicc.md section 5)");
+    serve_cmd->add_option("--template", so.card.tmpl, "the card image template");
+    serve_cmd->add_option("--imsi", so.card.imsi, "the sim-range IMSI the card is personalised for");
+    serve_cmd->add_option("--sealed", so.card.sealed_dir, "the sealed card secrets' directory");
+    serve_cmd->add_option("--kek", so.card.kek, "the KEK file");
+    serve_cmd->add_flag("--test-keys", so.card.test_keys, "TS 35.208 test set 1 and test PINs (CI and lab cards only)");
+    serve_cmd->add_option("--vpcd", so.vpcd, "vpcd's host:port (reader 0 is 35963)");
+    serve_cmd->add_option("--trace-udp", so.trace_udp, "GSMTAP-SIM to host:port (4729)");
+    serve_cmd->add_option("--trace-pcap", so.trace_pcap, "GSMTAP-SIM into a pcapng file (0600)");
+    serve_cmd->add_flag("--no-redact", so.no_redact, "trace keys and PINs in clear (with --test-keys only)");
+    serve_cmd->add_option("--seconds", so.seconds, "stop after this long (0: on SIGINT or SIGTERM)");
+    serve_cmd->add_option("--personality", so.card.personality, "present a real card's ATR (sysmoISIM-SJA5)");
+    std::string image;
+    bool access = false;
+    auto* validate_cmd = app.add_subcommand("validate", "check a card image (TS 102 221, TS 31.102)");
+    validate_cmd->add_option("image", image, "the card image")->required();
+    validate_cmd->add_flag("--access", access, "each EF's READ access after a reset");
+    ksim::sim::CardSource es;
+    auto* export_cmd = app.add_subcommand("export", "the card's contents as a pySim-shell script, keys left out");
+    export_cmd->add_option("--template", es.tmpl, "the card image template");
+    export_cmd->add_option("--imsi", es.imsi, "the sim-range IMSI");
+    export_cmd->add_option("--sealed", es.sealed_dir, "the sealed card secrets' directory");
+    export_cmd->add_option("--kek", es.kek, "the KEK file");
+    export_cmd->add_flag("--test-keys", es.test_keys, "TS 35.208 test set 1 and test PINs");
+    std::string fsdump;
+    std::string import_out;
+    std::string import_tmpl = "cards/usim-5g.yaml";
+    auto* import_cmd = app.add_subcommand("import", "a template's contents from a pySim-shell fsdump");
+    import_cmd->add_option("--fsdump", fsdump, "pySim-shell fsdump output (without --json)")->required();
+    import_cmd->add_option("--template", import_tmpl, "the template it starts from");
+    import_cmd->add_option("--out", import_out, "the new image (0600)")->required();
     CLI11_PARSE(app, argc, argv);
     ::umask(077);
+    if (serve_cmd->parsed()) {
+        return ksim::sim::serve(so);
+    }
+    if (validate_cmd->parsed()) {
+        return ksim::sim::validate(image, access);
+    }
+    if (export_cmd->parsed()) {
+        return ksim::sim::export_script(es);
+    }
+    if (import_cmd->parsed()) {
+        return ksim::sim::import_fsdump(fsdump, import_tmpl, import_out);
+    }
     if (init_cmd->parsed()) {
         return init(master, kek);
     }

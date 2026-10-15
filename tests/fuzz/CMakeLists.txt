@@ -27,3 +27,6 @@ ksim_add_fuzzer(fuzz_nas_ies SOURCES fuzz_nas_ies.cpp LIBS ksim::proc)
 ksim_add_fuzzer(fuzz_uu SOURCES fuzz_uu.cpp LIBS ksim::codec_air ksim::codec_pdcp ksim::codec_rrc ksim::entity)
 ksim_add_fuzzer(fuzz_ngap_proc SOURCES fuzz_ngap_proc.cpp LIBS ksim::proc)
 ksim_add_fuzzer(fuzz_netd_req SOURCES fuzz_netd_req.cpp LIBS ksim::net)
+# P1 N14: the vpcd framing in front of the soft card, and the APDU trace.
+ksim_add_fuzzer(fuzz_vpcd SOURCES fuzz_vpcd.cpp LIBS ksim::uicc)
+target_compile_definitions(fuzz_vpcd PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

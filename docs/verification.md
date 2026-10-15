@@ -26,7 +26,7 @@ They never come from kaluza-core ([ADR 0005](adr/0005-independence-from-kaluza-c
 |---|---|
 | NGAP, RRC, F1AP, E1AP, XnAP, NAS, GTP-U, NR-U | **tshark 4.6.4** (feed pcaps on stdin; AppArmor blocks paths under `~/Development`) and **pycrate** (in a venv), both directions. Every PDU type in the v1 procedure list must round-trip and decode field by field |
 | RRC (extra) | asn1c-JER versus tshark leaf comparison, as `/home/amadeus/Development/ran/kaluza-ue/tools/rrc-oracle.py` does |
-| Card | **pySim-shell** over vpcd reads every EF of the soft card; real sysmoISIM cards answer the same APDU sequences; `pySim-trace.py gsmtap-udp` decodes our traces |
+| Card | **pySim-shell** over vpcd reads every EF of the soft card; real sysmoISIM cards answer the same APDU sequences; `pySim-trace.py gsmtap-udp` decodes our traces. As built (P1 N14): `tools/ci.d/55-pysim.sh` runs `tests/oracles/pysim_shell.py` in full mode. It prints PYSIM_EF_READ=n/n (each EF read and decoded, or refused with 6982 as its ARR says), PYSIM_TRACE_READS=n/n with no unknown file, tshark on the trace, the test K absent, and an fsdump imported into an image that validates |
 | Crypto | KATs: TS 35.208 (MILENAGE), 35.233 (TUAK), 35.236 (MILENAGE-256), 33.501 C.4 (SUCI), 33.401 Annex C (AES NEA2/NIA2), the SAGE documents (SNOW 3G), 35.223 (ZUC) |
 | Key chain | A separate, minimal Python oracle written from TS 33.501 Annex A and 33.220 B.2 (FC values checked against j70). Final proof: SMC and handovers succeed against both kaluza-core and Open5GS |
 

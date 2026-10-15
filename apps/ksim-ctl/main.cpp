@@ -22,6 +22,7 @@
 //     ue <sel> service-request [--wait DUR] | sim remove|insert | airplane on|off
 //     ue <sel> sms-send <digits> <text> [--ucs2] [--srr] [--vp N] | sms-list | sms-memory full|available
 //     ue <sel> register --update
+//     ue <sel> sim info | sim read <EF> | sim trace on|off
 //     stub [release --ue SUPI --psi N [--cause C] | ping-ue --ue SUPI --psi N [--seq N]
 //           | deregister --ue SUPI [--rereg] | restart | t3512 --seconds N | sms-sub --ue SUPI [--off]]
 //           (--socket <stub ctl>)
@@ -353,6 +354,17 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
         json body = json::object();
         body["state"] = f.words[1];
         return call(c, "POST", base + "/sms-memory", body);
+    }
+    if (cmd == "sim" && f.words.size() >= 2 && f.words[1] == "info") {
+        return call(c, "GET", base + "/sim");
+    }
+    if (cmd == "sim" && f.words.size() >= 3 && f.words[1] == "read") {
+        return call(c, "GET", base + "/sim-read?ef=" + encode(f.words[2]));
+    }
+    if (cmd == "sim" && f.words.size() >= 3 && f.words[1] == "trace" && (f.words[2] == "on" || f.words[2] == "off")) {
+        json body = json::object();
+        body["state"] = f.words[2];
+        return call(c, "POST", base + "/sim-trace", body);
     }
     if (cmd == "sim" && f.words.size() >= 2 && (f.words[1] == "remove" || f.words[1] == "insert")) {
         json body = json::object();

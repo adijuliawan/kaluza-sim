@@ -119,7 +119,7 @@ struct Net {
                     du.on_frame(f);
                 }
             });
-        }, node::UeTaps{}, ue_net);
+        }, taps(), ue_net);
     }
 
     ~Net() {
@@ -203,6 +203,14 @@ struct Net {
                      },
                      du_f1u.get()};
     std::unique_ptr<node::UeDevice> ue;
+    /// The card's trace records while `sim_trace(true)` (N14): (sub-type, GSMTAP-SIM payload).
+    std::vector<std::pair<std::uint8_t, Bytes>> sim_records;
+
+    node::UeTaps taps() {
+        node::UeTaps t;
+        t.sim = [this](std::uint8_t sub, ByteView p, const std::string&) { sim_records.emplace_back(sub, Bytes(p.begin(), p.end())); };
+        return t;
+    }
     bool air_down = false;   // N12: the cell out of reach both ways (radio link failure)
 };
 

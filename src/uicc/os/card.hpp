@@ -82,6 +82,8 @@ public:
     /// current, security status cleared. Returns the ATR.
     const Bytes& reset();
     const Bytes& atr() const noexcept { return config_.atr; }
+    /// Another ATR from the next reset on (an image's personality).
+    void set_atr(Bytes atr) { config_.atr = std::move(atr); }
 
     /// One command APDU in, one response APDU out. An undecodable command gets
     /// SW 6700 (wrong length) or 6E00/6D00 as the class or instruction is.

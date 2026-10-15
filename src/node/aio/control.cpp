@@ -449,6 +449,73 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         return run_ue_command(aio, req,
                               UeCommand{[present](UeDevice& u) { return u.sim(present); }, {}, {}, {}, "sim"});
     });
+    // ---- the card (N14): info, read, trace ----
+    server.get("/v1/ue/:sel/sim", [&aio](const Request& req) {
+        const std::string sel = req.params.at("sel");
+        auto s = aio.call<Reply>([&aio, sel] {
+            UeDevice* ue = aio.ue(sel);
+            if (ue == nullptr) {
+                return Reply::fail(Exit::unknown, "no such UE");
+            }
+            const SimInfo i = ue->sim_info();
+            Reply r;
+            r.set("UE", ue->subject().substr(3));
+            r.set("PRESENT", i.present ? "1" : "0");
+            r.set("ICCID", i.iccid);
+            r.set("IMSI", i.imsi);
+            r.set("MSISDN", i.msisdn);
+            std::string ust;
+            for (unsigned n : i.ust) {
+                ust += (ust.empty() ? "" : ",") + std::to_string(n);
+            }
+            r.set("UST", ust);
+            r.set("SUCI_SCHEMES", i.suci_schemes);
+            r.set("ROUTING_INDICATOR", i.routing_indicator);
+            r.set("ATR", i.atr);
+            r.set("TRACE", ue->sim_tracing() ? "on" : "off");
+            return r;
+        });
+        return s ? *s : unsound();
+    });
+    server.get("/v1/ue/:sel/sim-read", [&aio](const Request& req) {
+        const std::string sel = req.params.at("sel");
+        const std::string ef = req.arg("ef");
+        if (ef.empty()) {
+            return Reply::fail(Exit::usage, "sim read <EF name, FID or FID path>");
+        }
+        auto s = aio.call<Reply>([&aio, sel, ef] {
+            UeDevice* ue = aio.ue(sel);
+            if (ue == nullptr) {
+                return Reply::fail(Exit::unknown, "no such UE");
+            }
+            auto f = ue->sim_read(ef);
+            if (!f) {
+                return Reply::fail(Exit::wrong_state, f.error().what);
+            }
+            Reply r;
+            r.set("EF", f->name);
+            r.set("PATH", f->path);
+            if (f->records) {
+                r.set("RECORDS", static_cast<std::int64_t>(f->contents.size()));
+                for (std::size_t i = 0; i < f->contents.size(); ++i) {
+                    r.set("RECORD." + std::to_string(i + 1), to_hex(f->contents[i]));
+                }
+            } else {
+                r.set("DATA", to_hex(f->contents.front()));
+            }
+            return r;
+        });
+        return s ? *s : unsound();
+    });
+    server.post("/v1/ue/:sel/sim-trace", [&aio](const Request& req) {
+        const std::string state = req.arg("state");
+        if (state != "on" && state != "off") {
+            return Reply::fail(Exit::usage, "sim trace on|off");
+        }
+        const bool on = state == "on";
+        return run_ue_command(aio, req,
+                              UeCommand{[on](UeDevice& u) { return u.sim_trace(on); }, {}, {}, {}, "sim trace"});
+    });
     server.post("/v1/ue/:sel/airplane", [&aio](const Request& req) {
         const std::string state = req.arg("state");
         if (state != "on" && state != "off") {

@@ -41,6 +41,7 @@
 #include "proc/ue/rrc/rrc.hpp"
 #include "uicc/os/card.hpp"
 #include "uicc/terminal/terminal.hpp"
+#include "uicc/trace/trace.hpp"
 #include "uicc/transport/transport.hpp"
 
 namespace ksim::node {
@@ -84,6 +85,20 @@ struct PingRequest {
 struct UeTaps {
     std::function<void(std::string_view channel, ByteView pdu, const std::string& supi)> rrc;
     std::function<void(bool uplink, ByteView plain, const std::string& supi)> nas;
+    /// The card's APDU trace, GSMTAP-SIM records (N14), while `sim trace on`.
+    std::function<void(std::uint8_t sub_type, ByteView payload, const std::string& supi)> sim;
+};
+
+/// What `sim info` shows: read from the card in the reader, never a key.
+struct SimInfo {
+    bool present = true;
+    std::string atr;
+    std::string iccid;
+    std::string imsi;
+    std::string msisdn;
+    std::vector<unsigned> ust;
+    std::string suci_schemes;        // EF.SUCI_Calc_Info's protection scheme identifiers
+    std::string routing_indicator;
 };
 
 class UeDevice {
@@ -117,6 +132,21 @@ public:
     Result<void> register_update();
     /// The UICC taken out of or put back into the reader (TS 24.501 5.5.2.2.1).
     Result<void> sim(bool present);
+    /// The card's APDU trace into the run's sim.pcapng (sim-uicc.md §6).
+    Result<void> sim_trace(bool on);
+    bool sim_tracing() const noexcept { return tracer_.tracing(); }
+    SimInfo sim_info() const;
+    /// One EF by name ("EF.IMSI", "IMSI"), FID ("6F07") or FID path
+    /// ("7FF0/5FC0/4F01"): its name, path and contents (one entry per record).
+    /// Key files and NAS security state are refused, and so is what the card's
+    /// access rules would not let a reader read in its present state.
+    struct SimEf {
+        std::string name;
+        std::string path;
+        std::vector<Bytes> contents;
+        bool records = false;
+    };
+    Result<SimEf> sim_read(std::string_view ef) const;
     /// Airplane mode: on, a registered UE de-registers as for switch-off and the
     /// radio goes off (the card keeps its state); off, the UE powers on again.
     Result<void> airplane(bool on);
@@ -182,7 +212,9 @@ private:
     UeDeviceConfig cfg_;
     std::unique_ptr<uicc::os::Card> card_;
     uicc::InProcTransport transport_;
+    uicc::trace::TracingTransport tracer_;   // between the reader and the terminal: off until sim trace on
     uicc::Terminal terminal_;
+    std::function<void(std::uint8_t, ByteView, const std::string&)> sim_tap_;
     std::unique_ptr<proc::ue::UeRrc> rrc_;
     std::unique_ptr<proc::ue::Mm> mm_;
     std::unique_ptr<proc::ue::Sm> sm_;

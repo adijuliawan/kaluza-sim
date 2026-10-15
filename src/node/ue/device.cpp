@@ -6,6 +6,9 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <cctype>
+
+#include "uicc/image/image.hpp"
 
 namespace ksim::node {
 
@@ -23,8 +26,8 @@ std::string guti_text(const nas::ie::MobileIdentity& g) {
 
 UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::os::Card> card,
                    std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net)
-    : ex_(ex), cfg_(std::move(cfg)), card_(std::move(card)), transport_(ex, card_.get()), terminal_(transport_),
-      events_(events), net_(cfg_.netns.empty() ? nullptr : net) {
+    : ex_(ex), cfg_(std::move(cfg)), card_(std::move(card)), transport_(ex, card_.get()), tracer_(transport_, {}),
+      terminal_(tracer_), sim_tap_(taps.sim), events_(events), net_(cfg_.netns.empty() ? nullptr : net) {
     const std::string subject = "ue:imsi-" + cfg_.supi;
     proc::ue::RrcConfig rc;
     rc.id = subject;
@@ -322,6 +325,138 @@ Result<void> UeDevice::sim(bool present) {
         }
     }
     return {};
+}
+
+Result<void> UeDevice::sim_trace(bool on) {
+    if (on && !sim_tap_) {
+        return make_error(Errc::unsupported, 0, "this run has no SIM capture");
+    }
+    if (on == tracer_.tracing()) {
+        return make_error(Errc::invalid_argument, 0, on ? "the trace is on already" : "the trace is off already");
+    }
+    if (on) {
+        tracer_.set_sink([tap = sim_tap_, supi = cfg_.supi](std::uint8_t sub, Bytes payload) { tap(sub, payload, supi); });
+    } else {
+        tracer_.set_sink({});
+    }
+    events_.emit("ue.sim.trace", subject(), {{"on", on ? "1" : "0"}});
+    return {};
+}
+
+namespace {
+
+std::string fid4(std::uint16_t f) { return fmt::format("{:04X}", f); }
+
+std::string ef_path(const uicc::os::File& f) {
+    std::vector<const uicc::os::File*> up;
+    for (const uicc::os::File* q = &f; q != nullptr; q = q->parent) {
+        up.push_back(q);
+    }
+    std::string p;
+    for (auto it = up.rbegin(); it != up.rend(); ++it) {
+        p += (p.empty() ? "" : "/") + fid4((*it)->fid);
+    }
+    return p;
+}
+
+const uicc::os::File* find_ef(const uicc::os::File& df, const std::function<bool(const uicc::os::File&)>& match) {
+    for (const auto& c : df.children) {
+        if (!uicc::os::is_df(c->kind) && match(*c)) {
+            return c.get();
+        }
+    }
+    for (const auto& c : df.children) {
+        if (uicc::os::is_df(c->kind)) {
+            if (const auto* f = find_ef(*c, match)) {
+                return f;
+            }
+        }
+    }
+    return nullptr;
+}
+
+std::string lower(std::string_view s) {
+    std::string out(s);
+    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return out;
+}
+
+} // namespace
+
+SimInfo UeDevice::sim_info() const {
+    SimInfo s;
+    s.present = sim_present_;
+    s.atr = to_hex(card_->atr());
+    const uicc::os::File& mf = card_->mf();
+    auto ef = [&](std::uint16_t fid) { return find_ef(mf, [fid](const uicc::os::File& f) { return f.fid == fid; }); };
+    if (const auto* f = ef(0x2FE2)) {
+        s.iccid = uicc::image::decode_iccid(f->data);
+    }
+    if (const auto* f = ef(0x6F07)) {
+        s.imsi = uicc::image::decode_imsi(f->data);
+    }
+    if (const auto* f = ef(0x6F40); f != nullptr && !f->records.empty()) {
+        s.msisdn = uicc::image::decode_msisdn_record(f->records[0]);
+    }
+    if (const auto* f = ef(0x6F38)) {
+        s.ust = uicc::image::services(f->data);
+    }
+    if (const auto* f = ef(0x4F07); f != nullptr && f->data.size() >= 2 && f->data[0] == 0xA0) {
+        // TS 31.102 4.4.11.8: 'A0' L, then (identifier, key index) pairs.
+        const std::size_t n = std::min<std::size_t>(f->data[1], f->data.size() - 2);
+        for (std::size_t i = 0; i + 1 < n; i += 2) {
+            s.suci_schemes += (s.suci_schemes.empty() ? "" : ",") + std::to_string(f->data[2 + i]);
+        }
+    }
+    if (const auto* f = ef(0x4F0A); f != nullptr && f->data.size() >= 2) {
+        for (std::size_t i = 0; i < 2; ++i) {   // 4.4.11.11: four BCD digits, 'F' when fewer
+            for (std::uint8_t n : {static_cast<std::uint8_t>(f->data[i] & 0x0F), static_cast<std::uint8_t>(f->data[i] >> 4)}) {
+                if (n <= 9) {
+                    s.routing_indicator.push_back(static_cast<char>('0' + n));
+                }
+            }
+        }
+    }
+    return s;
+}
+
+Result<UeDevice::SimEf> UeDevice::sim_read(std::string_view want) const {
+    const std::string w = lower(want);
+    const uicc::os::File* f = nullptr;
+    const uicc::os::File& mf = card_->mf();
+    if (w.find('/') != std::string::npos) {
+        f = find_ef(mf, [&](const uicc::os::File& x) {
+            const std::string p = lower(ef_path(x));
+            return p == w || (p.size() > w.size() && p.compare(p.size() - w.size(), w.size(), w) == 0 &&
+                              p[p.size() - w.size() - 1] == '/');
+        });
+    } else {
+        f = find_ef(mf, [&](const uicc::os::File& x) {
+            const std::string n = lower(x.name);
+            return n == w || n == "ef." + w || lower(fid4(x.fid)) == w;
+        });
+    }
+    if (f == nullptr) {
+        return make_error(Errc::invalid_argument, 0, "no such EF on the card");
+    }
+    // Key material and the NAS security state stay in the card (sim-uicc.md §6),
+    // and what the card's access rules keep from a reader stays too.
+    if (f->secret || uicc::os::key_fid(f->fid)) {
+        return make_error(Errc::invalid_argument, 0, "that EF holds keys: sim read refuses it");
+    }
+    if (!card_->allowed(*f, 0x01)) {
+        return make_error(Errc::invalid_argument, 0, "the card's access rule does not let that EF be read");
+    }
+    SimEf out;
+    out.name = f->name;
+    out.path = ef_path(*f);
+    out.records = uicc::os::is_record(f->kind);
+    if (out.records) {
+        out.contents = f->records;
+    } else {
+        out.contents.push_back(f->data);
+    }
+    return out;
 }
 
 Result<void> UeDevice::airplane(bool on) {

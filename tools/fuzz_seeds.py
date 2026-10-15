@@ -86,6 +86,25 @@ def main() -> int:
         seq("0070000001", "01A4040C07A0000000871002", "0070800100"),
         seq("00A4000C022F06", "00A201040383010100", "00B2000228", "00B2000328"),
     ]
+    # fuzz_vpcd: a cut octet, vpcd frames for the card (first half), then
+    # (length, command, length, response) pairs for the trace's Redactor.
+    def vframes(*payloads):
+        return b"".join(len(p).to_bytes(2, "big") + p for p in payloads)
+    def vseed(cut, stream, raw):
+        raw = raw + bytes(max(0, len(stream) + 1 - len(raw)))
+        return bytes([cut]) + stream + raw[:len(stream) + 1]
+    ex = lambda c, r: bytes([len(c)]) + c + bytes([len(r)]) + r
+    h = bytes.fromhex
+    seeds["fuzz_vpcd"] = [
+        vseed(0, vframes(b"\x01", b"\x02", b"\x04", h("00A40004023F00"), h("00C0000025"), b"\x04"),
+              ex(h("00A40004023F00"), h("6125")) + ex(h("00C0000025"), h("62" + "00" * 35 + "9000"))),
+        vseed(3, vframes(b"\x02", b"\x04", h("00A4040C07A0000000871002"), h("00A4000C025FC0"), h("00B0850006"), b"\x00"),
+              ex(h("00A4000C025FC0"), h("9000")) + ex(h("00B0850004"), h("112233449000"))),
+        vseed(6, vframes(b"\x01", h("0088008122" + "10" + "00" * 16 + "10" + "00" * 16)),
+              ex(h("0088008122" + "10" + "00" * 16 + "10" + "00" * 16), h("6135"))
+              + ex(h("00C0000035"), h("DB08" + "00" * 8 + "10" + "11" * 16 + "10" + "22" * 16 + "08" + "33" * 8 + "9000"))),
+        vseed(1, vframes(b"\x04", h("00B0000000")), ex(h("00B0000000"), h("6C09")) + ex(h("00B0000009"), h("00" * 9 + "9000"))),
+    ]
     # fuzz_uu: a selector octet, then a KAIR frame (0), a PDCP PDU (1), length-prefixed
     # PDUs for a PDCP entity (2), or an RRC message for one of the readers (3-11): the
     # builder samples of tests/unit/asn1/rrc_samples.hpp.

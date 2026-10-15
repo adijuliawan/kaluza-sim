@@ -4,16 +4,22 @@
 - It keeps **nr-cli's verbs and its `<node> --exec '<cmd>'` form**, so moving a gate off UERANSIM changes the binary and the node name, not the logic.
 - New commands cover the device, the SIM, radio and mobility, the data plane, events and the RAN nodes.
 
-**As built through P1 N13:**
+**As built through P1 N14:**
 - **Verbs:**
   - `nodes`, `info`, `version`, `capabilities`, `faults list`, `ues`, `stop`;
   - `ue <sel> status|power on|power off --switch-off|--abrupt|register|deregister normal|switch-off|wait|events` (N8, `--abrupt` N12);
   - `ue <sel> ps-list|ps-establish ipv4|ps-release|ping` (N10), `ifaces|exec` and `ping --df` (N11), `service-request`, `sim remove|insert` and `airplane on|off` (N12);
   - `ue <sel> sms-send <digits> <text> [--ucs2] [--srr] [--vp N]|sms-list|sms-memory full|available` and `register --update` (N13);
+  - `ue <sel> sim info|sim read <EF>|sim trace on|off` (N14): `read` takes a name, FID or FID path and refuses key files, NAS state and what the ARR keeps from a reader; `trace` writes the run's `sim.pcapng`;
   - `wait`, `events`;
   - `gnb <name> ue-list|amf-list` (N8), `ue-release <ue> [--cause C]|restart` (N12);
   - `stub release|ping-ue` (N10), `stub deregister [--rereg]|t3512 --seconds N|restart` (N12) and `stub sms-sub --ue SUPI [--off]` (N13), with `--socket` on `ksim-corestub`'s control socket.
 - **The run:** `--run D`, else `$KSIM_RUN`, else `$KSIM_RUNS/latest` (`runs/latest`); `--socket S` reaches any control socket, e.g. `ksim-corestub`'s, with `stub`.
+- **`ksim-sim`** (the offline card tool) has `range init|derive|provision|deprovision` (N8, N9) and, from N14:
+  - `serve [--test-keys | --sealed D --kek F] [--imsi I] [--template Y] [--vpcd host:port] [--personality sysmoISIM-SJA5] [--trace-udp host:port] [--trace-pcap F] [--seconds N]`;
+  - `validate <image> [--access]`;
+  - `export [--test-keys | --sealed D --kek F] [--imsi I]`;
+  - `import --fsdump F [--template Y] --out Y`.
 - **Unbuilt verbs** answer exit 5 and name the milestone that brings them. The `--exec` form and `--format=nrcli` come with N16.
 - **Routes:** in [`src/api/openapi.yaml`](../src/api/openapi.yaml).
 

@@ -99,6 +99,28 @@ paths:
         again, then a registration)
       parameters: [{$ref: "#/components/parameters/sel"}]
       responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/sim:
+    get:
+      summary: >-
+        N14: PRESENT, ICCID, IMSI, MSISDN, UST (the services available), SUCI_SCHEMES,
+        ROUTING_INDICATOR, ATR, TRACE: read from the card in the reader, never a key
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/sim-read:
+    get:
+      summary: >-
+        N14: ef (a name such as EF.IMSI or IMSI, a FID, or a FID path): EF, PATH, and DATA or
+        RECORDS with RECORD.<n>, in hex. Key files, the NAS security contexts and what
+        the card's ARR keeps from a reader are refused (exit 6)
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/sim-trace:
+    post:
+      summary: >-
+        N14: state=on|off: the card's APDUs into the run's sim.pcapng as GSMTAP-SIM,
+        redacted (sim-uicc.md 6); event ue.sim.trace
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
   /v1/ue/{sel}/airplane:
     post:
       summary: >-

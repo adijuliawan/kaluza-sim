@@ -98,6 +98,17 @@ until grep -q '^CTL=' "$KSIM_RUNS/$core-ksim.out" 2>/dev/null; do
 done
 export RUN
 
+# KSIM_SIM_TRACE=1: every UE's card trace on from the start (N14): sim.pcapng,
+# GSMTAP-SIM, redacted (sim-uicc.md 6). The component run asks for it.
+if [ "${KSIM_SIM_TRACE:-0}" = 1 ]; then
+    _n=$("$KSIM_CTL" --run "$RUN" ues 2>/dev/null | sed -n 's/^UES=//p')
+    _i=1
+    while [ "$_i" -le "${_n:-0}" ]; do
+        "$KSIM_CTL" --run "$RUN" ue "$_i" sim trace on >/dev/null || echo "SIM_TRACE: UE $_i refused"
+        _i=$((_i + 1))
+    done
+fi
+
 [ $# -gt 0 ] || set -- "$ROOT"/gates/verification/ksim-p1-*.sh
 rc=0
 for g in "$@"; do

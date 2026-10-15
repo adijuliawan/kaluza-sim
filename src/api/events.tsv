@@ -143,3 +143,4 @@ sms.mt.deliver	23.040 9.2.2.1	an SMS-DELIVER stored in EF.SMS; from, record, dcs
 sms.mt.duplicate	24.011 5.3.2.1	a CP-DATA repeated on an MT transaction the UE answered: acknowledged again, not delivered; ti
 sms.memory	24.011 6.3.2	sms-memory: full or available; full, network_told (the network had a #22)
 sms.discard	24.011 9	a CP or RP message the UE could not use; what
+ue.sim.trace	sim	sim trace on or off: the card's APDUs go to the run's sim.pcapng as GSMTAP-SIM, redacted (sim-uicc.md 6); on

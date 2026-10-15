@@ -226,11 +226,27 @@ os::File* find_child(os::File* df, std::uint16_t fid) { return df != nullptr ? d
 
 } // namespace
 
+std::optional<Bytes> personality_atr(std::string_view name) {
+    // sim-uicc.md §3: a real card's ATR, so pySim applies that card's model
+    // (it then also looks for the card's own files, AF20 and AF30 among them).
+    if (name == "sysmoISIM-SJA5") {
+        return from_hex("3B9F96801F878031E073FE211B674A357530350251CC").value_or(Bytes{});
+    }
+    return std::nullopt;
+}
+
 std::unique_ptr<os::Card> load(const Yaml& image, const secrets::SecretMap& s) {
-    image.only({"atr", "t0", "channels", "pins", "mf"});
+    image.only({"atr", "personality", "t0", "channels", "pins", "mf"});
     os::CardConfig cfg;
     if (image.has("atr")) {
         cfg.atr = hex_of(image.at("atr"));
+    }
+    if (image.has("personality")) {
+        auto atr = personality_atr(image.at("personality").as<std::string>());
+        if (!atr) {
+            image.at("personality").fail("not a personality this card has (sysmoISIM-SJA5)");
+        }
+        cfg.atr = std::move(*atr);
     }
     cfg.t0 = image.get<bool>("t0", true);
     cfg.channels = image.get<std::uint8_t>("channels", 4);
@@ -376,6 +392,72 @@ Result<Bytes> encode_msisdn_record(std::string_view d, std::size_t record_len) {
         rec[x + 2 + i / 2] = static_cast<std::uint8_t>(lo | (hi << 4));
     }
     return rec;
+}
+
+namespace {
+
+/// BCD digits, low nibble first, up to the first filler.
+std::string bcd_digits(ByteView b) {
+    std::string out;
+    for (std::uint8_t o : b) {
+        for (std::uint8_t n : {static_cast<std::uint8_t>(o & 0x0F), static_cast<std::uint8_t>(o >> 4)}) {
+            if (n > 9) {
+                return out;
+            }
+            out.push_back(static_cast<char>('0' + n));
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+std::string decode_imsi(ByteView ef) {
+    if (ef.size() < 2 || ef[0] == 0 || ef[0] == 0xFF || ef[0] > 8 || ef.size() < 1u + ef[0]) {
+        return {};
+    }
+    // The first nibble is the type and parity; the digits follow.
+    std::string out;
+    const std::uint8_t first = ef[1] >> 4;
+    if (first > 9) {
+        return {};
+    }
+    out.push_back(static_cast<char>('0' + first));
+    for (std::size_t i = 1; i < ef[0]; ++i) {
+        for (std::uint8_t n : {static_cast<std::uint8_t>(ef[1 + i] & 0x0F), static_cast<std::uint8_t>(ef[1 + i] >> 4)}) {
+            if (n > 9) {
+                return out;
+            }
+            out.push_back(static_cast<char>('0' + n));
+        }
+    }
+    return out;
+}
+
+std::string decode_iccid(ByteView ef) { return bcd_digits(ef.subspan(0, std::min<std::size_t>(ef.size(), 10))); }
+
+std::string decode_msisdn_record(ByteView rec) {
+    if (rec.size() < 14) {
+        return {};
+    }
+    const std::size_t x = rec.size() - 14;
+    const std::size_t n = rec[x];
+    if (n < 2 || n > 11) {
+        return {};
+    }
+    return bcd_digits(rec.subspan(x + 2, n - 1));
+}
+
+std::vector<unsigned> services(ByteView ust) {
+    std::vector<unsigned> out;
+    for (std::size_t i = 0; i < ust.size(); ++i) {
+        for (unsigned b = 0; b < 8; ++b) {
+            if ((ust[i] >> b & 1) != 0) {
+                out.push_back(static_cast<unsigned>(i * 8 + b + 1));
+            }
+        }
+    }
+    return out;
 }
 
 Result<Subscriber> range_subscriber(std::string_view imsi) {

@@ -56,6 +56,9 @@ Result<std::unique_ptr<Capture>> Capture::open(const std::string& dir) {
     if (auto r = open_file(c->gtpu_, dir + "/gtpu.pcapng", "gtpu", pcap::LinkType::ipv4); !r) {
         return r.error();
     }
+    if (auto r = open_file(c->sim_, dir + "/sim.pcapng", "sim", pcap::LinkType::ipv4); !r) {
+        return r.error();
+    }
     return c;
 }
 
@@ -118,6 +121,21 @@ void Capture::gtpu(const Endpoint& from, const Endpoint& to, ByteView pdu) {
     std::fflush(gtpu_.f);
 }
 
+void Capture::sim(std::uint8_t sub_type, ByteView payload, const std::string& supi) {
+    pcap::Udp4 u;
+    u.src = {127, 0, 0, 1};
+    u.dst = {127, 0, 0, 1};
+    u.dst_port = pcap::kGsmtapPort;
+    auto frame = pcap::ipv4_udp(u, pcap::gsmtap(pcap::kGsmtapSim, sub_type, payload));
+    const std::lock_guard lock(mu_);
+    if (!frame || sim_.f == nullptr) {
+        return;
+    }
+    ++stats_.sim;
+    (void)sim_.w->write(sim_.ifc, wall_ns(), *frame, "imsi-" + supi);
+    std::fflush(sim_.f);
+}
+
 void Capture::rrc(std::string_view channel, ByteView pdu, const std::string& supi) {
     const std::lock_guard lock(mu_);
     ++stats_.uu;
@@ -138,7 +156,7 @@ CaptureStats Capture::stats() const {
 
 void Capture::close() {
     const std::lock_guard lock(mu_);
-    for (File* f : {&ngap_, &f1ap_, &e1ap_, &gtpu_, &uu_}) {
+    for (File* f : {&ngap_, &f1ap_, &e1ap_, &gtpu_, &uu_, &sim_}) {
         f->w.reset();
         if (f->f != nullptr) {
             std::fclose(f->f);

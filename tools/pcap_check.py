@@ -3,8 +3,9 @@
 # SPDX-License-Identifier: LicenseRef-kaluza-sim-private
 """The run capture check (P1 N8; verification.md section 2): every frame of a
 run's ngap.pcapng, f1ap.pcapng, e1ap.pcapng and uu.pcapng through two decoders
-that are not ours, and (P1 N10) every frame of gtpu.pcapng (N3 and F1-U as
-IPv4/UDP 2152) through tshark.
+that are not ours, (P1 N10) every frame of gtpu.pcapng (N3 and F1-U as
+IPv4/UDP 2152) through tshark, and (P1 N14) every frame of sim.pcapng (the card
+traces, GSMTAP-SIM) through tshark when a trace was on.
 
   tshark   the whole capture on stdin (AppArmor keeps it out of ~/Development);
            a frame fails on a malformed mark or an expert item of severity
@@ -36,6 +37,7 @@ from ksimoracle import asn, pcap, tshark  # noqa: E402
 
 CAPTURES = ("ngap.pcapng", "f1ap.pcapng", "e1ap.pcapng", "uu.pcapng")
 RAW_CAPTURES = ("gtpu.pcapng",)   # raw IPv4 frames: tshark only (pycrate has no GTP-U)
+SIM_CAPTURE = "sim.pcapng"        # GSMTAP-SIM (N14): tshark's gsm_sim; frames only while a trace was on
 RRC = {
     "nr-rrc.bcch.bch": "BCCH_BCH_Message",
     "nr-rrc.bcch.dl.sch": "BCCH_DL_SCH_Message",
@@ -114,6 +116,18 @@ def main() -> int:
             if errs:
                 malformed += 1
                 bad.append(f"{cap} frame {i}: tshark: {'; '.join(errs)[:160]}")
+    sim_frames = 0
+    f = run / SIM_CAPTURE
+    if f.is_file():
+        packets = tshark.decode(f.read_bytes())
+        sim_frames = len(packets)
+        frames += sim_frames
+        for i, p in enumerate(packets, start=1):
+            errs = tshark.errors(p)
+            if errs:
+                malformed += 1
+                bad.append(f"{SIM_CAPTURE} frame {i}: tshark: {'; '.join(errs)[:160]}")
+    print(f"PCAP_SIM_FRAMES={sim_frames}")
     for b in bad:
         print(f"PCAP_BAD {b}")
     ok = not bad and frames > 0

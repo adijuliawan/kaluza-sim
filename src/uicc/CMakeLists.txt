@@ -12,6 +12,8 @@ add_library(ksim_uicc STATIC
     secrets/secrets.cpp
     image/image.cpp
     transport/inproc.cpp
+    transport/vpcd.cpp
+    trace/trace.cpp
     terminal/terminal.cpp)
 add_library(ksim::uicc ALIAS ksim_uicc)
 target_include_directories(ksim_uicc PUBLIC ${PROJECT_SOURCE_DIR}/src)

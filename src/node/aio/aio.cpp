@@ -258,6 +258,7 @@ Result<void> AllInOne::build(std::string& why) {
         if (topo_.plain_nas) {
             taps.nas = [cap](bool ul, ByteView plain, const std::string& supi) { cap->nas(ul, plain, supi); };
         }
+        taps.sim = [cap](std::uint8_t sub, ByteView payload, const std::string& supi) { cap->sim(sub, payload, supi); };
         ues_.push_back(std::make_unique<UeDevice>(*shard_, events_, std::move(uc), std::move(c.card),
                                                   [this, i](const air::Frame& f) { ue_to_air(i, f); }, taps,
                                                   ue_net_.get()));

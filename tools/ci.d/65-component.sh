@@ -7,7 +7,8 @@
 #   1. ksim-sim range init and derive (a master, a KEK, three sealed cards);
 #   2. gates/run.sh stub: every P1 gate, rows scored from the sim's evidence;
 #   3. the stub's own verdicts: FAILURES=0;
-#   4. tools/pcap_check.py on the run's captures (tshark and pycrate);
+#   4. tools/pcap_check.py on the run's captures (tshark and pycrate), the card
+#      traces of every UE among them (sim.pcapng, N14);
 #   5. the canary over the run directory, the gates' ksim-ctl output and
 #      ksim-sim's output (derive, a kaluza dry run) included.
 # The run directory (no keys in it) is kept as build/component/last.
@@ -33,7 +34,7 @@ BLOCK=001010000300001/12
 
 rc=0
 KSIM_RUNS="$T/runs" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
-    sh "$ROOT/gates/run.sh" stub > "$T/gates.out" 2>&1 || rc=1
+    KSIM_SIM_TRACE=1 sh "$ROOT/gates/run.sh" stub > "$T/gates.out" 2>&1 || rc=1
 cat "$T/gates.out"
 RUN="$(sed -n 's/^RUN_DIR=//p' "$T/gates.out")"
 [[ -n "$RUN" && -d "$RUN" ]] || { echo "COMPONENT=FAIL (no run directory)"; exit 1; }
@@ -46,7 +47,9 @@ grep -qx 'FAILURES=0' "$RUN/stub.txt" || rc=1
 grep -qx 'NG_SETUP=1' "$RUN/stub.txt" || rc=1
 
 echo "-- captures"
-"$PY" -I "$ROOT/tools/pcap_check.py" "$RUN" || rc=1
+"$PY" -I "$ROOT/tools/pcap_check.py" "$RUN" | tee "$T/pcap.out" || rc=1
+# Every UE's card was traced (KSIM_SIM_TRACE): sim.pcapng has frames, and the canary below scans it.
+[[ "$(sed -n 's/^PCAP_SIM_FRAMES=//p' "$T/pcap.out")" -gt 0 ]] 2>/dev/null || { echo "COMPONENT: no SIM trace"; rc=1; }
 
 echo "-- canary"
 "$PY" -I "$ROOT/tools/secret_canary.py" --run-dir "$RUN" --master "$T/keys/master.key" --block "$BLOCK" || rc=1
