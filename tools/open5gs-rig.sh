@@ -7,7 +7,9 @@
 #
 #   tools/open5gs-rig.sh start [--session] [--t3512 N] | stop | status [--host amadeus-open5gs]
 #
-# Our copy differs from the live configs in: logger paths (~/kaluza-sim-rig/log),
+# Our copy differs from the live configs in: logger paths (~/kaluza-sim-rig/log;
+# smf.yaml and upf.yaml too from N17: the first session run appended to the
+# fork's install/var/log files, reported to kaluza-core-df),
 # the SBI addresses of nrf, ausf, udm and nssf (the fork's loopback defaults,
 # as in the .preroam variants: the 5gc FQDNs do not resolve on the rig), the
 # AMF's NGAP on vmnet8 only (no wg0 address) and NSAC off (no NSACF in the set).
@@ -59,12 +61,13 @@ if [ -n '$t3512' ]; then
 fi
 if [ '$session' = 1 ]; then
     # upfd as root (sudo -n): it makes ogstun; the gateways go on it below.
-    sudo -n ~/open5gs-n3iwf/install/bin/open5gs-upfd -D -c ~/kaluza-sim-rig/etc/upf.yaml </dev/null >/dev/null 2>&1
+    nf=upf   # named through a variable, so this script's text never matches its own pgrep patterns
+    sudo -n ~/open5gs-n3iwf/install/bin/open5gs-\${nf}d -D -c ~/kaluza-sim-rig/etc/\${nf}.yaml </dev/null >/dev/null 2>&1
     sleep 2
     sudo -n ip addr replace 10.45.0.1/16 dev ogstun
     sudo -n ip addr replace 10.46.0.1/16 dev ogstun
     sudo -n ip link set ogstun up
-    pid=\$(pgrep -f 'open5gs-upfd .*kaluza-sim-rig/etc/upf.yaml' | head -n 1 || true)
+    pid=\$(pgrep -f 'open5gs-[u]pfd .*kaluza-sim-rig/etc/upf.yaml' | head -n 1 || true)
     echo \"NF.upf=\${pid:-DOWN}\"
 fi
 for nf in $NFS; do
@@ -79,13 +82,13 @@ done"
     ;;
 stop)
     rig "pkill -f 'open5gs-[a-z0-9]+d .*kaluza-sim-rig/etc/' || true
-if pgrep -f 'open5gs-upfd .*kaluza-sim-rig/etc/' >/dev/null; then
-    sudo -n pkill -f 'open5gs-upfd .*kaluza-sim-rig/etc/' || true
+if pgrep -f 'open5gs-[u]pfd .*kaluza-sim-rig/etc/' >/dev/null; then
+    sudo -n pkill -f 'open5gs-[u]pfd .*kaluza-sim-rig/etc/' || true
 fi
 sleep 2
 pkill -9 -f 'open5gs-[a-z0-9]+d .*kaluza-sim-rig/etc/' 2>/dev/null || true
-if pgrep -f 'open5gs-upfd .*kaluza-sim-rig/etc/' >/dev/null; then
-    sudo -n pkill -9 -f 'open5gs-upfd .*kaluza-sim-rig/etc/' || true
+if pgrep -f 'open5gs-[u]pfd .*kaluza-sim-rig/etc/' >/dev/null; then
+    sudo -n pkill -9 -f 'open5gs-[u]pfd .*kaluza-sim-rig/etc/' || true
 fi
 for dev in ogstun ogstun-edge; do
     if ip link show \$dev >/dev/null 2>&1; then sudo -n ip link del \$dev || true; fi
