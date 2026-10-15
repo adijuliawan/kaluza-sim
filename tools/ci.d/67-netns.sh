@@ -27,7 +27,8 @@ BLOCK=001010000300001/12
 sudo -n "$B/ksim-netd/ksim-netd" --uid "$(id -u)" --socket "$T/netd.sock" > "$T/netd.log" 2>&1 &
 netd=$!
 for _ in $(seq 50); do [[ -S "$T/netd.sock" ]] && break; sleep 0.1; done
-sed "s|template: ../cards/usim-5g.yaml|template: $ROOT/cards/usim-5g.yaml|" "$ROOT/topologies/aio-stub.yaml" > "$T/topology.yaml"
+# The copy lives outside topologies/, so its repo-relative paths (the card template, the personas) are made absolute.
+sed "s|\.\./|$ROOT/|g" "$ROOT/topologies/aio-stub.yaml" > "$T/topology.yaml"
 echo "netd: {socket: $T/netd.sock, nodes: false, ues: true}" >> "$T/topology.yaml"
 KSIM_TOPOLOGY_FILE="$T/topology.yaml" KSIM_RUNS="$T/runs" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" \
     KSIM_SEALED="$T/cards" sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p1-dataplane.sh" > "$T/gates.out" 2>&1
