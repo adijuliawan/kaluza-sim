@@ -20,6 +20,9 @@
 : "${CORE:?CORE is stub, open5gs or kaluza}"
 : "${RUN:?RUN is the run directory}"
 
+# The S-NSSAI the gates ask sessions for: the core env's SLICE (the stub's SST 1 by default).
+: "${SLICE:=--sst 1}"
+
 pass=0; fail=0; skip=0; allowed=0
 ROWS_TSV="$RUN/rows.tsv"
 P1_ROWS="$KSIM_ROOT/gates/rows/p1.tsv"

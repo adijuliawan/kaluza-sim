@@ -52,7 +52,7 @@ echo "-- CM-IDLE after a RAN release (UE 6)"
 reg=$(ctl ue 6 power on --wait 30s)
 [ "$(printf '%s\n' "$reg" | kv RESULT)" = ACCEPT ] || abort "UE 6 did not register"
 supi=$(printf '%s\n' "$reg" | kv UE)
-est=$(ctl ue 6 ps-establish ipv4 --dnn internet --sst 1 --wait 15s)
+est=$(ctl ue 6 ps-establish ipv4 --dnn internet $SLICE --wait 15s)
 psi=$(printf '%s\n' "$est" | kv PSI); ip=$(printf '%s\n' "$est" | kv IP)
 [ -n "$psi" ] || abort "UE 6 has no session"
 seq=$(ctl info | kv EVENT_SEQ)
@@ -93,7 +93,7 @@ echo "-- the periodic registration and the 5G-GUTI across a power cycle (UE 7)"
 reg=$(ctl ue 7 power on --wait 30s)
 [ "$(printf '%s\n' "$reg" | kv RESULT)" = ACCEPT ] || abort "UE 7 did not register"
 supi=$(printf '%s\n' "$reg" | kv UE)
-ctl ue 7 ps-establish ipv4 --dnn internet --sst 1 --wait 15s >/dev/null
+ctl ue 7 ps-establish ipv4 --dnn internet $SLICE --wait 15s >/dev/null
 if on_stub; then
     stub t3512 --seconds 8 >/dev/null || abort "the stub did not take t3512"
 fi
@@ -112,7 +112,7 @@ sht=$(printf '%s' "$wire" | cut -f1 | cut -d, -f1); tid=$(printf '%s' "$wire" | 
 row ksim-p1.guti-after-power-cycle '^identity=5g-guti protected=integrity wire=sht1,id2$' \
     "identity=$(printf '%s\n' "$req" | kv IDENTITY) protected=$(printf '%s\n' "$req" | kv PROTECTED) wire=sht$sht,id$tid"
 if on_stub; then
-    est=$(ctl ue 7 ps-establish ipv4 --dnn internet --sst 1 --wait 15s)
+    est=$(ctl ue 7 ps-establish ipv4 --dnn internet $SLICE --wait 15s)
     psi=$(printf '%s\n' "$est" | kv PSI)
     seq=$(ctl info | kv EVENT_SEQ)
     release 7 >/dev/null
@@ -141,8 +141,8 @@ echo "-- radio loss and a session asked for again (UE 8)"
 reg=$(ctl ue 8 power on --wait 30s)
 [ "$(printf '%s\n' "$reg" | kv RESULT)" = ACCEPT ] || abort "UE 8 did not register"
 supi=$(printf '%s\n' "$reg" | kv UE)
-ctl ue 8 ps-establish ipv4 --dnn internet --sst 1 --wait 15s | grep -q '^PSI=1$' || abort "UE 8's first session is not PSI 1"
-ctl ue 8 ps-establish ipv4 --dnn ims --sst 1 --wait 15s >/dev/null
+ctl ue 8 ps-establish ipv4 --dnn internet $SLICE --wait 15s | grep -q '^PSI=1$' || abort "UE 8's first session is not PSI 1"
+ctl ue 8 ps-establish ipv4 --dnn ims $SLICE --wait 15s >/dev/null
 seq=$(ctl info | kv EVENT_SEQ)
 ctl ue 8 power off --abrupt >/dev/null
 rr=$(ctl wait ran.ue.release_request --since "$seq" --timeout 10s)
@@ -151,10 +151,10 @@ rlf=$(ctl wait ran.du.rlf --since "$seq" --timeout 1ms | kv EVENT)
 row ksim-p1.radio-loss-release '^ran.du.rlf cause=radio-connection-with-ue-lost$' \
     "$rlf cause=$(printf '%s\n' "$rr" | kv CAUSE)"
 ctl ue 8 power on --wait 30s | grep -q '^RESULT=ACCEPT$' || abort "UE 8 did not register again"
-est=$(ctl ue 8 ps-establish ipv4 --dnn internet --sst 1 --wait 15s)
+est=$(ctl ue 8 ps-establish ipv4 --dnn internet $SLICE --wait 15s)
 row amf-ueransim.047 '^ACCEPT psi=1$' "$(printf '%s\n' "$est" | kv RESULT) psi=$(printf '%s\n' "$est" | kv PSI)"
 t0=$(date +%s)
-ims=$(ctl ue 8 ps-establish ipv4 --dnn ims --sst 1 --wait 30s | kv RESULT)
+ims=$(ctl ue 8 ps-establish ipv4 --dnn ims $SLICE --wait 30s | kv RESULT)
 el=$(($(date +%s) - t0))
 row amf-ueransim.049 '^ACCEPT within=yes ' "$ims within=$([ "$el" -lt 10 ] && echo yes || echo no) (${el}s; T3580 16 s)"
 

@@ -27,11 +27,11 @@ UE=5
 echo "-- registration and two sessions (UE $UE)"
 reg=$(ctl ue "$UE" power on --wait 30s)
 [ "$(printf '%s\n' "$reg" | kv RESULT)" = ACCEPT ] || abort "UE $UE did not register: $(printf '%s\n' "$reg" | kv CAUSE)"
-est=$(ctl ue "$UE" ps-establish ipv4 --dnn internet --sst 1 --wait 15s)
+est=$(ctl ue "$UE" ps-establish ipv4 --dnn internet $SLICE --wait 15s)
 [ "$(printf '%s\n' "$est" | kv RESULT)" = ACCEPT ] || abort "no internet session: $(printf '%s\n' "$est" | kv CAUSE)"
 ip=$(printf '%s\n' "$est" | kv IP)
 psi=$(printf '%s\n' "$est" | kv PSI)
-psi_ims=$(ctl ue "$UE" ps-establish ipv4 --dnn ims --sst 1 --wait 15s | kv PSI)
+psi_ims=$(ctl ue "$UE" ps-establish ipv4 --dnn ims $SLICE --wait 15s | kv PSI)
 
 ifs=$(ctl ue "$UE" ifaces)
 mode=$(printf '%s\n' "$ifs" | kv MODE)

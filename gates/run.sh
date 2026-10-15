@@ -34,14 +34,32 @@ bin() {
 }
 KSIM=$(bin ksim); KSIM_CTL=$(bin ksim-ctl); STUB_BIN=$(bin ksim-corestub)
 export KSIM_CTL KSIM_ROOT="$ROOT" CORE
+[ -n "${SLICE:-}" ] && export SLICE
 : "${KSIM_RUNS:=$ROOT/runs}"
 : "${KSIM_MASTER:=$HOME/.kaluza-sim/secrets/range-master.key}"
 
 RUN="$KSIM_RUNS/$core-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$KSIM_RUNS"
 stub_pid=""; ksim_pid=""
+# A UE left registered stays in a real core's AMF: before ksim stops, every UE
+# still registered releases its sessions and switches off, a gate's abort
+# included (W1, 2026-10-15).
+switch_off_left() {
+    _n=$("$KSIM_CTL" --run "$RUN" ues 2>/dev/null | sed -n 's/^UES=//p')
+    _i=1
+    while [ "$_i" -le "${_n:-0}" ]; do
+        if [ "$("$KSIM_CTL" --run "$RUN" ue "$_i" status 2>/dev/null | sed -n 's/^RM_STATE=//p')" = RM-REGISTERED ]; then
+            for _psi in $("$KSIM_CTL" --run "$RUN" ue "$_i" ps-list 2>/dev/null | sed -n 's/^PS\.\([0-9][0-9]*\)\.DNN=.*/\1/p'); do
+                "$KSIM_CTL" --run "$RUN" ue "$_i" ps-release "$_psi" --wait 15s >/dev/null 2>&1
+            done
+            "$KSIM_CTL" --run "$RUN" ue "$_i" power off --switch-off --wait 10s >/dev/null 2>&1 &&
+                echo "CLEANUP: UE $_i switched off"
+        fi
+        _i=$((_i + 1))
+    done
+}
 cleanup() {
-    [ -n "$ksim_pid" ] && { "$KSIM_CTL" --run "$RUN" stop >/dev/null 2>&1; wait "$ksim_pid" 2>/dev/null; }
+    [ -n "$ksim_pid" ] && { switch_off_left; "$KSIM_CTL" --run "$RUN" stop >/dev/null 2>&1; wait "$ksim_pid" 2>/dev/null; }
     [ -n "$stub_pid" ] && { kill "$stub_pid" 2>/dev/null; wait "$stub_pid" 2>/dev/null; }
 }
 trap cleanup EXIT INT TERM

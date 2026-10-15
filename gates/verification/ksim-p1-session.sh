@@ -28,7 +28,7 @@ reg=$(ctl ue "$UE" power on --wait 30s)
 supi=$(printf '%s\n' "$reg" | kv UE)
 
 echo "-- establishment: internet"
-est=$(ctl ue "$UE" ps-establish ipv4 --dnn internet --sst 1 --wait 15s)
+est=$(ctl ue "$UE" ps-establish ipv4 --dnn internet $SLICE --wait 15s)
 row amf-ueransim.016 '^ACCEPT psi=[0-9]+ ip=[0-9.]+ qfi=[0-9]+$' \
     "$(printf '%s\n' "$est" | kv RESULT) psi=$(printf '%s\n' "$est" | kv PSI) ip=$(printf '%s\n' "$est" | kv IP) qfi=$(printf '%s\n' "$est" | kv QFI)"
 psi1=$(printf '%s\n' "$est" | kv PSI)
@@ -42,7 +42,7 @@ png=$(ctl ue "$UE" ping "$DN_ADDR" --psi "$psi1" -c 3 --interval 200)
 echo "   ping $DN_ADDR: sent=$(printf '%s\n' "$png" | kv SENT) received=$(printf '%s\n' "$png" | kv RECEIVED) rtt_avg_ms=$(printf '%s\n' "$png" | kv RTT_AVG_MS)"
 
 echo "-- a second session: ims"
-est2=$(ctl ue "$UE" ps-establish ipv4 --dnn ims --sst 1 --wait 15s)
+est2=$(ctl ue "$UE" ps-establish ipv4 --dnn ims $SLICE --wait 15s)
 psi2=$(printf '%s\n' "$est2" | kv PSI)
 list=$(ctl ue "$UE" ps-list)
 row amf-ueransim.044 '^sessions=2 dnns=internet,ims$' \
@@ -75,13 +75,13 @@ fi
 
 echo "-- the 5GSM back-off"
 if [ "$CORE" = stub ]; then
-    first=$(ctl ue "$UE" ps-establish ipv4 --dnn ksim-backoff --sst 1 --wait 15s)
+    first=$(ctl ue "$UE" ps-establish ipv4 --dnn ksim-backoff $SLICE --wait 15s)
     bo=$(ctl ue "$UE" wait nas.sm.backoff --timeout 5s)
-    ctl ue "$UE" ps-establish ipv4 --dnn ksim-backoff --sst 1 >/dev/null 2>&1
+    ctl ue "$UE" ps-establish ipv4 --dnn ksim-backoff $SLICE >/dev/null 2>&1
     again=$?   # 6: refused while the timer runs
     secs=$(printf '%s\n' "$bo" | kv SECONDS)
     ctl ue "$UE" wait nas.sm.backoff.expiry --timeout "$((secs + 5))s" >/dev/null
-    after=$(ctl ue "$UE" ps-establish ipv4 --dnn ksim-backoff --sst 1 --wait 15s | kv RESULT)
+    after=$(ctl ue "$UE" ps-establish ipv4 --dnn ksim-backoff $SLICE --wait 15s | kv RESULT)
     row ksim-p1.backoff '^reject=29 seconds=[1-9][0-9]* during=6 after=ACCEPT$' \
         "reject=$(printf '%s\n' "$first" | kv CAUSE) seconds=$secs during=$again after=$after"
 else
@@ -94,7 +94,7 @@ ctl ue "$UE" power off --switch-off --wait 10s >/dev/null
 
 echo "-- a fresh UE (UE 4)"
 ctl ue 4 power on --wait 30s >/dev/null
-est3=$(ctl ue 4 ps-establish ipv4 --dnn internet --sst 1 --wait 15s)
+est3=$(ctl ue 4 ps-establish ipv4 --dnn internet $SLICE --wait 15s)
 list=$(ctl ue 4 ps-list)
 row smf-ueransim.040 '^ACCEPT sessions=1$' \
     "$(printf '%s\n' "$est3" | kv RESULT) sessions=$(printf '%s\n' "$list" | kv PDU_SESSIONS)"

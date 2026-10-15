@@ -30,7 +30,7 @@ on_stub() { [ "$CORE" = stub ] && [ -n "${STUB_CTL:-}" ]; }
 reg=$(ctl ue "$UE" power on --wait 30s)
 [ "$(printf '%s\n' "$reg" | kv RESULT)" = ACCEPT ] || abort "UE $UE did not register"
 supi=$(printf '%s\n' "$reg" | kv UE)
-est=$(ctl ue "$UE" ps-establish ipv4 --dnn internet --sst 1 --wait 15s)
+est=$(ctl ue "$UE" ps-establish ipv4 --dnn internet $SLICE --wait 15s)
 psi=$(printf '%s\n' "$est" | kv PSI); ip=$(printf '%s\n' "$est" | kv IP)
 [ -n "$psi" ] || abort "UE $UE has no session"
 
