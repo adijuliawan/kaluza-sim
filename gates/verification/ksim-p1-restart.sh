@@ -51,14 +51,16 @@ if on_stub || [ -n "${DN_PING:-}" ]; then
     ctl ue "$UE" wait nas.mm.cm_idle --since "$seq" --timeout 10s >/dev/null || abort "UE $UE not idle"
     ctl wait ran.ue.released --since "$seq" --timeout 10s >/dev/null
     seq=$(ctl info | kv EVENT_SEQ)
+    rc=1
     if on_stub; then
         stub ping-ue --ue "$supi" --psi "$psi" --seq 1 >/dev/null || abort "the stub did not take ping-ue"
     else
         $DN_PING "$ip" >/dev/null 2>&1
+        rc=$?   # netns mode: the UE's own stack answers; the DN side's replies are the evidence (N18)
     fi
-    ans=$(ctl ue "$UE" wait ue.ping.answered --since "$seq" --timeout 10s | kv EVENT)
+    ans=$(ctl ue "$UE" wait ue.ping.answered --since "$seq" --timeout "$([ "$rc" = 0 ] && echo 1ms || echo 10s)" | kv EVENT)
     paged=$(ctl wait ran.ngap.paging --since "$seq" --timeout 1ms | kv EVENT)
-    row amf-ueransim.033 '^answered=1$' "answered=$([ "$ans" = ue.ping.answered ] && echo 1 || echo 0)"
+    row amf-ueransim.033 '^answered=1$' "answered=$([ "$ans" = ue.ping.answered ] || [ "$rc" = 0 ] && echo 1 || echo 0)"
     row amf-ueransim.034 '^ran.ngap.paging$' "$paged"
 else
     skip_row amf-ueransim.033 "no DN-side ping on $CORE (DN_PING)"

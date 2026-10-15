@@ -37,6 +37,11 @@ done
 
 B="$ROOT/build/release-lab/apps"
 BINS=(ksim ksim-ctl ksim-sim ksim-netd ksim-selftest)
+# The binaries are built from the tree being released, and reconfigured so
+# their build stamp names it (W2 shipped a release named for the next commit
+# with binaries stamped by the previous configure).
+( cd "$ROOT" && cmake --preset release-lab >/dev/null && cmake --build --preset release-lab -j "$(nproc)" >/dev/null ) ||
+    { echo "DEPLOY=FAIL (the release-lab build failed)"; exit 1; }
 for b in "${BINS[@]}"; do
     [[ -x "$B/$b/$b" ]] || { echo "DEPLOY=FAIL (no $B/$b/$b; cmake --build --preset release-lab)"; exit 1; }
 done

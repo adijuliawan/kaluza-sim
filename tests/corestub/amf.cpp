@@ -31,6 +31,8 @@ constexpr std::uint8_t kAuthenticationResponse = 0x57;
 constexpr std::uint8_t kAuthenticationResult = 0x5A;
 constexpr std::uint8_t kAuthenticationReject = 0x58;
 constexpr std::uint8_t kAuthenticationFailure = 0x59;
+constexpr std::uint8_t kIdentityRequest = 0x5B;
+constexpr std::uint8_t kIdentityResponse = 0x5C;
 constexpr std::uint8_t kSecurityModeCommand = 0x5D;
 constexpr std::uint8_t kSecurityModeComplete = 0x5E;
 constexpr std::uint8_t kSecurityModeReject = 0x5F;
@@ -101,7 +103,7 @@ Profile::Challenge challenge_named(const std::string& s, const Yaml& at) {
 Profile Profile::from_yaml(const Yaml& y) {
     y.only({"challenges", "ea", "ia", "imeisv_request", "rinmr", "tamper_replayed_capabilities", "registration",
             "reject_cause", "tmsi", "amf_region", "amf_set", "amf_pointer", "tacs", "allowed_sst", "t3512_s",
-            "t3502_s", "deregistration", "session", "eap_aka_prime"});
+            "t3502_s", "deregistration", "session", "eap_aka_prime", "forget_on_deregistration"});
     Profile p;
     if (y.has("challenges")) {
         p.challenges.clear();
@@ -115,6 +117,7 @@ Profile Profile::from_yaml(const Yaml& y) {
     p.imeisv_request = y.get<bool>("imeisv_request", p.imeisv_request);
     p.rinmr = y.get<bool>("rinmr", p.rinmr);
     p.eap_aka_prime = y.get<bool>("eap_aka_prime", p.eap_aka_prime);
+    p.forget_on_deregistration = y.get<bool>("forget_on_deregistration", p.forget_on_deregistration);
     p.tamper_replayed_capabilities = y.get<bool>("tamper_replayed_capabilities", p.tamper_replayed_capabilities);
     const std::string r = y.get<std::string>("registration", "accept");
     if (r == "accept") {
@@ -244,6 +247,18 @@ void Amf::on_uplink(ByteView wire, bool initial) {
         on_message(*m, sht, true, false);
         return;
     }
+    if (!ctx_ && (state_ == State::identifying || state_ == State::authenticating)) {
+        // §4.4.4.3: before secure exchange the AMF takes an IDENTITY RESPONSE or
+        // an AUTHENTICATION RESPONSE or FAILURE it cannot check; the UE protects
+        // it with the context it still uses (§4.4.4.1), integrity only (§4.4.5).
+        check(sht == Sht::integrity, "4.4.5", "not ciphered before secure exchange is established");
+        auto p = nas::decode_protected(wire);
+        auto m = p ? nas::decode(p->payload) : Result<nas::Message>(make_error(Errc::malformed, 0, "protected"));
+        if (m && sht == Sht::integrity) {
+            on_message(*m, Sht::plain, false);
+        }
+        return;
+    }
     if (!ctx_) {
         check(false, "4.4.3.3", "a protected uplink message has a context to check it with");
         return;
@@ -294,6 +309,9 @@ void Amf::on_message(const nas::Message& m, Sht sht, bool initial, bool verified
     case kAuthenticationResponse:
         on_authentication_response(m);
         return;
+    case kIdentityResponse:
+        on_identity_response(m);
+        return;
     case kAuthenticationFailure:
         on_authentication_failure(m);
         return;
@@ -321,7 +339,6 @@ void Amf::on_message(const nas::Message& m, Sht sht, bool initial, bool verified
         return;
     case kStatus:
     case 0x55:    // CONFIGURATION UPDATE COMPLETE
-    case 0x5C:    // IDENTITY RESPONSE
         return;   // recorded in uplink_
     default:
         check(false, "5", "an uplink message the stub expects", m.desc->name);
@@ -351,6 +368,7 @@ void Amf::on_registration_request(const nas::Message& m, bool initial, Sht sht, 
     state_ = State::idle;
     initial_ = m;
     initial_had_context_ = verified;
+    initial_protected_ = sht != Sht::plain;
     const Bytes* rt = nas::get(m, "5GS registration type");
     auto type = rt ? ie::RegistrationType::decode(*rt) : Result<ie::RegistrationType>(make_error(Errc::truncated, 0, ""));
     check(type && type->value >= ie::RegistrationType::initial && type->value <= 3, "5.5.1.2.2, 5.5.1.3.2",
@@ -393,9 +411,19 @@ void Amf::on_registration_request(const nas::Message& m, bool initial, Sht sht, 
     } else if (id && id->type == ie::MobileIdentity::Type::guti) {
         const bool known = guti_ && guti_->tmsi == id->tmsi && guti_->amf_region == id->amf_region &&
                            guti_->amf_set == id->amf_set && guti_->amf_pointer == id->amf_pointer;
-        check(known, "5.5.1.2.2", "the 5G-GUTI is the one this AMF assigned");
         if (known) {
-            supi_ = guti_supi_;   // an unknown 5G-GUTI needs identification, which is N12
+            supi_ = guti_supi_;
+        } else if (p_.forget_on_deregistration) {
+            // §5.4.3: identification. No context, so the request goes plain and
+            // the UE answers it before secure exchange (§4.4.4.2).
+            nas::Message q = make(kIdentityRequest);
+            put(q, "Identity type", Bytes{ie::IdentityType::suci});
+            send(q, false);
+            state_ = State::identifying;
+            ++identity_requests_;
+            return;
+        } else {
+            check(false, "5.5.1.2.2", "the 5G-GUTI is the one this AMF assigned");
         }
     } else {
         check(false, "5.5.1.2.2", "the identity is a SUCI or a 5G-GUTI");
@@ -422,6 +450,26 @@ void Amf::on_registration_request(const nas::Message& m, bool initial, Sht sht, 
           "a periodic or mobility update comes with a context the AMF can verify");
     challenges_ = 0;
     start_challenge();
+}
+
+void Amf::on_identity_response(const nas::Message& m) {
+    if (state_ != State::identifying) {
+        return;   // an identification the stub asked for on its own (N12): recorded in uplink_
+    }
+    const Bytes* idv = nas::get(m, "Mobile identity");
+    auto id = idv ? ie::MobileIdentity::decode(*idv) : Result<ie::MobileIdentity>(make_error(Errc::truncated, 0, ""));
+    check(id && id->type == ie::MobileIdentity::Type::suci, "5.4.3.3", "the UE returns the SUCI asked for");
+    if (!id || id->type != ie::MobileIdentity::Type::suci) {
+        return;
+    }
+    supi_ = home_.find(id->plmn.mcc, id->plmn.mnc, id->null_scheme_msin());
+    check(!supi_.empty(), "TS 33.501 6.12.2", "the SUCI names a known subscriber");
+    if (supi_.empty()) {
+        return;
+    }
+    state_ = State::idle;
+    challenges_ = 0;
+    start_challenge();   // a new 5G NAS security context (TS 33.501 6.1.1)
 }
 
 void Amf::on_service_request(const nas::Message& m, bool initial, bool verified) {
@@ -562,6 +610,16 @@ void Amf::start_challenge() {
     }
     av_ = std::move(*av);
     av_kind_ = kind;
+    // Not the ngKSI the UE named in its request: that one is the UE's (#71, §5.4.1.3.7 c).
+    std::uint8_t ue_ksi = 7;
+    if (const Bytes* k = nas::get(initial_, "ngKSI")) {
+        if (auto v = ie::NgKsi::decode(*k)) {
+            ue_ksi = v->value;
+        }
+    }
+    if (next_ngksi_ == ue_ksi) {
+        next_ngksi_ = static_cast<std::uint8_t>(next_ngksi_ % 6 + 1);
+    }
     ngksi_ = ie::NgKsi{false, next_ngksi_};
     next_ngksi_ = static_cast<std::uint8_t>(next_ngksi_ % 6 + 1);
     nas::Message r = make(kAuthenticationRequest);
@@ -751,7 +809,10 @@ void Amf::send_security_mode_command() {
     if (p_.imeisv_request) {
         put(c, "IMEISV request", ie::ImeisvRequest{true}.encode());
     }
-    if (p_.rinmr) {
+    // §5.4.2.2 a: an initial message that came protected but did not pass the
+    // integrity check here (no context: the AMF forgot the UE) is asked for again.
+    rinmr_sent_ = p_.rinmr || (initial_protected_ && !initial_had_context_);
+    if (rinmr_sent_) {
         put(c, "Additional 5G security information", ie::Additional5gSecurityInformation{true, false}.encode());
     }
     if (p_.eap_aka_prime && !p_.eap_result_message) {
@@ -806,7 +867,7 @@ void Amf::on_security_mode_complete(const nas::Message& m, Sht sht) {
               "the IMEISV is sixteen digits");
     }
     const Bytes* container = nas::get(m, "NAS message container");
-    const bool want = !initial_had_context_ || p_.rinmr;
+    const bool want = (!initial_had_context_ && !initial_protected_) || rinmr_sent_;
     check((container != nullptr) == want, "5.4.2.3, 4.4.6",
           "the whole REGISTRATION REQUEST is returned when the UE had no context or RINMR asked");
     if (container != nullptr) {
@@ -957,6 +1018,7 @@ void Amf::on_deregistration_request(const nas::Message& m) {
         // §5.5.2.2.2: no accept for a switch-off; the AMF still releases the
         // UE's N2 context (TS 23.502 4.2.2.3.2 step 8).
         release();
+        forget_if_asked();
         return;
     }
     if (p_.deregistration == Profile::Deregistration::silent) {
@@ -964,6 +1026,24 @@ void Amf::on_deregistration_request(const nas::Message& m) {
     }
     send(make(kDeregistrationAcceptUe), was_secure);
     release();
+    forget_if_asked();
+}
+
+void Amf::send_plain_identity_request() {
+    nas::Message q = make(kIdentityRequest);
+    put(q, "Identity type", Bytes{ie::IdentityType::suci});
+    send(q, false);
+}
+
+void Amf::forget_if_asked() {
+    if (!p_.forget_on_deregistration) {
+        return;
+    }
+    // The accept went protected with the context still held; now nothing is kept.
+    ctx_.reset();
+    guti_.reset();
+    guti_supi_.clear();
+    last_ul_.reset();
 }
 
 // ---- downlink -----------------------------------------------------------------------------

@@ -39,15 +39,19 @@ release() {
 }
 
 # dn_ping UE SUPI PSI IP: a ping from the DN to the UE; prints answered=<0|1>.
+# In inject mode the sim answers and says so (ue.ping.answered); in netns mode
+# the UE's own stack answers, so the DN side's replies are the evidence (N18).
 dn_ping() {
     _seq=$(ctl info | kv EVENT_SEQ)
+    _rc=1
     if on_stub; then
         stub ping-ue --ue "$2" --psi "$3" --seq 1 >/dev/null || abort "the stub did not take ping-ue"
     else
         $DN_PING "$4" >/dev/null 2>&1
+        _rc=$?
     fi
-    _ans=$(ctl ue "$1" wait ue.ping.answered --since "$_seq" --timeout 10s | kv EVENT)
-    echo "answered=$([ "$_ans" = ue.ping.answered ] && echo 1 || echo 0)"
+    _ans=$(ctl ue "$1" wait ue.ping.answered --since "$_seq" --timeout "$([ "$_rc" = 0 ] && echo 1ms || echo 10s)" | kv EVENT)
+    echo "answered=$([ "$_ans" = ue.ping.answered ] || [ "$_rc" = 0 ] && echo 1 || echo 0)"
 }
 
 echo "-- CM-IDLE after a RAN release (UE 6)"

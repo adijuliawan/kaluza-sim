@@ -202,6 +202,7 @@ void Mm::power_on() {
     rejected_nssai_.clear();    // §4.6.2.2: until switching off
     update_ = UpdateStatus::u2_not_updated;
     connected_ = false;
+    secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
     ++gen_;
     coro::spawn(read_card(alive_));
 }
@@ -707,6 +708,7 @@ void Mm::deregister(bool switch_off) {
         // From 5GMM-IDLE the request still waits for the RRC connection: a local
         // release would drop it (F-46); the radio goes off once it is sent.
         connected_ = false;
+        secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
         set_state(MmState::null, "switch off");
         return;
     }
@@ -1093,6 +1095,7 @@ void Mm::network_failed_authentication() {
     if (connected_) {
         lower_.release_local();
         connected_ = false;
+        secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
     }
 }
 
@@ -1202,6 +1205,7 @@ void Mm::on_security_mode_command(ByteView wire) {
     }
     ctx_ = std::move(*candidate);
     partial_.reset();
+    secure_exchange_ = true;   // §4.4.2: the SMC establishes secure exchange
 
     nas::Message c = make(kSecurityModeComplete);
     bool imeisv = false;
@@ -1296,7 +1300,7 @@ void Mm::on_nas(ByteView wire) {
         if (!m) {
             // Once secure exchange is up a plain message is not processed at
             // all (§4.4.4.2); before, a status says what was wrong (§7).
-            if (!ctx_) {
+            if (!secure_exchange_) {
                 send_status(m.error().code == Errc::unsupported ? kTypeNotImplemented : kInvalidMandatory);
             }
             return;
@@ -1304,7 +1308,12 @@ void Mm::on_nas(ByteView wire) {
         if (cfg_.tap) {
             cfg_.tap(false, wire);
         }
-        if (!processed_unprotected(*m, ctx_.has_value())) {
+        // §4.4.4.2: before the network has established secure exchange on this
+        // connection (an integrity-checked downlink message, or the SMC) the
+        // listed plain messages are processed, even with a stored context the
+        // UE protected its initial message with: the AMF may not have it
+        // (kaluza-core W2: IDENTITY REQUEST for the SUCI after a switch-off).
+        if (!processed_unprotected(*m, secure_exchange_)) {
             events_.emit("nas.sec.discard", cfg_.id,
                          {{"message", m->desc != nullptr ? m->desc->name : "?"}, {"verdict", "unprotected"}});
             return;
@@ -1321,6 +1330,7 @@ void Mm::on_nas(ByteView wire) {
         events_.emit("nas.sec.discard", cfg_.id, {{"message", "?"}, {"verdict", verdict_name(in.verdict)}});
         return;
     }
+    secure_exchange_ = true;   // a downlink message passed the integrity check with the current context
     if (cfg_.tap) {
         cfg_.tap(false, in.plain);
     }
@@ -1444,6 +1454,7 @@ void Mm::on_released() {
     const bool recovery = std::exchange(recovery_pending_, false);
     const std::uint16_t recovery_up = std::exchange(recovery_up_, std::uint16_t{0});
     connected_ = false;
+    secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
     kgnb_count_.reset();   // the next connection's K_gNB comes from its own initial message or SMC
     // §5.4.1.3.3 d and §5.4.1.3.7: entering 5GMM-IDLE ends the stored challenge and T3520.
     clear_stored_challenge();
@@ -1509,6 +1520,7 @@ void Mm::power_off_abrupt() {
     }
     ++gen_;
     connected_ = false;
+    secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
     pending_sm_.clear();
     sr_uplink_ = 0;
     events_.emit("nas.mm.power_off", cfg_.id, {{"mode", "abrupt"}});
@@ -2103,8 +2115,11 @@ void Mm::send(const nas::Message& m) {
         send_wire(std::move(*plain));
         return;
     }
-    // §4.4.5: an initial NAS message is integrity protected, not ciphered.
-    auto out = ctx_->protect(*plain, connected_ ? Sht::integrity_ciphered : Sht::integrity);
+    // §4.4.4.1: integrity protected once a context is in use. §4.4.5: ciphered
+    // only from when the network has established secure exchange on this
+    // connection; before that (an initial message, or an IDENTITY RESPONSE to
+    // an AMF that could not take the stored context) integrity only.
+    auto out = ctx_->protect(*plain, connected_ && secure_exchange_ ? Sht::integrity_ciphered : Sht::integrity);
     if (out) {
         send_wire(std::move(*out));
     }
@@ -2172,6 +2187,7 @@ void Mm::on_expiry(MmTimer t) {
         if (connected_) {
             lower_.release_local();
             connected_ = false;
+            secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
         }
         clear_stored_challenge();
         stop(MmTimer::t3520);
@@ -2211,6 +2227,7 @@ void Mm::on_expiry(MmTimer t) {
         if (connected_) {
             lower_.release_local();
             connected_ = false;
+            secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
         }
         set_state(MmState::registered_normal_service, "T3517 expiry");
         return;
@@ -2252,6 +2269,7 @@ void Mm::on_expiry(MmTimer t) {
         if (connected_) {
             lower_.release_local();
             connected_ = false;
+            secure_exchange_ = false;   // §4.4.4.2: it lasts for one NAS signalling connection
         }
         events_.emit("nas.dereg.abort", cfg_.id, {{"reason", "T3521"}});
         set_state(usim_present_ ? MmState::deregistered_normal_service : MmState::deregistered_no_supi,

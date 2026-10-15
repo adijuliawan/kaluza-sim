@@ -336,6 +336,7 @@ private:
     int attempts_ = 0;
     bool usim_valid_ = false;
     bool connected_ = false;
+    bool secure_exchange_ = false;   // §4.4.4.2, for the current NAS signalling connection
     std::string supi_;
     std::string msin_;
     nas::ie::Plmn home_;

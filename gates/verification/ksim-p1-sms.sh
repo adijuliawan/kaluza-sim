@@ -101,8 +101,10 @@ cpa=$(tshark_fields "$RUN/uu.pcapng" "gsm_a.dtap.msg_sms_type == 0x04 && $mine" 
 row smsf.028 '^cp_data=4 cp_ack=4$' "cp_data=$cpd cp_ack=$cpa"
 rpt=$(tshark_fields "$RUN/uu.pcapng" "gsm_a.rp.msg_type && $mine" gsm_a.rp.msg_type | sort | tr '\n' ',' | sed 's/,$//')
 row smsf.029 '^0x00,0x01,0x02,0x03$' "$rpt"
-tps=$(tshark_fields "$RUN/uu.pcapng" "gsm_sms.tp-mti && $mine" gsm_sms.tp-mti | sort | tr '\n' ',' | sed 's/,$//')
-txt=$(tshark_fields "$RUN/uu.pcapng" "gsm_sms.tp-mti == 0 && $mine" gsm_sms.sms_text | head -n 1)
+# The TPDUs of the RP-DATA (types 0 and 1): an RP-ACK may carry a report TPDU
+# too (TS 24.011 7.3.3; kaluza-core's carries an SMS-SUBMIT-REPORT, W2).
+tps=$(tshark_fields "$RUN/uu.pcapng" "gsm_a.rp.msg_type <= 1 && gsm_sms.tp-mti && $mine" gsm_sms.tp-mti | sort | tr '\n' ',' | sed 's/,$//')
+txt=$(tshark_fields "$RUN/uu.pcapng" "gsm_a.rp.msg_type == 1 && gsm_sms.tp-mti == 0 && $mine" gsm_sms.sms_text | head -n 1)
 row smsf.030 "^tpdu=0,1 text=$TEXT\$" "tpdu=$tps text=$txt"
 mal=$(tshark_fields "$RUN/uu.pcapng" "_ws.malformed && $mine" frame.number | wc -l)
 row smsf.031 '^malformed=0$' "malformed=$mal"

@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# ksim-netd on the dev PC (P1 N17; ADR 0009 point 3, D2): the UE namespaces
+# and their TUNs for netns-mode runs against the Open5GS rig over vmnet8. No
+# parent link: ksim-netd refuses one anywhere but kaluza-uesim, and the RAN
+# nodes stay in the root namespace here. Installed by the user as
+# ksim-netd.service, the binary root-owned in /usr/local/sbin (never run as
+# root from a home directory); it serves the uid of the user who runs ksim.
+[Unit]
+Description=kaluza-sim privileged helper (netns, ipvlan, sockets by fd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=KSIM_UID=1000
+ExecStart=/usr/local/sbin/ksim-netd --uid ${KSIM_UID}
+Restart=on-failure
+RestartSec=2
+# No ProtectSystem, ProtectHome or PrivateTmp: each would give the service a
+# mount namespace of its own, and its /run/netns mounts would not show on the
+# host (ip netns, the gc check). The capability set is the limit instead:
+# NET_ADMIN and SYS_ADMIN for namespaces, links, TUNs and mounts; SETUID and
+# SETGID so exec (P1 N11) can drop to the asking user, which it always does.
+# NET_RAW is in the bounding set only so that exec can start binaries that
+# carry it as a file capability, ping above all: the kernel refuses to exec a
+# capability-dumb binary (effective bit) whose capabilities the bounding set
+# withholds (EPERM), while no-new-privileges still keeps the command from
+# gaining it (W1, 2026-10-15; ping uses the namespace's ping socket instead).
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID CAP_NET_RAW
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -70,6 +70,10 @@ struct Profile {
     enum class Deregistration : std::uint8_t { accept, silent };
     Deregistration deregistration = Deregistration::accept;
     bool reauthenticate = false;   // a registration that verifies is authenticated anyway
+    // N18: the UE's context and 5G-GUTI go at its de-registration, as a real AMF
+    // may (kaluza-core does); a 5G-GUTI the AMF does not know then gets an
+    // IDENTITY REQUEST for the SUCI, plain (§5.4.3, §4.4.4.2), and a new authentication.
+    bool forget_on_deregistration = false;
     // EAP-AKA' instead of 5G AKA (TS 33.501 6.1.3.1; the challenge kinds apply as
     // for 5G AKA). The two faults touch the first challenge only.
     bool eap_aka_prime = false;
@@ -144,6 +148,7 @@ public:
     /// The uplink messages by name, in order ("REGISTRATION REQUEST", …).
     const std::vector<std::string>& uplink() const noexcept { return uplink_; }
     std::size_t count_uplink(std::string_view name) const;
+    std::size_t identity_requests() const noexcept { return identity_requests_; }
     /// The last REGISTRATION REQUEST: whole when it came in a container (N15), else as received.
     const nas::Message* last_registration_request() const noexcept {
         return full_request_ ? &*full_request_ : (initial_.desc != nullptr ? &initial_ : nullptr);
@@ -160,7 +165,7 @@ public:
     Result<SecretBytes> kgnb() const;
 
 private:
-    enum class State : std::uint8_t { idle, authenticating, securing, accepting, registered, released, deregistering };
+    enum class State : std::uint8_t { idle, identifying, authenticating, securing, accepting, registered, released, deregistering };
 
     void check(bool ok, const char* clause, const char* what, std::string detail = {});
     void on_message(const nas::Message& m, proc::ue::Sht sht, bool initial, bool verified = false);
@@ -168,6 +173,12 @@ private:
     void on_service_request(const nas::Message& m, bool initial, bool verified);
     void start_challenge();
     void on_authentication_response(const nas::Message& m);
+    void on_identity_response(const nas::Message& m);
+public:
+    /// A plain IDENTITY REQUEST for the SUCI, now (a test of §4.4.4.2).
+    void send_plain_identity_request();
+private:
+    void forget_if_asked();
     void on_authentication_failure(const nas::Message& m);
     Result<Bytes> eap_challenge(const std::string& snn);
     void on_eap_response(const nas::Message& m);
@@ -201,6 +212,9 @@ private:
     std::string guti_supi_;                         // and whose it is
     nas::Message initial_;                          // the REGISTRATION REQUEST as received
     std::optional<nas::Message> full_request_;      // and whole, from the SECURITY MODE COMPLETE's container
+    bool initial_protected_ = false;                // it came integrity protected (§4.4.6 b)
+    bool rinmr_sent_ = false;                       // the SMC asked for it again (§5.4.2.2)
+    std::size_t identity_requests_ = 0;
     bool initial_had_context_ = false;
     std::optional<nas::ie::UeSecurityCapability> ue_caps_;
     std::uint8_t next_ngksi_ = 1;
