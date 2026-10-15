@@ -136,6 +136,30 @@ std::uint64_t fnv1a(std::string_view s) {
 
 } // namespace
 
+namespace {
+
+/// TS-Service-Centre-Address of an EF.SMSP record (TS 31.102 4.2.27): after
+/// the Y alpha octets, the parameter indicators (bit 2 at 0: present), 12 octets
+/// of TP-DA, then 12 of the address: its length, TON/NPI, digits. Returns TON/NPI
+/// and digits, as RP-Destination Address carries them (TS 24.011 8.2.5.2).
+std::optional<Bytes> smsp_service_centre(ByteView rec) {
+    if (rec.size() < 28) {
+        return std::nullopt;
+    }
+    const std::size_t y = rec.size() - 28;
+    if ((rec[y] & 0x02) != 0) {
+        return std::nullopt;   // the indicator says absent
+    }
+    const std::size_t at = y + 13;
+    const std::size_t len = rec[at];
+    if (len < 2 || len > 11) {
+        return std::nullopt;
+    }
+    return Bytes(rec.begin() + static_cast<std::ptrdiff_t>(at + 1), rec.begin() + static_cast<std::ptrdiff_t>(at + 1 + len));
+}
+
+} // namespace
+
 Mm::Mm(Executor& ex, uicc::Terminal& card, INasLower& lower, IEventSink& events, MmConfig cfg)
     : ex_(ex), card_(card), lower_(lower), events_(events), cfg_(std::move(cfg)), alive_(std::make_shared<bool>(true)),
       rng_(cfg_.seed, {0x3247, fnv1a(cfg_.id)}) {}
@@ -216,6 +240,14 @@ coro::Task<void> Mm::read_card(std::shared_ptr<bool> alive) {
                 stored = std::move(**d);
             }
         }
+        // N13: the SMS service centre (EF.SMSP, TS 31.102 4.2.27) and EF.SMSS (4.2.28).
+        smsc_.reset();
+        if (auto p = co_await card_.read_record({0x6F42}, 1); p) {
+            smsc_ = smsp_service_centre(*p);
+        }
+        if (auto ss = co_await card_.read_ef({0x6F43}); ss) {
+            smss_ = std::move(*ss);
+        }
     }
     if (!*alive) {
         co_return;
@@ -293,8 +325,12 @@ void Mm::start_registration(RegType type) {
         events_.emit("nas.reg.blocked", cfg_.id, {{"why", forbidden_plmn ? "forbidden PLMN" : "forbidden TA"}});
         return;
     }
+    // N13: an update on an existing N1 connection is an ordinary protected message.
+    const bool on_connection = connected_ && ctx_.has_value() && type != RegType::initial;
     partial_.reset();
-    kgnb_count_.reset();
+    if (!on_connection) {
+        kgnb_count_.reset();
+    }
     ++gen_;
     reg_type_ = type;
     // §4.4.6 b: with a 5G-GUTI and a valid context the request is protected
@@ -312,6 +348,9 @@ void Mm::start_registration(RegType type) {
     const ie::MobileIdentity id = identity();
     put(m, "5GS mobile identity", id.encode());
     put(m, "UE security capability", cfg_.security.encode());
+    if (cfg_.sms_requested) {
+        put(m, "5GS update type", ie::UpdateType{true, false, 0, 0}.encode());   // N13: SMS over NAS requested
+    }
     std::vector<ie::Snssai> requested;
     for (const auto& s : cfg_.requested_nssai) {
         const bool rejected = std::any_of(rejected_nssai_.begin(), rejected_nssai_.end(), [&](const auto& r) {
@@ -337,7 +376,9 @@ void Mm::start_registration(RegType type) {
     initial_ = m;
     initial_without_context_ = !with_context;
     Result<Bytes> wire = Bytes{};
-    if (with_context) {
+    if (on_connection) {
+        // sent below with send(), under the current context
+    } else if (with_context) {
         wire = protect_initial(m);
     } else {
         // §4.4.6 a: without a valid context only the cleartext IEs go.
@@ -356,7 +397,7 @@ void Mm::start_registration(RegType type) {
     events_.emit("nas.reg.request", cfg_.id,
                  {{"type", reg_type_name(static_cast<std::uint8_t>(type))},
                   {"identity", guti_ ? "5g-guti" : "suci"},
-                  {"protected", with_context ? "integrity" : "plain"},
+                  {"protected", on_connection ? "integrity-ciphered" : with_context ? "integrity" : "plain"},
                   {"attempt", str(attempts_ + 1)},
                   {"nssai", [&] {
                        std::string n;
@@ -366,7 +407,11 @@ void Mm::start_registration(RegType type) {
                        return n;
                    }()}});
     set_state(MmState::registered_initiated, "registration request");
-    send_wire(std::move(*wire));
+    if (on_connection) {
+        send(m);
+    } else {
+        send_wire(std::move(*wire));
+    }
     start(MmTimer::t3510, cfg_.timers.t3510);
 }
 
@@ -505,6 +550,10 @@ void Mm::on_registration_accept(const nas::Message& m) {
                   {"t3512_s", t3512_ ? str(*t3512_ / 1000) : "deactivated"},
                   {"allowed_nssai", nssai},
                   {"sms_allowed", result->sms_allowed ? "1" : "0"}});
+    sms_allowed_ = result->sms_allowed;
+    if (cfg_.sms_allowed) {
+        cfg_.sms_allowed(sms_allowed_);
+    }
     set_state(MmState::registered_normal_service, "registration accept");
     if (new_guti) {
         // §5.5.1.2.4: a 5G-GUTI in the accept is acknowledged.
@@ -1674,6 +1723,32 @@ void Mm::flush_pending_sm() {
     }
 }
 
+// ---- SMS over NAS (N13) ----------------------------------------------------------------
+
+Result<void> Mm::send_sms(Bytes cp) {
+    SmUplink u;
+    u.sms = true;
+    u.sm = std::move(cp);
+    return send_sm(u);
+}
+
+void Mm::store_sms_record(std::uint8_t record, Bytes data) {
+    card_job(CardWrite{0x6F3C, true, std::make_shared<SecretBytes>(SecretBytes::copy_of(data)), {0x6F3C}, record});
+}
+
+void Mm::store_smss(Bytes data) {
+    smss_ = data;
+    card_job(CardWrite{0x6F43, false, std::make_shared<SecretBytes>(SecretBytes::copy_of(data)), {0x6F43}, 1});
+}
+
+Result<void> Mm::register_update() {
+    if (state_ != MmState::registered_normal_service) {
+        return make_error(Errc::invalid_argument, 0, "5GMM: a registration update needs 5GMM-REGISTERED.NORMAL-SERVICE");
+    }
+    start_registration(RegType::mobility);
+    return {};
+}
+
 // ---- network-initiated procedures (§5.5.2.3, §5.4.4, §5.4.3) ----------------------------
 
 void Mm::on_network_deregistration(const nas::Message& m) {
@@ -1895,8 +1970,8 @@ coro::Task<void> Mm::run_card_jobs(std::shared_ptr<bool> alive) {
         CardWrite w = std::move(card_jobs_.front());
         card_jobs_.pop_front();
         Bytes raw(w.data->expose().begin(), w.data->expose().end());
-        const std::vector<std::uint16_t> path{persist::kDf5gs, w.fid};
-        auto r = w.record ? co_await card_.update_record(path, 1, raw) : co_await card_.update_ef(path, raw);
+        const std::vector<std::uint16_t> path = w.path.empty() ? std::vector<std::uint16_t>{persist::kDf5gs, w.fid} : w.path;
+        auto r = w.record ? co_await card_.update_record(path, w.record_no, raw) : co_await card_.update_ef(path, raw);
         secure_zero(raw);
         if (!*alive) {
             co_return;
@@ -1916,12 +1991,13 @@ void Mm::persist_loci() {
     }
     const std::uint8_t status = update_ == UpdateStatus::u1_updated ? 0 : update_ == UpdateStatus::u2_not_updated ? 1 : 2;
     const Bytes data = persist::encode_loci(persist::Loci{guti_, last_tai_, status});
-    card_job(CardWrite{persist::kLoci, false, std::make_shared<SecretBytes>(SecretBytes::copy_of(data))});
+    card_job(CardWrite{persist::kLoci, false, std::make_shared<SecretBytes>(SecretBytes::copy_of(data)), {}, 1});
 }
 
 void Mm::persist_nsc(bool valid) {
     card_job(CardWrite{persist::kNsc, true,
-                       std::make_shared<SecretBytes>(persist::encode_nsc(valid && ctx_ ? &*ctx_ : nullptr, nsc_record_size_))});
+                       std::make_shared<SecretBytes>(persist::encode_nsc(valid && ctx_ ? &*ctx_ : nullptr, nsc_record_size_)),
+                       {}, 1});
 }
 
 void Mm::persist_auth_keys() {
@@ -1931,7 +2007,7 @@ void Mm::persist_auth_keys() {
     // TS 31.102 4.4.11.6: with service n°133 not available only K_AUSF and
     // K_SEAF for 3GPP access, in octets 0 to 67 (the rest is left alone).
     card_job(CardWrite{persist::kAuthKeys, false,
-                       std::make_shared<SecretBytes>(persist::encode_auth_keys(&kausf_, &kseaf_, 68))});
+                       std::make_shared<SecretBytes>(persist::encode_auth_keys(&kausf_, &kseaf_, 68)), {}, 1});
 }
 
 // ---- the NAS transport of 5GSM (§5.4.5) -------------------------------------------------
@@ -1949,6 +2025,13 @@ Result<void> Mm::send_sm(const SmUplink& u) {
         return {};
     }
     nas::Message m = make(kUlNasTransport);
+    if (u.sms) {
+        // §5.4.5.2.2 for SMS: the CP message, no PDU session ID (N13).
+        put(m, "Payload container type", Bytes{ie::PayloadContainerType::sms});
+        put(m, "Payload container", u.sm);
+        send(m);
+        return {};
+    }
     put(m, "Payload container type", Bytes{ie::PayloadContainerType::n1_sm});
     put(m, "Payload container", u.sm);
     put(m, "PDU session ID", Bytes{u.psi});   // §5.4.5.2.2: for N1 SM, always
@@ -1971,8 +2054,14 @@ void Mm::on_dl_nas_transport(const nas::Message& m) {
     if (type == nullptr || type->empty() || payload == nullptr) {
         return;
     }
+    if (((*type)[0] & 0x0F) == ie::PayloadContainerType::sms) {
+        if (cfg_.sms) {
+            cfg_.sms(*payload);   // §5.4.5.3.2: the SMS CP message to the SMS entity (N13)
+        }
+        return;
+    }
     if (((*type)[0] & 0x0F) != ie::PayloadContainerType::n1_sm) {
-        // SMS is N13; other payloads are not P1 (§5.4.5.3.3: discarded).
+        // Other payloads are not P1 (§5.4.5.3.3: discarded).
         events_.emit("nas.mm.transport.discard", cfg_.id, {{"payload_type", str((*type)[0] & 0x0F)}});
         return;
     }

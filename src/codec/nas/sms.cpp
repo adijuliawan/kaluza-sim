@@ -621,6 +621,47 @@ std::string ucs2_to_utf8(ByteView in) {
     return out;
 }
 
+Result<Bytes> utf8_to_ucs2(std::string_view text) {
+    Bytes out;
+    for (std::size_t i = 0; i < text.size();) {
+        const std::uint32_t cp = next_utf8(text, i);
+        if (cp > 0xFFFF) {
+            return err(Errc::invalid_argument, i, "UCS2: a character outside the BMP");
+        }
+        out.push_back(static_cast<std::uint8_t>(cp >> 8));
+        out.push_back(static_cast<std::uint8_t>(cp));
+    }
+    return out;
+}
+
+Result<std::vector<std::string>> split_text(std::string_view text, bool ucs2, std::size_t per_part) {
+    std::vector<std::string> parts(1);
+    std::size_t used = 0;
+    for (std::size_t i = 0; i < text.size();) {
+        const std::size_t start = i;
+        const std::uint32_t cp = next_utf8(text, i);
+        std::size_t cost = 1;
+        if (ucs2) {
+            if (cp > 0xFFFF) {
+                return err(Errc::invalid_argument, start, "UCS2: a character outside the BMP");
+            }
+        } else {
+            auto one = utf8_to_gsm7(text.substr(start, i - start));
+            if (!one) {
+                return one.error();
+            }
+            cost = one->second;   // 2 for an escaped character
+        }
+        if (used + cost > per_part) {
+            parts.emplace_back();
+            used = 0;
+        }
+        parts.back().append(text.substr(start, i - start));
+        used += cost;
+    }
+    return parts;
+}
+
 // ---- JSON ---------------------------------------------------------------------------
 
 std::string to_json(const Cp& cp) {

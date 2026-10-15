@@ -65,6 +65,7 @@ struct Stub {
     std::unique_ptr<ksim::IAssoc> assoc;
     std::unique_ptr<ksim::corestub::NgapAmf> amf;
     std::vector<ksim::corestub::Verdict> past;   // the verdicts of associations that ended
+    std::map<std::string, bool> sms_sub;         // N13: per-UE SMS subscription, before the AMF exists
     std::uint64_t associations = 0;
 
     template <class T>
@@ -222,6 +223,9 @@ static int run_main(int argc, char** argv) {
             } else {
                 s.amf = std::make_unique<ksim::corestub::NgapAmf>(s.shard, s.home, s.plmn, s.profile, *s.assoc, s.n3.get(),
                                                                   s.n3_addr);
+                for (const auto& [supi, on] : s.sms_sub) {
+                    s.amf->set_sms_subscribed(supi, on);
+                }
             }
             ++s.associations;
         });
@@ -308,6 +312,30 @@ static int run_main(int argc, char** argv) {
         }
         Reply out;
         out.set("DEREGISTER", "sent");
+        return out;
+    });
+    server.post("/v1/stub/sms-sub", [&s](const ksim::api::Request& req) {
+        // N13: SMS in a UE's subscription or not; the next REGISTRATION ACCEPT says so.
+        std::string supi = req.arg("ue");
+        if (supi.rfind("imsi-", 0) == 0) {
+            supi = supi.substr(5);
+        }
+        const bool on = req.arg("on", "1") == "1";
+        if (supi.size() != 15) {
+            return Reply::fail(Exit::usage, "sms-sub --ue <SUPI> [--off]");
+        }
+        auto r = s.call<bool>([&s, supi, on] {
+            if (s.amf) {
+                s.amf->set_sms_subscribed(supi, on);
+            }
+            s.sms_sub[supi] = on;   // kept for the AMF of the next association
+            return true;
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        Reply out;
+        out.set("SMS_SUBSCRIBED", on ? "1" : "0");
         return out;
     });
     server.post("/v1/stub/t3512", [&s, num](const ksim::api::Request& req) {

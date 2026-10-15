@@ -20,8 +20,11 @@
 //     wait <event> … (any subject)      events …
 //     gnb <name> ue-list | amf-list | ue-release <ue sel> [--cause C] | restart
 //     ue <sel> service-request [--wait DUR] | sim remove|insert | airplane on|off
+//     ue <sel> sms-send <digits> <text> [--ucs2] [--srr] [--vp N] | sms-list | sms-memory full|available
+//     ue <sel> register --update
 //     stub [release --ue SUPI --psi N [--cause C] | ping-ue --ue SUPI --psi N [--seq N]
-//           | deregister --ue SUPI [--rereg] | restart | t3512 --seconds N]   (--socket <stub ctl>)
+//           | deregister --ue SUPI [--rereg] | restart | t3512 --seconds N | sms-sub --ue SUPI [--off]]
+//           (--socket <stub ctl>)
 //
 // <sel> is imsi-…, a farm index, group:<name> or all; a group prints one block
 // per UE, separated by a blank line. Output is KEY=value lines (--json: one
@@ -140,7 +143,7 @@ struct Flags {
 Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
     static const std::vector<std::string> valued{"wait", "timeout", "where", "since", "fail", "filter", "cause",
                                                  "dnn", "sst", "sd", "psi", "count", "interval", "size", "type", "ue",
-                                                 "seq", "seconds"};
+                                                 "seq", "seconds", "vp"};
     Flags f;
     for (std::size_t i = from; i < args.size(); ++i) {
         const std::string& a = args[i];
@@ -291,7 +294,7 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
             }
             path = base + "/power";
         } else if (cmd == "register") {
-            body["type"] = f.get("type", "initial");
+            body["type"] = f.has("update") ? "update" : f.get("type", "initial");
             path = base + "/register";
         } else {
             body["type"] = f.words.size() > 1 ? f.words[1] : "normal";
@@ -319,6 +322,37 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
     }
     if (cmd == "ifaces") {
         return call(c, "GET", base + "/ifaces");
+    }
+    if (cmd == "sms-send") {
+        if (f.words.size() < 3) {
+            return Reply::fail(Exit::usage, "sms-send <digits> <text> [--ucs2] [--srr] [--vp N] [--wait DUR]");
+        }
+        auto w = wait_flag(f, err);
+        if (!w) {
+            return err;
+        }
+        json body = json::object();
+        body["to"] = f.words[1];
+        std::string text = f.words[2];
+        for (std::size_t i = 3; i < f.words.size(); ++i) {
+            text += " " + f.words[i];   // the rest of the line is the text
+        }
+        body["text"] = text;
+        body["ucs2"] = f.has("ucs2") ? "1" : "0";
+        body["srr"] = f.has("srr") ? "1" : "0";
+        if (f.has("vp")) {
+            body["vp"] = f.get("vp");
+        }
+        body["wait_ms"] = std::to_string(*w);
+        return call(c, "POST", base + "/sms-send", body, *w);
+    }
+    if (cmd == "sms-list") {
+        return call(c, "GET", base + "/sms");
+    }
+    if (cmd == "sms-memory" && f.words.size() >= 2 && (f.words[1] == "full" || f.words[1] == "available")) {
+        json body = json::object();
+        body["state"] = f.words[1];
+        return call(c, "POST", base + "/sms-memory", body);
     }
     if (cmd == "sim" && f.words.size() >= 2 && (f.words[1] == "remove" || f.words[1] == "insert")) {
         json body = json::object();
@@ -452,7 +486,7 @@ int run(const Ctx& c, const std::vector<std::string>& args) {
     } else if (verb == "stub") {
         // ksim-corestub (--socket): its report, or a network-side trigger for the gates.
         if (!f.words.empty() && (f.words[0] == "release" || f.words[0] == "ping-ue" || f.words[0] == "deregister" ||
-                                 f.words[0] == "restart" || f.words[0] == "t3512")) {
+                                 f.words[0] == "restart" || f.words[0] == "t3512" || f.words[0] == "sms-sub")) {
             json body = json::object();
             for (const char* k : {"ue", "psi", "cause", "seq", "seconds"}) {
                 if (f.has(k)) {
@@ -461,6 +495,9 @@ int run(const Ctx& c, const std::vector<std::string>& args) {
             }
             if (f.has("rereg")) {
                 body["rereg"] = "1";
+            }
+            if (f.words[0] == "sms-sub") {
+                body["on"] = f.has("off") ? "0" : "1";
             }
             r = call(c, "POST", "/v1/stub/" + f.words[0], body);
         } else {

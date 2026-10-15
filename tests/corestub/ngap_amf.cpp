@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "codec/nas/build.hpp"
+#include "uicc/image/image.hpp"
 
 namespace ksim::corestub {
 
@@ -61,10 +62,33 @@ const char* name_of(const ngap::Pdu& p) {
 NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc& ng, IDatagram* n3,
                  std::array<std::uint8_t, 4> n3_addr)
     : ex_(ex), home_(home), plmn_(std::move(plmn)), p_(std::move(p)), ng_(&ng),
-      upf_(n3 != nullptr ? std::make_unique<Upf>(*n3, n3_addr) : nullptr), smf_(p_.session, upf_.get()) {
+      upf_(n3 != nullptr ? std::make_unique<Upf>(*n3, n3_addr) : nullptr), smf_(p_.session, upf_.get()),
+      smsf_(Smsf::Link{
+                [this](const std::string& msisdn) {
+                    // The sim range's MSISDN is 999 and the MSIN's last eight digits (image.hpp).
+                    for (const auto& s : home_.supis()) {
+                        if (auto r = uicc::image::range_subscriber(s); r && r->msisdn == msisdn) {
+                            return s;
+                        }
+                    }
+                    return std::string();
+                },
+                [](const std::string& supi) {
+                    auto r = uicc::image::range_subscriber(supi);
+                    return r ? r->msisdn : std::string();
+                },
+                [this](const std::string& supi, Bytes cp) {
+                    Amf* a = nas_by_supi(supi);
+                    return a != nullptr && a->send_sms(std::move(cp));
+                },
+                [this](const std::string& supi) { page(supi); },
+                [this] { return static_cast<std::uint64_t>(ex_.now()); }},
+            p_.sms_sc) {
     ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [](LinkEvent) {});
     smf_.on_page([this](const std::string& supi, std::uint8_t) { page(supi); });
 }
+
+void NgapAmf::set_sms_subscribed(const std::string& supi, bool on) { sms_sub_[supi] = on; }
 
 void NgapAmf::rebind(IAssoc& ng) {
     ng_ = &ng;
@@ -174,6 +198,8 @@ std::vector<Verdict> NgapAmf::failures() const {
     std::vector<Verdict> out;
     std::copy_if(verdicts_.begin(), verdicts_.end(), std::back_inserter(out), [](const Verdict& v) { return !v.ok; });
     std::copy_if(smf_.verdicts().begin(), smf_.verdicts().end(), std::back_inserter(out), [](const Verdict& v) { return !v.ok; });
+    const auto sf = smsf_.failures();
+    out.insert(out.end(), sf.begin(), sf.end());
     if (upf_) {
         std::copy_if(upf_->verdicts().begin(), upf_->verdicts().end(), std::back_inserter(out),
                      [](const Verdict& v) { return !v.ok; });
@@ -335,6 +361,19 @@ void NgapAmf::relink(Ue& ue) {
                                                     {ngap::SessionCause{psi, ngap::Cause{"nas", "normal-release"}}}},
              stream_of(*u));
     };
+    link.sms_uplink = [this, id](Bytes cp) {
+        if (Ue* u = by_amf(id)) {
+            smsf_.on_uplink(u->nas->supi(), cp);
+        }
+    };
+    link.sms_subscribed = [this, id] {
+        Ue* u = by_amf(id);
+        if (u == nullptr) {
+            return false;
+        }
+        auto it = sms_sub_.find(u->nas->supi());
+        return it != sms_sub_.end() ? it->second : p_.sms_subscribed;
+    };
     ue.nas->attach(std::move(link));
     ue.nas->attach_smf(&smf_);
 }
@@ -421,6 +460,8 @@ void NgapAmf::on_message(ByteView msg) {
                        check(ue != nullptr && ue->ics_sent, "TS 38.413 8.3.1.2", "the response answers a setup request");
                        if (ue != nullptr) {
                            ue->ics_answered = true;
+                           const std::string supi = ue->nas->supi();
+                           ex_.post([this, supi] { smsf_.on_connected(supi); });   // N13: MT SMS that waited
                            for (const auto& s : m.sessions) {
                                ue->setups.erase(std::remove(ue->setups.begin(), ue->setups.end(), s.psi), ue->setups.end());
                                smf_.on_setup_response(ue->nas->supi(), s.psi, s.transfer.dl);   // the user plane is back

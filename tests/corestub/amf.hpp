@@ -77,6 +77,8 @@ struct Profile {
     bool eap_bad_at_mac = false;       // AT_MAC corrupted: the UE answers with a client error
     std::uint16_t eap_kdf = 1;         // the first challenge's AT_KDF (not 1: an incorrect AUTN to the UE)
     bool eap_result_message = false;   // EAP-success in an AUTHENTICATION RESULT before the SMC
+    bool sms_subscribed = true;               // N13: SMS over NAS for a UE that asks (§5.5.1.2.4)
+    std::string sms_sc = "99900000";          // the SC's address digits (cards/usim-5g.yaml EF.SMSP)
     SessionProfile session;   // the SMF's (N10)
 
     /// Reads a profile; unknown keys are an error (YamlError with the path).
@@ -98,6 +100,9 @@ public:
         /// N12: the SERVICE ACCEPT in an INITIAL CONTEXT SETUP REQUEST with K_gNB
         /// and the sessions (bit n for PSI n) whose user plane comes back.
         std::function<void(Bytes accept, SecretBytes kgnb, std::uint16_t psis)> service_accept;
+        /// N13: the UE's SMS CP messages to the SMSF; whether its subscription has SMS.
+        std::function<void(Bytes cp)> sms_uplink;
+        std::function<bool()> sms_subscribed;
     };
 
     Amf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p);
@@ -115,6 +120,8 @@ public:
     /// With a 5GMM cause when not 0 (§5.5.2.3.1). Also while a UE de-registration
     /// waits unanswered (Deregistration::silent), for the collision of §5.5.2.2.6 d.
     bool network_deregister(bool reregistration_required, std::uint8_t cause = 0);
+    /// N13: a DL NAS TRANSPORT with an SMS CP message; false unless registered and connected.
+    bool send_sms(Bytes cp);
     /// Whether this context is the UE's that `id` (a 5G-GUTI) or `s_tmsi` names.
     bool owns(const nas::ie::MobileIdentity& id) const;
     bool owns_s_tmsi(std::uint64_t s_tmsi) const;
@@ -212,6 +219,7 @@ private:
     std::uint8_t eap_id_ = 0;      // the last EAP-request's identifier
     bool eap_fault_ = false;       // the last challenge carried a profile fault
     std::uint16_t reg_uplink_ = 0;   // the REGISTRATION REQUEST's Uplink data status
+    bool sms_requested_ = false;     // N13: the 5GS update type's SMS requested
     std::uint16_t reg_up_ = 0;       // the sessions whose user plane the accept brought back
     std::optional<std::uint32_t> initial_count_;   // the COUNT of a verified initial message
     int service_requests_ = 0;

@@ -20,7 +20,7 @@ for x in "$B/ksim/ksim" "$B/ksim-ctl/ksim-ctl" "$B/ksim-corestub/ksim-corestub" 
     [[ -x "$x" ]] || { echo "NETNS_PRIV=SKIP (no $x; build the dev preset)"; exit 77; }
 done
 T="$(mktemp -d)"
-BLOCK=001010000300001/10
+BLOCK=001010000300001/12
 "$B/ksim-sim/ksim-sim" range init --master "$T/keys/master.key" --kek "$T/keys/kek.key" >/dev/null || exit 1
 "$B/ksim-sim/ksim-sim" range derive --block "$BLOCK" --master "$T/keys/master.key" --kek "$T/keys/kek.key" \
     --out "$T/cards" >/dev/null || exit 1

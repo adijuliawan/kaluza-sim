@@ -61,6 +61,26 @@ secrets: {sealed: cards, kek: ~/k.key}
 peer: {name: stub}
 )";
 
+TEST(Topology, TheRepositorysTopologiesLoad) {
+    // P1 N13: twelve UEs for the stub and Open5GS; the lab adds two from the SMS sub-block.
+    const std::string root = KSIM_SOURCE_DIR;
+    for (const char* f : {"aio-stub.yaml", "aio-open5gs.yaml", "aio-lab.yaml"}) {
+        std::string why;
+        auto t = load_topology(root + "/topologies/" + f, why);
+        ASSERT_TRUE(t) << f << ": " << why;
+        std::size_t n = 0;
+        for (const auto& g : t->ues) {
+            n += g.count;
+        }
+        EXPECT_EQ(n, 12u) << f;
+    }
+    std::string why;
+    auto lab = load_topology(root + "/topologies/aio-lab.yaml", why);
+    ASSERT_TRUE(lab) << why;
+    ASSERT_EQ(lab->ues.size(), 2u);
+    EXPECT_EQ(lab->ues[1].first_imsi, "001010000300050");
+}
+
 TEST(Topology, ReadsTheP1SubsetAndResolvesPaths) {
     const std::string dir = temp_dir();
     std::string why;

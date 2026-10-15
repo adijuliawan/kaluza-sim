@@ -109,6 +109,12 @@ Result<std::pair<Bytes, std::size_t>> utf8_to_gsm7(std::string_view text, unsign
 
 /// UCS2 (big-endian) octets to UTF-8.
 std::string ucs2_to_utf8(ByteView in);
+/// UTF-8 to UCS2 (big-endian); a character outside the BMP is an error (N13).
+Result<Bytes> utf8_to_ucs2(std::string_view text);
+/// The text cut into parts of at most `per_part` septets (GSM 7-bit, an escaped
+/// character counting two and never cut) or UCS2 characters, for a concatenated
+/// message (TS 23.040 9.2.3.24.1; N13). An error for a character the alphabet lacks.
+Result<std::vector<std::string>> split_text(std::string_view text, bool ucs2, std::size_t per_part);
 
 /// One-line JSON summaries for ksim-codec and the harness.
 std::string to_json(const Cp& cp);

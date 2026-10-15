@@ -330,7 +330,16 @@ void Amf::on_message(const nas::Message& m, Sht sht, bool initial, bool verified
 }
 
 void Amf::on_registration_request(const nas::Message& m, bool initial, Sht sht, bool verified) {
-    check(initial, "5.5.1.2.2", "REGISTRATION REQUEST is the initial NAS message");
+    // A mobility or periodic update may also come on the N1 connection the UE
+    // has, protected with the current context (§5.5.1.3.2; N13: SMS requested again).
+    const bool on_connection = !initial && state_ == State::registered && ctx_.has_value() &&
+                               sht == Sht::integrity_ciphered;
+    check(initial || on_connection, "5.5.1.2.2, 5.5.1.3.2",
+          "REGISTRATION REQUEST is the initial NAS message, or an update on the UE's connection");
+    if (on_connection) {
+        verified = true;
+        initial_count_ = last_ul_.value_or(0);
+    }
     stop_t3560();
     if (!verified) {
         // No context the AMF can use: what the stub knew of the last procedure goes.
@@ -349,6 +358,12 @@ void Amf::on_registration_request(const nas::Message& m, bool initial, Sht sht, 
     reg_type_ = type ? type->value : std::uint8_t{1};
     reg_uplink_ = 0;
     reg_up_ = 0;
+    sms_requested_ = false;
+    if (const Bytes* ut = nas::get(m, "5GS update type")) {
+        if (auto u = ie::UpdateType::decode(*ut)) {
+            sms_requested_ = u->sms_requested;
+        }
+    }
     if (const Bytes* u = nas::get(m, "Uplink data status")) {
         if (auto b = ie::PsiBitmap::decode(*u)) {
             reg_uplink_ = b->psis;
@@ -466,6 +481,17 @@ void Amf::on_service_request(const nas::Message& m, bool initial, bool verified)
     } else {
         downlink(std::move(*wire));
     }
+}
+
+bool Amf::send_sms(Bytes cp) {
+    if (state_ != State::registered || !ctx_ || !connected_) {
+        return false;
+    }
+    nas::Message d = make(kDlNasTransport);
+    put(d, "Payload container type", Bytes{ie::PayloadContainerType::sms});
+    put(d, "Payload container", std::move(cp));
+    send(d, true);
+    return true;
 }
 
 bool Amf::network_deregister(bool reregistration_required, std::uint8_t cause) {
@@ -791,6 +817,14 @@ void Amf::on_security_mode_complete(const nas::Message& m, Sht sht) {
                           nas::get(*full, "UE security capability") != nullptr &&
                           *nas::get(*full, "UE security capability") == *nas::get(initial_, "UE security capability");
         check(same, "4.4.6", "the container repeats the initial message's cleartext IEs");
+        if (full) {
+            // The non-cleartext IEs come only now (N13: the 5GS update type).
+            if (const Bytes* ut = nas::get(*full, "5GS update type")) {
+                if (auto u = ie::UpdateType::decode(*ut)) {
+                    sms_requested_ = u->sms_requested;
+                }
+            }
+        }
     }
     send_registration_result();
 }
@@ -821,7 +855,10 @@ void Amf::send_registration_result() {
         guti_ = g;
         guti_supi_ = supi_;
         nas::Message a = make(kRegistrationAccept);
-        put(a, "5GS registration result", ie::RegistrationResult{}.encode());
+        // §5.5.1.2.4: SMS over NAS allowed to a UE that asked, with SMS in its subscription (N13).
+        ie::RegistrationResult result;
+        result.sms_allowed = sms_requested_ && (link_.sms_subscribed ? link_.sms_subscribed() : p_.sms_subscribed);
+        put(a, "5GS registration result", result.encode());
         put(a, "5G-GUTI", g.encode());
         ie::TaiList tl;
         for (std::uint32_t tac : p_.tacs) {
@@ -935,8 +972,14 @@ void Amf::on_ul_nas_transport(const nas::Message& m, Sht sht) {
     if (type == nullptr || type->empty() || payload == nullptr) {
         return;
     }
+    if (((*type)[0] & 0x0F) == ie::PayloadContainerType::sms) {
+        if (link_.sms_uplink) {
+            link_.sms_uplink(*payload);   // §5.4.5.2.4: to the SMSF (N13)
+        }
+        return;
+    }
     if (((*type)[0] & 0x0F) != ie::PayloadContainerType::n1_sm) {
-        check(false, "5.4.5.2.2", "a payload container type the stub serves (N1 SM)", std::to_string((*type)[0] & 0x0F));
+        check(false, "5.4.5.2.2", "a payload container type the stub serves (N1 SM, SMS)", std::to_string((*type)[0] & 0x0F));
         return;
     }
     const Bytes* psi_v = nas::get(m, "PDU session ID");

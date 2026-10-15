@@ -108,6 +108,7 @@ struct SmUplink {
     std::optional<std::uint8_t> request_type;   // §9.11.3.47; establishment: initial request
     std::optional<nas::ie::Snssai> snssai;
     std::optional<std::string> dnn;
+    bool sms = false;   // N13: `sm` is an SMS CP message (payload container type SMS, no PSI)
 };
 
 /// A DL NAS TRANSPORT with an N1 SM payload (§5.4.5.3.1). With a 5GMM cause,
@@ -127,6 +128,7 @@ struct MmConfig {
     std::vector<nas::ie::Snssai> requested_nssai;
     std::string imeisv;                            // 16 digits
     bool follow_on_request = false;
+    bool sms_requested = true;                     // N13: SMS over NAS in the 5GS update type
     std::uint64_t seed = 0;                        // the run's, for T3247's draw (keyed by the SUPI)
     MmTimerValues timers;
     /// Each 5GMM message in clear, as sent before protection and as taken
@@ -134,6 +136,10 @@ struct MmConfig {
     std::function<void(bool uplink, ByteView plain)> tap;
     /// 5GSM's downlink (N10).
     std::function<void(const SmDownlink&)> sm;
+    /// N13: an SMS CP message in a DL NAS TRANSPORT, and SMS over NAS allowed
+    /// or not after each REGISTRATION ACCEPT (§5.5.1.2.4).
+    std::function<void(ByteView cp)> sms;
+    std::function<void(bool allowed)> sms_allowed;
     SmHooks sm_hooks;
 };
 
@@ -174,6 +180,23 @@ public:
     void usim_inserted();
     /// The cell the UE camps on: its TAI is the current TAI (§5.3.13).
     void on_camped(std::uint32_t tac);
+
+    // ---- SMS over NAS (N13)
+
+    /// An SMS CP message to the network (§5.4.5.2: payload container type SMS);
+    /// from 5GMM-IDLE a service request brings the connection first.
+    Result<void> send_sms(Bytes cp);
+    bool sms_allowed() const noexcept { return sms_allowed_; }
+    /// TS-Service-Centre-Address from EF.SMSP record 1 (TON/NPI and digits), when
+    /// the card gives one (TS 31.102 4.2.27); RP-DA comes from it (L7).
+    const std::optional<Bytes>& sms_service_centre() const noexcept { return smsc_; }
+    /// EF.SMSS as read at power on (TS 31.102 4.2.28).
+    const Bytes& smss() const noexcept { return smss_; }
+    /// Writes to the SMS files through the card queue: an EF.SMS record, EF.SMSS.
+    void store_sms_record(std::uint8_t record, Bytes data);
+    void store_smss(Bytes data);
+    /// A mobility registration update, e.g. to ask for SMS again (§5.5.1.3.2).
+    Result<void> register_update();
 
     // ---- from 5GSM
 
@@ -256,6 +279,8 @@ private:
         std::uint16_t fid = 0;
         bool record = false;
         std::shared_ptr<SecretBytes> data;   // two of the files hold keys
+        std::vector<std::uint16_t> path;     // empty: DF.5GS/fid (N13: the SMS files under ADF.USIM)
+        std::uint8_t record_no = 1;
     };
     void card_job(CardWrite w);
     coro::Task<void> run_card_jobs(std::shared_ptr<bool> alive);
@@ -334,6 +359,9 @@ private:
     RegType reg_type_ = RegType::initial;
     bool recovery_pending_ = false;    // §5.5.1.3.2 f
     std::uint16_t reg_uplink_ = 0;     // the mobility registration's Uplink data status, until accepted
+    bool sms_allowed_ = false;         // N13: from the last REGISTRATION ACCEPT
+    std::optional<Bytes> smsc_;        // EF.SMSP's service centre address
+    Bytes smss_;                       // EF.SMSS
     std::uint16_t recovery_up_ = 0;    // its Uplink data status
     std::optional<nas::ie::Tai> last_tai_;      // the last visited registered TAI
     std::optional<nas::ie::Tai> current_tai_;   // the camped cell's

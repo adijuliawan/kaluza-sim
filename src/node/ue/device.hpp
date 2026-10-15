@@ -37,6 +37,7 @@
 #include "platform/result.hpp"
 #include "proc/ue/nas_mm/mm.hpp"
 #include "proc/ue/nas_sm/sm.hpp"
+#include "proc/ue/sms/sms.hpp"
 #include "proc/ue/rrc/rrc.hpp"
 #include "uicc/os/card.hpp"
 #include "uicc/terminal/terminal.hpp"
@@ -106,6 +107,14 @@ public:
     Result<void> power_off_abrupt();
     /// SERVICE REQUEST for signalling (cli.md service-request).
     Result<void> service_request();
+    // ---- SMS over NAS (N13)
+    /// An MO message: its parts, or an error while SMS over NAS is not allowed.
+    Result<std::size_t> sms_send(const proc::ue::SmsSubmit& m);
+    const std::vector<proc::ue::StoredSms>& sms_list() const { return sms_->messages(); }
+    void sms_memory(bool full) { sms_->memory(full); }
+    bool sms_allowed() const { return mm_->sms_allowed(); }
+    /// A mobility registration update (e.g. SMS requested again).
+    Result<void> register_update();
     /// The UICC taken out of or put back into the reader (TS 24.501 5.5.2.2.1).
     Result<void> sim(bool present);
     /// Airplane mode: on, a registered UE de-registers as for switch-off and the
@@ -177,6 +186,7 @@ private:
     std::unique_ptr<proc::ue::UeRrc> rrc_;
     std::unique_ptr<proc::ue::Mm> mm_;
     std::unique_ptr<proc::ue::Sm> sm_;
+    std::unique_ptr<proc::ue::Sms> sms_;
     IEventSink& events_;
     std::optional<Ping> ping_;
     std::uint16_t ping_id_ = 0;

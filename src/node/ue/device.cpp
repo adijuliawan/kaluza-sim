@@ -61,7 +61,18 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     mc.sm_hooks.active = [this] { return sm_->active_bitmap(); };
     mc.sm_hooks.sync = [this](std::uint16_t network) { sm_->sync(network); };
     mc.sm_hooks.release_all = [this] { sm_->release_all_local("network"); };
+    mc.sms = [this](ByteView cp) { sms_->on_downlink(cp); };
     mm_ = std::make_unique<proc::ue::Mm>(ex_, terminal_, *rrc_, events, mc);
+    proc::ue::SmsConfig smc;
+    smc.id = subject;
+    proc::ue::SmsPorts sp;
+    sp.send = [this](Bytes cp) { return mm_->send_sms(std::move(cp)); };
+    sp.allowed = [this] { return mm_->sms_allowed(); };
+    sp.service_centre = [this] { return mm_->sms_service_centre(); };
+    sp.store = [this](std::uint8_t record, Bytes data) { mm_->store_sms_record(record, std::move(data)); };
+    sp.store_smss = [this](Bytes data) { mm_->store_smss(std::move(data)); };
+    sp.smss = [this] { return mm_->smss(); };
+    sms_ = std::make_unique<proc::ue::Sms>(ex_, events, smc, std::move(sp));
     proc::ue::SmConfig sc;
     sc.id = subject;
     proc::ue::SmUpper su;
@@ -261,6 +272,7 @@ Result<void> UeDevice::deregister(bool switch_off) {
     // TS 24.501 §5.5.2.2.1: the UE's PDU sessions go with its registration.
     sm_->release_all_local(switch_off ? "switch-off" : "deregistration");
     held_.clear();
+    sms_->reset();   // SMS transactions end with the registration (TS 24.011 5.3.2.1)
     if (switch_off) {
         powered_ = false;   // 5GMM-NULL at once: the UE is off (§5.5.2.2.1)
         rrc_->power_off_after_nas();   // from CM-IDLE the request still has to reach the AMF (F-46)
@@ -277,6 +289,7 @@ Result<void> UeDevice::power_off_abrupt() {
     mm_->power_off_abrupt();
     sm_->release_all_local("switch-off");
     held_.clear();
+    sms_->reset();
     powered_ = false;
     events_.emit("ue.power", subject(), {{"state", "off"}, {"mode", "abrupt"}});
     return {};
@@ -295,6 +308,7 @@ Result<void> UeDevice::sim(bool present) {
                 sm_->release_all_local("deregistration");   // the de-registration takes the sessions
                 held_.clear();
             }
+            sms_->reset();
             mm_->usim_removed();
         }
         return {};
@@ -331,6 +345,23 @@ Result<void> UeDevice::airplane(bool on) {
     airplane_ = false;
     events_.emit("ue.airplane", subject(), {{"on", "0"}});
     return power_on();
+}
+
+Result<std::size_t> UeDevice::sms_send(const proc::ue::SmsSubmit& m) {
+    if (!powered_) {
+        return make_error(Errc::invalid_argument, 0, "the UE is off");
+    }
+    if (!proc::ue::is_registered(mm_->state())) {
+        return make_error(Errc::invalid_argument, 0, "the UE is not registered");
+    }
+    return sms_->send(m);
+}
+
+Result<void> UeDevice::register_update() {
+    if (!powered_) {
+        return make_error(Errc::invalid_argument, 0, "the UE is off");
+    }
+    return mm_->register_update();
 }
 
 Result<void> UeDevice::service_request() {

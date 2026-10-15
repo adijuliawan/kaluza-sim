@@ -71,7 +71,10 @@ paths:
       responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
   /v1/ue/{sel}/register:
     post:
-      summary: type=initial; wait_ms as for power on
+      summary: >-
+        type=initial; wait_ms as for power on. type=update (N13): a mobility
+        registration update on the UE's connection (SMS requested again), ending at
+        nas.reg.accept type=mobility
       parameters: [{$ref: "#/components/parameters/sel"}]
       responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
   /v1/ue/{sel}/deregister:
@@ -101,6 +104,29 @@ paths:
       summary: >-
         N12: state=on de-registers as for switch-off and turns the radio off; state=off
         powers the UE on again
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/sms-send:
+    post:
+      summary: >-
+        N13: to (digits), text (UTF-8), ucs2=1, srr=1, vp (TP-VP relative): an MO short
+        message, in concatenated parts past one TPDU; with wait_ms it ends at the last
+        part's sms.mo.done (RESULT ack, error with CAUSE, or failed). Exit 6 with
+        nothing sent while SMS over NAS is not allowed
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/sms:
+    get:
+      summary: >-
+        N13: SMS_ALLOWED, MESSAGES and per stored message SMS.<n>.FROM, .TEXT, .DCS,
+        .UD (TP-UD, hex), .RECORD (EF.SMS), .CONCAT (part/parts/reference)
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/sms-memory:
+    post:
+      summary: >-
+        N13: state=full makes MT messages get RP-ERROR #22; state=available sends
+        RP-SMMA when the network had a #22 (TS 24.011 6.3.2)
       parameters: [{$ref: "#/components/parameters/sel"}]
       responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
   /v1/ue/{sel}/ps:
@@ -231,6 +257,12 @@ paths:
     post:
       summary: "ksim-corestub, N12: seconds: the T3512 value of the next accepts"
       responses: {"200": {$ref: "#/components/responses/Reply"}}
+  /v1/stub/sms-sub:
+    post:
+      summary: >-
+        ksim-corestub, N13: ue (SUPI), on=0|1: SMS in that UE's subscription or not,
+        for its next REGISTRATION ACCEPT (kept until the gNB associates)
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
   /v1/stub/restart:
     post:
       summary: >-

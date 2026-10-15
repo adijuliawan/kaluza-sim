@@ -127,3 +127,19 @@ nas.mm.t3247.expiry	24.501 5.3.20.2	T3247 ran out: the TAs forbidden by unprotec
 nas.mm.usim	24.501 5.5.2.2.1	the UICC removed or inserted, as 5GMM sees it; state=removed|inserted
 ue.sim	sim	ksim-ctl ue sim: the UICC taken out of or put back into the reader; present
 ue.airplane	sim	ksim-ctl ue airplane: airplane mode switched; on
+sms.cp.data	24.011 5.3.2	a CP-DATA sent (dir=ul) or taken (dir=dl); ti, transmission (1, then TC1* retransmissions)
+sms.cp.ack	24.011 5.3.2	a CP-ACK sent or taken; dir, ti
+sms.cp.error	24.011 7.2.3	a CP-ERROR sent or taken: the transaction ends; dir, ti, cause
+sms.cp.timeout	24.011 5.3.2.1	TC1* ran out after the last retransmission: the transaction ends; ti, kind
+sms.rp.data	24.011 7.3.1	an MO RP-DATA sent; dir=ul, mr, ti
+sms.rp.ack	24.011 7.3.3	RP-ACK: taken for an MO message (dir=dl, mr, tp_mr) or sent for an MT one (dir=ul, mr)
+sms.rp.error	24.011 7.3.4	RP-ERROR: taken for an MO message (dir=dl) or sent for an MT one (dir=ul, cause 22 when the memory is full); mr, cause
+sms.rp.smma	24.011 7.3.2	RP-SMMA sent: memory available again after a #22; dir=ul, mr, ti
+sms.mo.submit	23.040 9.2.2.2	an SMS-SUBMIT queued; to, part, parts, tp_mr, dcs, ud (TP-UD, hex)
+sms.mo.done	24.011 6.3.1	an MO transfer or memory notification ended; result=ack|error|failed, cause, why (TC1*, TR1M, TRAM, CP-ERROR), tp_mr, kind
+sms.mo.refused	24.501 5.4.5.2	an SMS not sent: SMS over NAS is not allowed; why
+sms.mo.no_service_centre	31.102 4.2.27	EF.SMSP gives no service centre: RP-DA goes empty
+sms.mt.deliver	23.040 9.2.2.1	an SMS-DELIVER stored in EF.SMS; from, record, dcs, ud (hex), concat (part/parts), text
+sms.mt.duplicate	24.011 5.3.2.1	a CP-DATA repeated on an MT transaction the UE answered: acknowledged again, not delivered; ti
+sms.memory	24.011 6.3.2	sms-memory: full or available; full, network_told (the network had a #22)
+sms.discard	24.011 9	a CP or RP message the UE could not use; what

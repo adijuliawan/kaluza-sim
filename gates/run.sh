@@ -35,6 +35,9 @@ bin() {
 KSIM=$(bin ksim); KSIM_CTL=$(bin ksim-ctl); STUB_BIN=$(bin ksim-corestub)
 export KSIM_CTL KSIM_ROOT="$ROOT" CORE
 [ -n "${SLICE:-}" ] && export SLICE
+for v in SMS_UE1 SMS_UE2 NOSMS_UE3; do
+    eval "[ -n \"\${$v:-}\" ] && export $v"
+done
 : "${KSIM_RUNS:=$ROOT/runs}"
 : "${KSIM_MASTER:=$HOME/.kaluza-sim/secrets/range-master.key}"
 

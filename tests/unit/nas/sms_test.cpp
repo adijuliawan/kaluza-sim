@@ -272,5 +272,32 @@ TEST(Rp, ReservedTypesAndUnknownIes) {
     EXPECT_EQ(cut.error().code, Errc::truncated);
 }
 
+// N13: the UE's encoders for MO messages.
+TEST(Ucs2, KoreanRoundTripsAndANonBmpCharacterIsRefused) {
+    auto u = utf8_to_ucs2("안녕");
+    ASSERT_TRUE(u);
+    EXPECT_EQ(to_hex(*u), "c548b155");
+    EXPECT_EQ(ucs2_to_utf8(*u), "안녕");
+    EXPECT_FALSE(utf8_to_ucs2("\xF0\x9F\x98\x80"));   // U+1F600 is outside the BMP
+}
+
+TEST(SplitText, PartsHoldAtMostTheirSeptetsAndNeverCutAnEscape) {
+    auto one = split_text("hello", false, 160);
+    ASSERT_TRUE(one);
+    EXPECT_EQ(one->size(), 1u);
+    // 152 'a', then '[' (escape + septet): it does not fit the first 153-septet part.
+    std::string t(152, 'a');
+    t += "[b";
+    auto two = split_text(t, false, 153);
+    ASSERT_TRUE(two);
+    ASSERT_EQ(two->size(), 2u);
+    EXPECT_EQ((*two)[0], std::string(152, 'a'));
+    EXPECT_EQ((*two)[1], "[b");
+    auto u = split_text(std::string(std::size_t{3} * 67, 'x'), true, 67);
+    ASSERT_TRUE(u);
+    EXPECT_EQ(u->size(), 3u);
+    EXPECT_FALSE(split_text("\xE2\x82\xAC\xE2\x98\x83", false, 160));   // a snowman is not GSM 7-bit
+}
+
 } // namespace
 } // namespace ksim::sms

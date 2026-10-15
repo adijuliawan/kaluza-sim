@@ -34,6 +34,7 @@
 
 #include "amf.hpp"
 #include "smf.hpp"
+#include "smsf.hpp"
 #include "upf.hpp"
 #include "codec/asn1/msg/ngap.hpp"
 #include "platform/transport.hpp"
@@ -80,6 +81,9 @@ public:
     };
     std::optional<UeIds> ids(std::size_t n) const;
     Smf& smf() noexcept { return smf_; }
+    Smsf& smsf() noexcept { return smsf_; }
+    /// N13: SMS in a UE's subscription or not (ksim-ctl stub sms-sub); the next accept says so.
+    void set_sms_subscribed(const std::string& supi, bool on);
     Upf* upf() noexcept { return upf_.get(); }
 
 private:
@@ -115,6 +119,8 @@ private:
     IAssoc* ng_;
     std::unique_ptr<Upf> upf_;
     Smf smf_;
+    Smsf smsf_;
+    std::map<std::string, bool> sms_sub_;   // per SUPI, over the profile's sms_subscribed
     bool ng_setup_ = false;
     std::map<std::uint64_t, Ue> ues_;   // by AMF UE NGAP ID
     std::vector<std::uint64_t> order_;  // AMF UE NGAP IDs in arrival order

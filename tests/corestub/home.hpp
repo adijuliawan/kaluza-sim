@@ -49,6 +49,14 @@ public:
 
     void add(std::string supi, SecretBytes k, SecretBytes opc, std::uint64_t seq = 0);
     bool has(const std::string& supi) const { return subs_.count(supi) != 0; }
+    std::vector<std::string> supis() const {
+        std::vector<std::string> out;
+        out.reserve(subs_.size());
+        for (const auto& [s, sub] : subs_) {
+            out.push_back(s);
+        }
+        return out;
+    }
     /// The SUPI with this PLMN and MSIN, or empty.
     std::string find(std::string_view mcc, std::string_view mnc, std::string_view msin) const;
     std::uint64_t seq(const std::string& supi) const;

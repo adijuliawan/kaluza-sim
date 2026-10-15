@@ -458,6 +458,76 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         return run_ue_command(aio, req,
                               UeCommand{[on](UeDevice& u) { return u.airplane(on); }, {}, {}, {}, "airplane"});
     });
+    // ---- SMS over NAS (N13) ----
+    server.post("/v1/ue/:sel/sms-send", [&aio](const Request& req) {
+        proc::ue::SmsSubmit m;
+        m.to = req.arg("to");
+        m.text = req.arg("text");
+        m.ucs2 = req.arg("ucs2") == "1";
+        m.status_report = req.arg("srr") == "1";
+        if (const std::string vp = req.arg("vp"); !vp.empty()) {
+            m.vp = static_cast<std::uint8_t>(std::min<std::uint64_t>(number(vp, 167), 255));
+        }
+        if (m.to.empty() || m.text.empty()) {
+            return Reply::fail(Exit::usage, "sms-send <digits> <text> [--ucs2] [--srr]");
+        }
+        return run_ue_command(aio, req,
+                              UeCommand{[m](UeDevice& u) -> Result<void> {
+                                            auto r = u.sms_send(m);
+                                            if (!r) {
+                                                return r.error();
+                                            }
+                                            return {};
+                                        },
+                                        {"sms.mo.done"},
+                                        {},
+                                        {},
+                                        "sms-send"});
+    });
+    server.get("/v1/ue/:sel/sms", [&aio](const Request& req) {
+        const std::string sel = req.params.at("sel");
+        auto s = aio.call<Reply>([&aio, sel] {
+            UeDevice* ue = aio.ue(sel);
+            if (ue == nullptr) {
+                return Reply::fail(Exit::unknown, "no such UE");
+            }
+            Reply r;
+            r.set("UE", ue->subject().substr(3));
+            r.set("SMS_ALLOWED", ue->sms_allowed() ? "1" : "0");
+            const auto& list = ue->sms_list();
+            r.set("MESSAGES", static_cast<std::int64_t>(list.size()));
+            for (std::size_t i = 0; i < list.size(); ++i) {
+                const std::string k = "SMS." + std::to_string(i + 1);
+                const auto& m = list[i];
+                r.set(k + ".FROM", m.from);
+                r.set(k + ".TEXT", m.text);
+                r.set(k + ".DCS", static_cast<std::int64_t>(m.dcs));
+                r.set(k + ".UD", to_hex(m.ud));
+                r.set(k + ".RECORD", static_cast<std::int64_t>(m.record));
+                if (m.concat) {
+                    r.set(k + ".CONCAT", fmt::format("{}/{}/{}", (*m.concat)[0], (*m.concat)[2], (*m.concat)[1]));
+                }
+            }
+            return r;
+        });
+        return s ? *s : unsound();
+    });
+    server.post("/v1/ue/:sel/sms-memory", [&aio](const Request& req) {
+        const std::string state = req.arg("state");
+        if (state != "full" && state != "available") {
+            return Reply::fail(Exit::usage, "sms-memory full|available");
+        }
+        const bool full = state == "full";
+        return run_ue_command(aio, req,
+                              UeCommand{[full](UeDevice& u) -> Result<void> {
+                                            u.sms_memory(full);
+                                            return {};
+                                        },
+                                        {},
+                                        {},
+                                        {},
+                                        "sms-memory"});
+    });
     server.post("/v1/ue/:sel/service-request", [&aio](const Request& req) {
         return run_ue_command(aio, req,
                               UeCommand{[](UeDevice& u) { return u.service_request(); },
@@ -467,8 +537,18 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                                         "service-request"});
     });
     server.post("/v1/ue/:sel/register", [&aio](const Request& req) {
-        if (const std::string type = req.arg("type", "initial"); type != "initial") {
-            return Reply::fail(Exit::capability, "register --type " + type + " comes with N12");
+        const std::string type = req.arg("type", "initial");
+        if (type == "update") {
+            // N13: a mobility registration update (e.g. SMS requested again).
+            return run_ue_command(aio, req,
+                                  UeCommand{[](UeDevice& u) { return u.register_update(); },
+                                            {"nas.reg.accept"},
+                                            {"nas.reg.reject", "nas.reg.abort"},
+                                            {{"type", "mobility"}},
+                                            "registration update"});
+        }
+        if (type != "initial") {
+            return Reply::fail(Exit::usage, "register --type initial|update");
         }
         return run_ue_command(aio, req,
                               UeCommand{[](UeDevice& u) { return u.register_initial(); },
