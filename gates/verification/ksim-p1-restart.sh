@@ -88,6 +88,7 @@ else
         skip_row "$r" "no AMF restart trigger on $CORE in this run (Open5GS: N17)"
     done
 fi
+release_all "$UE"
 ctl ue "$UE" power off --switch-off --wait 10s >/dev/null
 
 summary ksim-p1-restart

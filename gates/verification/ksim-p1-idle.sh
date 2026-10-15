@@ -86,6 +86,7 @@ else
         skip_row "$r" "no DN-side ping on $CORE (DN_PING)"
     done
 fi
+release_all 6
 ctl ue 6 power off --switch-off --wait 10s >/dev/null
 
 echo "-- the periodic registration and the 5G-GUTI across a power cycle (UE 7)"
@@ -97,6 +98,7 @@ if on_stub; then
     stub t3512 --seconds 8 >/dev/null || abort "the stub did not take t3512"
 fi
 seq=$(ctl info | kv EVENT_SEQ)
+release_all 7
 ctl ue 7 power off --switch-off --wait 10s >/dev/null
 ctl ue 7 power on --wait 30s | grep -q '^RESULT=ACCEPT$' || abort "UE 7 did not register again"
 req=$(ctl ue 7 wait nas.reg.request --since "$seq" --timeout 5s)
@@ -132,6 +134,7 @@ else
         skip_row "$r" "needs the short subsRegTimer sub-block's UE on $CORE (N17/N18)"
     done
 fi
+release_all 7
 ctl ue 7 power off --switch-off --wait 10s >/dev/null
 
 echo "-- radio loss and a session asked for again (UE 8)"
@@ -166,6 +169,7 @@ if on_stub; then
 else
     skip_row ksim-p1.reregistration-required "no network-side de-registration trigger on $CORE in P1"
 fi
+release_all 8
 ctl ue 8 power off --switch-off --wait 10s >/dev/null
 
 summary ksim-p1-idle

@@ -88,6 +88,8 @@ else
     skip_row ksim-p1.backoff "needs a core-side #29 with a back-off timer (N17/N18 triage)"
 fi
 
+release_all "$UE"
+
 ctl ue "$UE" power off --switch-off --wait 10s >/dev/null
 
 echo "-- a fresh UE (UE 4)"
@@ -96,6 +98,7 @@ est3=$(ctl ue 4 ps-establish ipv4 --dnn internet --sst 1 --wait 15s)
 list=$(ctl ue 4 ps-list)
 row smf-ueransim.040 '^ACCEPT sessions=1$' \
     "$(printf '%s\n' "$est3" | kv RESULT) sessions=$(printf '%s\n' "$list" | kv PDU_SESSIONS)"
+release_all 4
 ctl ue 4 power off --switch-off --wait 10s >/dev/null
 
 summary ksim-p1-session

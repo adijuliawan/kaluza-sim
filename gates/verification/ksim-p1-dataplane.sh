@@ -10,6 +10,7 @@
 # (inject mode) has no TUN: those rows SKIP; the QFI row scores in both.
 #
 #   RUN=<run dir> CORE=stub|open5gs|kaluza gates/verification/ksim-p1-dataplane.sh
+#   [IMS_ADDR=<IPv4>]  pinged on the ims session too, as evidence (kaluza-core: 172.30.63.10)
 #   [DN_ADDR=<IPv4>]   the address pinged (default 10.60.0.1, the stub's DN;
 #                      172.30.61.1 on kaluza-core)
 #
@@ -30,7 +31,7 @@ est=$(ctl ue "$UE" ps-establish ipv4 --dnn internet --sst 1 --wait 15s)
 [ "$(printf '%s\n' "$est" | kv RESULT)" = ACCEPT ] || abort "no internet session: $(printf '%s\n' "$est" | kv CAUSE)"
 ip=$(printf '%s\n' "$est" | kv IP)
 psi=$(printf '%s\n' "$est" | kv PSI)
-ctl ue "$UE" ps-establish ipv4 --dnn ims --sst 1 --wait 15s >/dev/null
+psi_ims=$(ctl ue "$UE" ps-establish ipv4 --dnn ims --sst 1 --wait 15s | kv PSI)
 
 ifs=$(ctl ue "$UE" ifaces)
 mode=$(printf '%s\n' "$ifs" | kv MODE)
@@ -54,6 +55,11 @@ if [ "$mode" = netns ]; then
         "received=$got dl_packets=$(printf '%s\n' "$ifs" | kv "IF.pdu$psi.DL_PACKETS")"
     probe=$(ctl ue "$UE" ping "$DN_ADDR" --psi "$psi" -c 1 --size 1372 --df)
     echo "   1400-octet probe (DF): received=$(printf '%s\n' "$probe" | kv RECEIVED)"
+    if [ -n "${IMS_ADDR:-}" ] && [ -n "$psi_ims" ]; then
+        # Evidence only (no row): the ims session's own peer (kaluza-core: the P-CSCF).
+        ipng=$(ctl ue "$UE" ping "$IMS_ADDR" --psi "$psi_ims" -c 3 --interval 200)
+        echo "   ims ping $IMS_ADDR: sent=$(printf '%s\n' "$ipng" | kv SENT) received=$(printf '%s\n' "$ipng" | kv RECEIVED)"
+    fi
 else
     for r in amf-ueransim.014 smf-ueransim.010 amf-ueransim.015 amf-ueransim.018 smf-ueransim.020; do
         skip_row "$r" "inject mode: no TUN in this run (needs ksim-netd, topology netd: ues)"
@@ -67,5 +73,6 @@ dl=$(tshark_fields "$RUN/gtpu.pcapng" "gtp.ext_hdr.pdu_ses_con.pdu_type == 0 && 
     gtp.ext_hdr.pdu_ses_con.qos_flow_id | sort -u | tr '\n' ' ' | sed 's/ $//')
 row smf-ueransim.017 "^rule=$qfi dl=$qfi\$" "rule=$qfi dl=$dl"
 
+release_all "$UE"
 ctl ue "$UE" power off --switch-off --wait 10s >/dev/null
 summary ksim-p1-dataplane

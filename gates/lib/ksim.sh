@@ -65,6 +65,14 @@ skip_row() {
     skip=$((skip + 1)); printf '  SKIP  %-66s %s\n' "$_text" "$2"; record "$1" SKIP "$2"
 }
 
+# release_all UE: releases each of the UE's PDU sessions before it de-registers, so
+# no PFCP session is left behind on a real core (agreed with kaluza-core for W1).
+release_all() {
+    for _psi in $(ctl ue "$1" ps-list | sed -n 's/^PS\.\([0-9][0-9]*\)\.DNN=.*/\1/p'); do
+        ctl ue "$1" ps-release "$_psi" --wait 15s >/dev/null || echo "   UE $1: PSI $_psi not released"
+    done
+}
+
 # summary NAME: prints the totals; the gate's exit status is 0 with no FAIL.
 summary() {
     printf '\n== %s: %d passed, %d failed, %d skipped, %d allowed ==\n' "$1" "$pass" "$fail" "$skip" "$allowed"
