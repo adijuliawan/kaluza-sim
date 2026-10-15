@@ -9,3 +9,4 @@ name	row	description
 null_suci_full_imsi	ksim-p1.reg-null-suci	the null-scheme SUCI carries the whole IMSI instead of the MSIN (TS 33.501 6.12.2, TS 23.003 2.2B)
 kamf_input_sbi_spelling	amf-ueransim.012	K_AMF derived with the SUPI in its SBI form "imsi-..." instead of its digits (TS 33.501 A.7.0)
 kgnb_wrong_ul_count	ksim-p1.as-smc-nia2	K_gNB derived from the next uplink NAS COUNT instead of the SECURITY MODE COMPLETE's (TS 33.501 6.8.1.2.2)
+ignore_backoff	ksim-p1.backoff	a PDU SESSION ESTABLISHMENT REQUEST sent while a back-off timer runs for its DNN and S-NSSAI (TS 24.501 6.4.1.4.3)

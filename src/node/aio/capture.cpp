@@ -6,10 +6,12 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <utility>
 
+#include "codec/asn1/msg/e1ap.hpp"
 #include "codec/asn1/msg/ngap.hpp"
 
 namespace ksim::node {
@@ -23,7 +25,7 @@ std::int64_t wall_ns() {
 
 } // namespace
 
-Result<void> Capture::open_file(File& out, const std::string& path, std::string_view ifc_name) {
+Result<void> Capture::open_file(File& out, const std::string& path, std::string_view ifc_name, pcap::LinkType type) {
     const int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
     if (fd < 0) {
         return make_error(Errc::io, static_cast<std::uint32_t>(errno), "capture: cannot create a pcapng file");
@@ -37,18 +39,22 @@ Result<void> Capture::open_file(File& out, const std::string& path, std::string_
     out.w = std::make_unique<pcap::PcapngWriter>([f](ByteView block) {
         (void)std::fwrite(block.data(), 1, block.size(), f);
     });
-    out.ifc = out.w->add_interface(pcap::LinkType::upper_pdu, ifc_name);
+    out.ifc = out.w->add_interface(type, ifc_name);
     std::fflush(f);
     return {};
 }
 
 Result<std::unique_ptr<Capture>> Capture::open(const std::string& dir) {
     std::unique_ptr<Capture> c(new Capture());   // NOLINT(cppcoreguidelines-owning-memory): private constructor
-    for (auto [file, name] : {std::pair{&c->ngap_, "ngap"}, std::pair{&c->f1ap_, "f1ap"}, std::pair{&c->uu_, "uu"}}) {
+    for (auto [file, name] : {std::pair{&c->ngap_, "ngap"}, std::pair{&c->f1ap_, "f1ap"}, std::pair{&c->e1ap_, "e1ap"},
+                              std::pair{&c->uu_, "uu"}}) {
         auto r = open_file(*file, dir + "/" + name + ".pcapng", name);
         if (!r) {
             return r.error();
         }
+    }
+    if (auto r = open_file(c->gtpu_, dir + "/gtpu.pcapng", "gtpu", pcap::LinkType::ipv4); !r) {
+        return r.error();
     }
     return c;
 }
@@ -81,6 +87,37 @@ void Capture::f1ap(bool cu_tx, ByteView pdu) {
     write(f1ap_, "f1ap", pdu, cu_tx ? "cu->du" : "du->cu");
 }
 
+void Capture::e1ap(bool cp_tx, ByteView pdu) {
+    auto r = e1ap::redact_keys(pdu);
+    const std::lock_guard lock(mu_);
+    if (!r) {
+        ++stats_.left_out;
+        return;
+    }
+    stats_.keys_zeroed += r->keys;
+    ++stats_.e1ap;
+    write(e1ap_, "e1ap", r->pdu, cp_tx ? "cp->up" : "up->cp");
+}
+
+void Capture::gtpu(const Endpoint& from, const Endpoint& to, ByteView pdu) {
+    if (from.family != Endpoint::Family::v4 || to.family != Endpoint::Family::v4) {
+        return;
+    }
+    pcap::Udp4 u;
+    std::copy(from.addr.begin(), from.addr.begin() + 4, u.src.begin());
+    std::copy(to.addr.begin(), to.addr.begin() + 4, u.dst.begin());
+    u.src_port = from.port;
+    u.dst_port = to.port;
+    auto frame = pcap::ipv4_udp(u, pdu);
+    const std::lock_guard lock(mu_);
+    if (!frame || gtpu_.f == nullptr) {
+        return;
+    }
+    ++stats_.gtpu;
+    (void)gtpu_.w->write(gtpu_.ifc, wall_ns(), *frame);
+    std::fflush(gtpu_.f);
+}
+
 void Capture::rrc(std::string_view channel, ByteView pdu, const std::string& supi) {
     const std::lock_guard lock(mu_);
     ++stats_.uu;
@@ -101,7 +138,7 @@ CaptureStats Capture::stats() const {
 
 void Capture::close() {
     const std::lock_guard lock(mu_);
-    for (File* f : {&ngap_, &f1ap_, &uu_}) {
+    for (File* f : {&ngap_, &f1ap_, &e1ap_, &gtpu_, &uu_}) {
         f->w.reset();
         if (f->f != nullptr) {
             std::fclose(f->f);
@@ -125,6 +162,23 @@ Result<void> TapAssoc::send(ByteView msg, SctpMeta meta) {
     auto r = inner_.send(msg, meta);
     if (r) {
         tap_(true, msg);
+    }
+    return r;
+}
+
+void TapDatagram::set_handler(OnDatagram on_datagram) {
+    inner_->set_handler([this, on_datagram = std::move(on_datagram)](ByteView payload, const Endpoint& from) {
+        tap_(from, inner_->local(), payload);
+        if (on_datagram) {
+            on_datagram(payload, from);
+        }
+    });
+}
+
+Result<void> TapDatagram::send_to(ByteView payload, const Endpoint& to) {
+    auto r = inner_->send_to(payload, to);
+    if (r) {
+        tap_(inner_->local(), to, payload);
     }
     return r;
 }

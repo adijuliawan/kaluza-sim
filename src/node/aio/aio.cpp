@@ -12,9 +12,11 @@
 #include "codec/air/kair.hpp"
 #include "net/netd.hpp"
 #include "net/sctp.hpp"
+#include "net/udp.hpp"
 #include "platform/memlink.hpp"
 #include "platform/yaml.hpp"
 #include "proc/ran/cucp.hpp"
+#include "proc/ran/cuup.hpp"
 #include "proc/ran/du.hpp"
 #include "uicc/image/image.hpp"
 #include "uicc/secrets/secrets.hpp"
@@ -26,6 +28,11 @@ namespace {
 constexpr std::size_t kEventRing = 1U << 16;
 constexpr std::size_t kInbox = 1U << 16;
 const Endpoint kDuAir = Endpoint::v4(10, 255, 0, 1, 41000);
+// F1-U between the DU and the CU-UP, in memory (the addresses only name the ends).
+const Endpoint kCuUpF1u = Endpoint::v4(10, 255, 0, 4, 2152);
+const Endpoint kDuF1u = Endpoint::v4(10, 255, 0, 5, 2152);
+
+std::array<std::uint8_t, 4> v4_of(const Endpoint& e) { return {e.addr[0], e.addr[1], e.addr[2], e.addr[3]}; }
 
 Endpoint ue_air(std::size_t index) {
     return Endpoint::v4(10, 254, static_cast<std::uint8_t>(index >> 8), static_cast<std::uint8_t>(index & 0xFF), 41001);
@@ -174,6 +181,51 @@ Result<void> AllInOne::build(std::string& why) {
                                             std::vector<Endpoint>{topo_.amf}, opt, net::SctpBackoff{}, std::move(source));
     ng_tap_ = std::make_unique<TapAssoc>(*ng_, [cap](bool tx, ByteView m) { cap->ngap(tx, m); });
 
+    // N3 (P1 N10): UDP 2152 on the CU-UP's address; with netd, from its own namespace.
+    std::unique_ptr<net::UdpSocket> n3;
+    if (topo_.netd.enabled) {
+        auto up = netd_->setup_node(topo_.netd.cuup_netns, topo_.netd.parent, v4_of(topo_.n3_bind), topo_.netd.prefix);
+        if (!up && netd_->last_error() == "netd: the namespace exists") {
+            (void)netd_->teardown(topo_.netd.cuup_netns);
+            up = netd_->setup_node(topo_.netd.cuup_netns, topo_.netd.parent, v4_of(topo_.n3_bind), topo_.netd.prefix);
+        }
+        if (!up) {
+            why = "ksim-netd (N3): " + netd_->last_error();
+            return up.error();
+        }
+        auto fd = netd_->socket(topo_.netd.cuup_netns, net::netd::SockKind::udp, 4);
+        if (!fd) {
+            why = "ksim-netd (N3 socket): " + netd_->last_error();
+            return fd.error();
+        }
+        auto s = net::UdpSocket::bind(shard_->reactor(), std::move(*fd), topo_.n3_bind);
+        if (!s) {
+            why = "N3 bind " + topo_.n3_bind.to_string() + ": " + s.error().what;
+            return s.error();
+        }
+        n3 = std::move(*s);
+    } else {
+        auto s = net::UdpSocket::bind(shard_->reactor(), topo_.n3_bind);
+        if (!s) {
+            why = "N3 bind " + topo_.n3_bind.to_string() + ": " + s.error().what;
+            return s.error();
+        }
+        n3 = std::move(*s);
+    }
+    auto gtpu_tap = [cap](const Endpoint& from, const Endpoint& to, ByteView p) { cap->gtpu(from, to, p); };
+    n3_ = std::make_unique<TapDatagram>(std::move(n3), gtpu_tap);
+    e1_ = std::make_unique<MemAssocPair>(*shard_, Endpoint::v4(10, 255, 0, 3, 0), *shard_,
+                                         Endpoint::v4(10, 255, 0, 1, 38462), 2, link);
+    e1_tap_ = std::make_unique<TapAssoc>(e1_->b(), [cap](bool tx, ByteView m) { cap->e1ap(tx, m); });
+    f1u_net_ = std::make_unique<MemNet>(link);
+    auto cuup_f1u = f1u_net_->bind(*shard_, kCuUpF1u);
+    auto du_f1u = f1u_net_->bind(*shard_, kDuF1u);
+    if (!cuup_f1u || !du_f1u) {
+        return make_error(Errc::internal, 0, "F1-U ports");
+    }
+    cuup_f1u_ = std::make_unique<TapDatagram>(std::move(*cuup_f1u), gtpu_tap);   // each F1-U datagram once
+    du_f1u_ = std::move(*du_f1u);
+
     proc::ran::CuCpConfig cc;
     cc.id = "gnb:" + topo_.gnb_name;
     cc.name = topo_.gnb_name;
@@ -185,7 +237,18 @@ Result<void> AllInOne::build(std::string& why) {
     for (const auto& s : slices) {
         cc.slices.push_back(ngap::Snssai{s.sst, s.sd});
     }
-    cucp_ = std::make_unique<proc::ran::CuCp>(*shard_, events_, cc, *ng_tap_, *f1_tap_);
+    cucp_ = std::make_unique<proc::ran::CuCp>(*shard_, events_, cc, *ng_tap_, *f1_tap_, e1_tap_.get());
+    proc::ran::CuUpConfig upc;
+    upc.id = "gnb:" + topo_.gnb_name + "-cuup";
+    upc.name = topo_.gnb_name + "-cuup";
+    upc.plmn = e1ap::plmn_id(topo_.mcc, topo_.mnc);
+    upc.slices.clear();
+    for (const auto& s : slices) {
+        upc.slices.push_back(e1ap::Snssai{s.sst, s.sd});
+    }
+    upc.n3_addr = v4_of(topo_.n3_bind);
+    upc.f1u_addr = v4_of(kCuUpF1u);
+    cuup_ = std::make_unique<proc::ran::CuUp>(*shard_, events_, upc, e1_->a(), *n3_, *cuup_f1u_);
 
     air_ = std::make_unique<MemNet>(link);
     auto du_air = air_->bind(*shard_, kDuAir);
@@ -211,7 +274,9 @@ Result<void> AllInOne::build(std::string& why) {
     dc.pci = topo_.pci;
     dc.tac = topo_.tac;
     dc.arfcn = topo_.arfcn;
-    du_ = std::make_unique<proc::ran::Du>(*shard_, events_, dc, f1_->a(), [this](const air::Frame& f) { du_to_air(f); });
+    dc.f1u_addr = v4_of(kDuF1u);
+    du_ = std::make_unique<proc::ran::Du>(*shard_, events_, dc, f1_->a(), [this](const air::Frame& f) { du_to_air(f); },
+                                          du_f1u_.get());
 
     // The UE farm: farm index i + 1, radio ID i + 1.
     for (std::size_t i = 0; i < cards.size(); ++i) {
@@ -253,6 +318,7 @@ Result<void> AllInOne::build(std::string& why) {
     }
 
     f1_->connect();
+    e1_->connect();
     ng_->start();
     return {};
 }
@@ -283,7 +349,14 @@ void AllInOne::teardown() {
     ues_.clear();
     ue_air_.clear();
     du_.reset();
+    cuup_.reset();
     cucp_.reset();
+    du_f1u_.reset();
+    cuup_f1u_.reset();
+    f1u_net_.reset();
+    e1_tap_.reset();
+    e1_.reset();
+    n3_.reset();
     du_air_.reset();
     air_.reset();
     if (ng_) {
@@ -294,6 +367,7 @@ void AllInOne::teardown() {
     f1_tap_.reset();
     f1_.reset();
     if (netd_) {
+        (void)netd_->teardown(topo_.netd.cuup_netns);
         (void)netd_->teardown(topo_.netd.netns);
         netd_.reset();
     }

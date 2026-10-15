@@ -33,6 +33,8 @@ constexpr std::uint8_t kSecurityModeCommand = 0x5D;
 constexpr std::uint8_t kSecurityModeComplete = 0x5E;
 constexpr std::uint8_t kSecurityModeReject = 0x5F;
 constexpr std::uint8_t kStatus = 0x64;
+constexpr std::uint8_t kUlNasTransport = 0x67;
+constexpr std::uint8_t kDlNasTransport = 0x68;
 
 // 5GMM causes (Annex A).
 constexpr std::uint8_t kIllegalUe = 3;
@@ -805,6 +807,9 @@ void Mm::on_plain(const nas::Message& m, bool integrity_ok) {
     case kDeregistrationAcceptUe:
         on_deregistration_accept();
         return;
+    case kDlNasTransport:
+        on_dl_nas_transport(m);
+        return;
     case kSecurityModeCommand:
         // Only with a new context (security header type 3) in N5; a command
         // under the current context (re-keying) is N12.
@@ -837,6 +842,64 @@ void Mm::on_released() {
         paused_t3521_ = false;
         events_.emit("nas.dereg.abort", cfg_.id, {{"reason", "released"}});
         set_state(MmState::deregistered_normal_service, "released before the de-registration accept");
+    }
+}
+
+// ---- the NAS transport of 5GSM (§5.4.5) -------------------------------------------------
+
+Result<void> Mm::send_sm(const SmUplink& u) {
+    if (!is_registered(state_) || !ctx_) {
+        return make_error(Errc::invalid_argument, 0, "5GMM: not registered");
+    }
+    if (!connected_) {
+        return make_error(Errc::closed, 0, "5GMM: no N1 signalling connection");
+    }
+    nas::Message m = make(kUlNasTransport);
+    put(m, "Payload container type", Bytes{ie::PayloadContainerType::n1_sm});
+    put(m, "Payload container", u.sm);
+    put(m, "PDU session ID", Bytes{u.psi});   // §5.4.5.2.2: for N1 SM, always
+    if (u.request_type) {
+        put(m, "Request type", Bytes{*u.request_type});
+    }
+    if (u.snssai) {
+        put(m, "S-NSSAI", u.snssai->encode());
+    }
+    if (u.dnn) {
+        put(m, "DNN", ie::Dnn{*u.dnn}.encode());
+    }
+    send(m);
+    return {};
+}
+
+void Mm::on_dl_nas_transport(const nas::Message& m) {
+    const Bytes* type = nas::get(m, "Payload container type");
+    const Bytes* payload = nas::get(m, "Payload container");
+    if (type == nullptr || type->empty() || payload == nullptr) {
+        return;
+    }
+    if (((*type)[0] & 0x0F) != ie::PayloadContainerType::n1_sm) {
+        // SMS is N13; other payloads are not P1 (§5.4.5.3.3: discarded).
+        events_.emit("nas.mm.transport.discard", cfg_.id, {{"payload_type", str((*type)[0] & 0x0F)}});
+        return;
+    }
+    const Bytes* psi = nas::get(m, "PDU session ID");
+    if (psi == nullptr || psi->empty()) {
+        events_.emit("nas.mm.transport.discard", cfg_.id, {{"payload_type", "1"}, {"why", "no PDU session ID"}});
+        return;
+    }
+    SmDownlink d;
+    d.psi = (*psi)[0];
+    d.sm = *payload;
+    if (const Bytes* c = nas::get(m, "5GMM cause"); c != nullptr && !c->empty()) {
+        d.mm_cause = (*c)[0];
+    }
+    if (const Bytes* b = nas::get(m, "Back-off timer value")) {
+        if (auto t = ie::GprsTimer3::decode(*b)) {
+            d.backoff = *t;
+        }
+    }
+    if (cfg_.sm) {
+        cfg_.sm(d);
     }
 }
 

@@ -58,7 +58,40 @@ inline std::vector<Sample> all() {
     ics.security_key = Bytes(32, 0xA5);   // a placeholder, not a derived key
     ics.nas = *from_hex("7e00420101");   // REGISTRATION ACCEPT: 3GPP access
     s.push_back({"InitialContextSetupRequest", ics});
-    s.push_back({"InitialContextSetupResponse", InitialContextSetupResponse{7, 1}});
+    // P1 N10: sessions. The NAS PDUs are protected and ciphered, as an AMF sends
+    // them, so the oracles see an opaque payload.
+    const Bytes protected_nas = *from_hex("7e0212345678030102030405060708");
+    SetupRequestTransfer st;
+    st.session_ambr = Ambr{1'000'000'000, 1'000'000'000};
+    st.ul = GtpTunnel{{172, 30, 50, 2}, 0x00000101};
+    st.type = "ipv4";
+    st.security = SecurityIndication{"preferred", "required"};
+    st.flows = {QosFlowRequest{1, 9, Arp{8, false, true}}};
+    SessionSetupItem item{1, protected_nas, Snssai{1, 0x000001}, st};
+    InitialContextSetupRequest ics_s = ics;
+    ics_s.ue_ambr = Ambr{2'000'000'000, 1'000'000'000};
+    ics_s.sessions = {SessionSetupItem{1, std::nullopt, Snssai{1, 0x000001}, st}};
+    s.push_back({"InitialContextSetupRequest.sessions", ics_s});
+    const SetupResponseTransfer rt{GtpTunnel{{172, 30, 30, 31}, 0x10000001}, {1}, SecurityResult{false, true}};
+    s.push_back({"InitialContextSetupResponse", InitialContextSetupResponse{7, 1, {}, {}}});
+    s.push_back({"InitialContextSetupResponse.sessions",
+                 InitialContextSetupResponse{7, 1, {SessionSetupOk{1, rt}}, {SessionCause{2, Cause{"radioNetwork", "unspecified"}}}}});
+    s.push_back({"PDUSessionResourceSetupRequest",
+                 PduSessionResourceSetupRequest{7, 1, std::nullopt, {item}, Ambr{2'000'000'000, 1'000'000'000}}});
+    s.push_back({"PDUSessionResourceSetupResponse", PduSessionResourceSetupResponse{7, 1, {SessionSetupOk{1, rt}}, {}}});
+    s.push_back({"PDUSessionResourceSetupResponse.failed",
+                 PduSessionResourceSetupResponse{7, 1, {}, {SessionCause{5, Cause{"radioNetwork", "multiple-PDU-session-ID-instances"}}}}});
+    s.push_back({"PDUSessionResourceReleaseCommand",
+                 PduSessionResourceReleaseCommand{7, 1, protected_nas, {SessionCause{1, Cause{"nas", "normal-release"}}}}});
+    s.push_back({"PDUSessionResourceReleaseResponse", PduSessionResourceReleaseResponse{7, 1, {1}}});
+    ModifyRequestTransfer mt;
+    mt.session_ambr = Ambr{500'000'000, 250'000'000};
+    mt.add_or_modify = {QosFlowRequest{2, 7, Arp{9, false, true}}};
+    mt.release = {3};
+    s.push_back({"PDUSessionResourceModifyRequest",
+                 PduSessionResourceModifyRequest{7, 1, {SessionModifyItem{1, protected_nas, mt}}}});
+    s.push_back({"PDUSessionResourceModifyResponse",
+                 PduSessionResourceModifyResponse{7, 1, {SessionModifyOk{1, ModifyResponseTransfer{{2}}}}, {}}});
     s.push_back({"InitialContextSetupFailure", InitialContextSetupFailure{7, 1, Cause{"radioNetwork", "unspecified"}}});
     s.push_back({"UEContextReleaseRequest", UeContextReleaseRequest{7, 1, Cause{"radioNetwork", "user-inactivity"}}});
     s.push_back({"UEContextReleaseCommand", UeContextReleaseCommand{7, 1, Cause{"nas", "normal-release"}}});

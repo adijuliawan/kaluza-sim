@@ -3,7 +3,9 @@
 //
 // The core stub's AMF, NAS side (P1 N5, ADR 0009 point f): it runs the
 // network half of registration, 5G AKA, security mode control and UE
-// de-registration for one UE at a time, as a profile tells it to, and checks
+// de-registration for one UE at a time, as a profile tells it to (N10: and
+// carries 5GSM between the UE and the stub's SMF in UL and DL NAS TRANSPORT,
+// a session's accept going in a PDU SESSION RESOURCE SETUP REQUEST), and checks
 // every uplink message against the spec: the mandatory IEs, the protection
 // it must carry, the uplink NAS COUNT, the MAC, and what each procedure
 // requires of its content. Each check is recorded with its clause as a
@@ -24,6 +26,8 @@
 #include "codec/nas/ie/ie.hpp"
 #include "codec/nas/nas.hpp"
 #include "home.hpp"
+#include "smf.hpp"
+#include "verdict.hpp"
 #include "platform/executor.hpp"
 #include "platform/yaml.hpp"
 #include "proc/ue/nas_sec/nas_sec.hpp"
@@ -54,16 +58,10 @@ struct Profile {
     std::optional<int> t3502_s;
     enum class Deregistration : std::uint8_t { accept, silent };
     Deregistration deregistration = Deregistration::accept;
+    SessionProfile session;   // the SMF's (N10)
 
     /// Reads a profile; unknown keys are an error (YamlError with the path).
     static Profile from_yaml(const Yaml& y);
-};
-
-struct Verdict {
-    std::string clause;
-    std::string what;
-    bool ok = false;
-    std::string detail;
 };
 
 class Amf {
@@ -74,6 +72,10 @@ public:
         /// With NGAP below: the REGISTRATION ACCEPT goes in an INITIAL CONTEXT
         /// SETUP REQUEST with K_gNB, instead of to_ue.
         std::function<void(Bytes accept, SecretBytes kgnb)> initial_context;
+        /// With NGAP below: a DL NAS TRANSPORT that goes with a session's
+        /// resource setup or release, instead of to_ue.
+        std::function<void(Bytes nas, ngap::SessionSetupItem item)> session_setup;
+        std::function<void(Bytes nas, std::uint8_t psi)> session_release;
     };
 
     Amf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p);
@@ -82,6 +84,11 @@ public:
     Amf& operator=(const Amf&) = delete;
 
     void attach(Link link) { link_ = std::move(link); }
+    /// The SMF behind this AMF; without one, UL NAS TRANSPORT fails its check.
+    void attach_smf(Smf* smf) { smf_ = smf; }
+    /// Network-requested release and modification of a session (TS 24.501 §6.3.3, §6.3.2).
+    bool release_session(std::uint8_t psi, std::uint8_t cause);
+    bool modify_session(std::uint8_t psi, std::uint32_t ambr_mbps);
     Profile& profile() noexcept { return p_; }
 
     void on_uplink(ByteView wire, bool initial);
@@ -123,9 +130,13 @@ private:
     void on_security_mode_reject(const nas::Message& m);
     void send_registration_result();
     void on_deregistration_request(const nas::Message& m);
+    void on_ul_nas_transport(const nas::Message& m, proc::ue::Sht sht);
+    void sm_actions(std::vector<SmAction> actions);
+    Bytes dl_nas_transport(std::uint8_t psi, Bytes sm, std::optional<std::uint8_t> mm_cause);
     Profile::Challenge challenge_kind() const;
     void send(const nas::Message& m, bool protect);
     void downlink(Bytes wire);
+    void downlink_protected(Bytes wire);
     void release();
     void start_t3560();
     void stop_t3560();
@@ -135,6 +146,7 @@ private:
     nas::ie::Plmn plmn_;
     Profile p_;
     Link link_;
+    Smf* smf_ = nullptr;
     std::shared_ptr<bool> alive_;
 
     State state_ = State::idle;

@@ -128,7 +128,10 @@ TEST(NgapMsg, IndependentProducersVectorsReadWhereTheProcedureIsInTheP1Set) {
                                    "AMFConfigurationUpdateAcknowledge", "Paging", "InitialUEMessage",
                                    "DownlinkNASTransport", "UplinkNASTransport", "InitialContextSetupRequest",
                                    "InitialContextSetupResponse", "UEContextReleaseCommand", "UEContextReleaseComplete",
-                                   "UEContextModificationRequest", "UEContextModificationResponse"};
+                                   "UEContextModificationRequest", "UEContextModificationResponse",
+                                   "PDUSessionResourceSetupRequest", "PDUSessionResourceSetupResponse",
+                                   "PDUSessionResourceReleaseCommand", "PDUSessionResourceReleaseResponse",
+                                   "PDUSessionResourceModifyRequest", "PDUSessionResourceModifyResponse"};
     int read = 0;
     int other = 0;
     for (const auto& [name, wire] : corpus()) {
@@ -142,6 +145,9 @@ TEST(NgapMsg, IndependentProducersVectorsReadWhereTheProcedureIsInTheP1Set) {
         EXPECT_TRUE(d || d.error().code == Errc::unsupported) << name << ": " << (d ? "" : d.error().what);
         if (p1.count(name) != 0) {
             read += d ? 1 : 0;
+            if (!d) {
+                std::printf("NGAP corpus: %s not read: %s\n", name.c_str(), d.error().what);
+            }
         } else {
             ++other;
         }

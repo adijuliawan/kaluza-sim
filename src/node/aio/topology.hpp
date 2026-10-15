@@ -13,6 +13,7 @@
 //     - id: {value: 0x1A0, bits: 22}
 //       name: ksim-gnb1
 //       cucp: {ng_bind: 127.0.0.2}
+//       cuup: {n3_bind: 127.0.0.2}          # N3 (GTP-U 2152); default: the ng_bind address
 //       dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
 //   ues:
 //     - {group: phones, count: 3, range: "001010000300001", card: {template: ../cards/usim-5g.yaml},
@@ -20,8 +21,9 @@
 //   secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek}
 //   peer: {name: stub}                      # free-form pins for the manifest
 //   security: {allow_null: false}            # D1: the bisect switch only
-//   netd: {socket: /run/ksim/netd.sock, netns: ksim-cucp, parent: ens19, prefix: 24}
-//                                            # lab only: NG-C from the CU-CP's own namespace
+//   netd: {socket: /run/ksim/netd.sock, netns: ksim-cucp, cuup_netns: ksim-cuup, parent: ens19, prefix: 24}
+//                                            # lab only: NG-C from the CU-CP's own namespace,
+//                                            # N3 from the CU-UP's
 
 #pragma once
 
@@ -57,6 +59,7 @@ struct NetdConfig {
     bool enabled = false;
     std::string socket = "/run/ksim/netd.sock";
     std::string netns = "ksim-cucp";
+    std::string cuup_netns = "ksim-cuup";   // N3's namespace, with n3_bind on its ipvlan
     std::string parent;
     std::uint8_t prefix = 24;
 };
@@ -71,6 +74,7 @@ struct Topology {
     std::uint8_t gnb_id_bits = 22;
     std::string gnb_name = "ksim-gnb1";
     Endpoint ng_bind;                      // port 0
+    Endpoint n3_bind;                      // the CU-UP's N3 address, port 2152
     std::uint64_t du_id = 1;
     std::uint16_t pci = 101;
     std::uint32_t tac = 1;

@@ -2,9 +2,12 @@
 // SPDX-License-Identifier: LicenseRef-kaluza-sim-private
 //
 // The all-in-one node (P1 N8; architecture §2.1, ADR 0009): a gNB (one DU,
-// one CU-CP) and a UE farm in one process. F1 runs over memlink as encoded
-// F1AP, the air link as encoded KAIR v1 frames over memlink datagrams (point
-// 1), and NG-C over a real SCTP association to the AMF (§2.1: never memory).
+// one CU-CP, and from N10 one CU-UP) and a UE farm in one process. F1 and E1
+// run over memlink as encoded F1AP and E1AP, F1-U as GTP-U over memlink
+// datagrams, the air link as encoded KAIR v1 frames over memlink datagrams
+// (point 1), and NG-C and N3 over real sockets to the core (§2.1: never
+// memory): SCTP to the AMF, UDP 2152 to the UPF, each from its node's own
+// namespace when the topology has netd.
 // P1 runs everything on one real-time shard, the reactor for NG-C included; the
 // [shard:4][gen:4][index:24] ID routing waits for a second shard (N7 note).
 //
@@ -38,6 +41,7 @@ class Client;
 }
 namespace ksim::proc::ran {
 class CuCp;
+class CuUp;
 class Du;
 }
 namespace ksim {
@@ -92,6 +96,7 @@ public:
     UeDevice* ue(const std::string& selector);
     proc::ran::CuCp& cucp() { return *cucp_; }
     proc::ran::Du& du() { return *du_; }
+    proc::ran::CuUp& cuup() { return *cuup_; }
     bool ng_up() const;
     const std::vector<std::string>& groups() const noexcept { return groups_; }   // by farm index - 1
     AioStats stats() const noexcept { return stats_; }
@@ -118,10 +123,17 @@ private:
     std::unique_ptr<TapAssoc> ng_tap_;
     std::unique_ptr<MemAssocPair> f1_;
     std::unique_ptr<TapAssoc> f1_tap_;
+    std::unique_ptr<MemAssocPair> e1_;
+    std::unique_ptr<TapAssoc> e1_tap_;
+    std::unique_ptr<MemNet> f1u_net_;
+    std::unique_ptr<IDatagram> cuup_f1u_;
+    std::unique_ptr<IDatagram> du_f1u_;
+    std::unique_ptr<IDatagram> n3_;
     std::unique_ptr<MemNet> air_;
     std::unique_ptr<IDatagram> du_air_;
     std::unique_ptr<proc::ran::CuCp> cucp_;
     std::unique_ptr<proc::ran::Du> du_;
+    std::unique_ptr<proc::ran::CuUp> cuup_;
     std::vector<std::unique_ptr<UeDevice>> ues_;
     std::vector<std::unique_ptr<IDatagram>> ue_air_;
     std::vector<std::uint32_t> radio_ids_;

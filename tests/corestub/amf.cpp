@@ -32,6 +32,9 @@ constexpr std::uint8_t kSecurityModeCommand = 0x5D;
 constexpr std::uint8_t kSecurityModeComplete = 0x5E;
 constexpr std::uint8_t kSecurityModeReject = 0x5F;
 constexpr std::uint8_t kStatus = 0x64;
+constexpr std::uint8_t kUlNasTransport = 0x67;
+constexpr std::uint8_t kDlNasTransport = 0x68;
+constexpr std::uint8_t kPayloadNotForwarded = 90;
 
 constexpr Millis kT3560 = 6'000;   // TS 24.501 Table 10.2.1
 const Bytes kAbba{0x00, 0x00};
@@ -90,7 +93,7 @@ Profile::Challenge challenge_named(const std::string& s, const Yaml& at) {
 Profile Profile::from_yaml(const Yaml& y) {
     y.only({"challenges", "ea", "ia", "imeisv_request", "rinmr", "tamper_replayed_capabilities", "registration",
             "reject_cause", "tmsi", "amf_region", "amf_set", "amf_pointer", "tacs", "allowed_sst", "t3512_s",
-            "t3502_s", "deregistration"});
+            "t3502_s", "deregistration", "session"});
     Profile p;
     if (y.has("challenges")) {
         p.challenges.clear();
@@ -145,6 +148,9 @@ Profile Profile::from_yaml(const Yaml& y) {
                         "unknown deregistration '" + d + "'");
     }
     p.deregistration = d == "accept" ? Deregistration::accept : Deregistration::silent;
+    if (y.has("session")) {
+        p.session = SessionProfile::from_yaml(y.at("session"));
+    }
     return p;
 }
 
@@ -242,6 +248,9 @@ void Amf::on_message(const nas::Message& m, Sht sht, bool initial) {
         return;
     case kDeregistrationRequestUe:
         on_deregistration_request(m);
+        return;
+    case kUlNasTransport:
+        on_ul_nas_transport(m, sht);
         return;
     case kStatus:
         return;   // recorded in uplink_
@@ -579,6 +588,115 @@ void Amf::on_deregistration_request(const nas::Message& m) {
 }
 
 // ---- downlink -----------------------------------------------------------------------------
+
+// ---- 5GSM transport (§5.4.5) ------------------------------------------------------------
+
+void Amf::on_ul_nas_transport(const nas::Message& m, Sht sht) {
+    check(state_ == State::registered, "5.4.5.2.1", "UL NAS TRANSPORT from a registered UE");
+    check(sht == Sht::integrity_ciphered, "4.4.5", "UL NAS TRANSPORT is integrity protected and ciphered");
+    const Bytes* type = nas::get(m, "Payload container type");
+    const Bytes* payload = nas::get(m, "Payload container");
+    if (type == nullptr || type->empty() || payload == nullptr) {
+        return;
+    }
+    if (((*type)[0] & 0x0F) != ie::PayloadContainerType::n1_sm) {
+        check(false, "5.4.5.2.2", "a payload container type the stub serves (N1 SM)", std::to_string((*type)[0] & 0x0F));
+        return;
+    }
+    const Bytes* psi_v = nas::get(m, "PDU session ID");
+    check(psi_v != nullptr && !psi_v->empty(), "5.4.5.2.2", "an N1 SM payload comes with its PDU session ID");
+    if (psi_v == nullptr || psi_v->empty() || smf_ == nullptr) {
+        check(smf_ != nullptr, "5.4.5.2.2", "the stub has an SMF for N1 SM");
+        return;
+    }
+    const std::uint8_t psi = (*psi_v)[0];
+    std::optional<std::uint8_t> request_type;
+    if (const Bytes* r = nas::get(m, "Request type"); r != nullptr && !r->empty()) {
+        request_type = static_cast<std::uint8_t>((*r)[0] & 0x07);
+    }
+    std::optional<std::string> dnn;
+    if (const Bytes* d = nas::get(m, "DNN")) {
+        if (auto v = ie::Dnn::decode(*d)) {
+            dnn = v->name;
+        }
+    }
+    std::optional<ie::Snssai> snssai;
+    if (const Bytes* s = nas::get(m, "S-NSSAI")) {
+        if (auto v = ie::Snssai::decode(*s)) {
+            snssai = *v;
+        }
+    }
+    if (request_type != ie::RequestType::initial && !smf_->known(supi_, psi)) {
+        // §7.3.2 c 2): the payload goes back with #90 "payload was not forwarded".
+        downlink_protected(dl_nas_transport(psi, *payload, kPayloadNotForwarded));
+        return;
+    }
+    sm_actions(smf_->on_uplink(supi_, psi, *payload, request_type, dnn, snssai));
+}
+
+Bytes Amf::dl_nas_transport(std::uint8_t psi, Bytes sm, std::optional<std::uint8_t> mm_cause) {
+    nas::Message d = make(kDlNasTransport);
+    put(d, "Payload container type", Bytes{ie::PayloadContainerType::n1_sm});
+    put(d, "Payload container", std::move(sm));
+    put(d, "PDU session ID", Bytes{psi});
+    if (mm_cause) {
+        put(d, "5GMM cause", Bytes{*mm_cause});
+    }
+    auto plain = nas::encode(d);
+    if (!plain || !ctx_) {
+        return {};
+    }
+    auto wire = ctx_->protect(*plain, Sht::integrity_ciphered);
+    return wire ? std::move(*wire) : Bytes{};
+}
+
+void Amf::downlink_protected(Bytes wire) {
+    if (!wire.empty()) {
+        downlink(std::move(wire));
+    }
+}
+
+void Amf::sm_actions(std::vector<SmAction> actions) {
+    for (auto& a : actions) {
+        Bytes wire = dl_nas_transport(a.psi, std::move(a.sm), std::nullopt);
+        if (wire.empty()) {
+            continue;
+        }
+        if (a.setup && link_.session_setup) {
+            link_.session_setup(std::move(wire), std::move(*a.setup));
+        } else if (a.release_resources && link_.session_release) {
+            link_.session_release(std::move(wire), a.psi);
+        } else {
+            downlink(std::move(wire));
+        }
+    }
+}
+
+bool Amf::release_session(std::uint8_t psi, std::uint8_t cause) {
+    if (smf_ == nullptr || state_ != State::registered) {
+        return false;
+    }
+    auto a = smf_->release(supi_, psi, cause);
+    if (!a) {
+        return false;
+    }
+    sm_actions({std::move(*a)});
+    return true;
+}
+
+bool Amf::modify_session(std::uint8_t psi, std::uint32_t ambr_mbps) {
+    if (smf_ == nullptr || state_ != State::registered) {
+        return false;
+    }
+    auto a = smf_->modify(supi_, psi, ambr_mbps);
+    if (!a) {
+        return false;
+    }
+    sm_actions({std::move(*a)});
+    return true;
+}
+
+// ---- sending ------------------------------------------------------------------------------
 
 void Amf::send(const nas::Message& m, bool protect) {
     auto plain = nas::encode(m);

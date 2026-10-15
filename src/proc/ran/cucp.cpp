@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "crypto/keys5g.hpp"
+#include "proc/ran/cuup.hpp"   // kE1apPpid
 
 namespace ksim::proc::ran {
 
@@ -37,10 +38,13 @@ bool supports(std::uint16_t map, std::uint8_t alg) { return alg == 0 || (map & (
 
 } // namespace
 
-CuCp::CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1)
-    : ex_(ex), events_(events), cfg_(std::move(cfg)), ng_(ngap), f1_(f1), alive_(std::make_shared<bool>(true)) {
+CuCp::CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1, IAssoc* e1)
+    : ex_(ex), events_(events), cfg_(std::move(cfg)), ng_(ngap), f1_(f1), alive_(std::make_shared<bool>(true)), e1_(e1) {
     ng_.set_handlers([this](ByteView msg, SctpMeta) { on_ngap(msg); }, [this](LinkEvent e) { on_ng_event(e); });
     f1_.set_handlers([this](ByteView msg, SctpMeta) { on_f1(msg); }, [this](LinkEvent e) { on_f1_event(e); });
+    if (e1_ != nullptr) {
+        e1_->set_handlers([this](ByteView msg, SctpMeta) { on_e1(msg); }, [this](LinkEvent e) { on_e1_event(e); });
+    }
 }
 
 CuCp::~CuCp() {
@@ -166,7 +170,7 @@ void CuCp::on_f1(ByteView msg) {
                    [this](const f1ap::UeContextSetupFailure& m) { handle(m); },
                    [this](const f1ap::UeContextReleaseRequest& m) { handle(m); },
                    [this](const f1ap::UeContextReleaseComplete& m) { handle(m); },
-                   [](const f1ap::UeContextModificationResponse&) {},
+                   [this](const f1ap::UeContextModificationResponse& m) { handle(m); },
                    [this](const f1ap::ErrorIndication& m) {
                        events_.emit("ran.f1.error_indication", cfg_.id,
                                     {{"cause", m.cause ? m.cause->group + "/" + m.cause->value : ""}});
@@ -313,6 +317,9 @@ void CuCp::handle(const f1ap::UeContextReleaseComplete& m) {
 }
 
 void CuCp::release_locally(Ue& ue) {
+    if (ue.cu_up_ue && e1_ != nullptr) {
+        send_e1(e1ap::BearerContextReleaseCommand{ue.cu_ue, *ue.cu_up_ue, e1ap::Cause{"radioNetwork", "unspecified"}}, true);
+    }
     send_f1(f1ap::UeContextReleaseCommand{ue.cu_ue, ue.du_ue, f1ap::Cause{"radioNetwork", "unspecified"}, std::nullopt,
                                           std::nullopt},
             true);
@@ -350,6 +357,9 @@ void CuCp::on_ngap(ByteView msg) {
                    [this](const ngap::UeContextModificationRequest& m) { handle(m); },
                    [this](const ngap::Paging& m) { handle(m); },
                    [this](const ngap::NgReset& m) { handle(m); },
+                   [this](const ngap::PduSessionResourceSetupRequest& m) { handle(m); },
+                   [this](const ngap::PduSessionResourceReleaseCommand& m) { handle(m); },
+                   [this](const ngap::PduSessionResourceModifyRequest& m) { handle(m); },
                    [this](const ngap::ErrorIndication& m) {
                        ++stats_.error_indications_rx;
                        events_.emit("ran.ngap.error_indication", cfg_.id,
@@ -439,6 +449,15 @@ void CuCp::handle(ngap::InitialContextSetupRequest& m) {
     ue->amf_ue = m.amf;
     ue->kgnb = std::move(kgnb);
     ue->ics_nas = m.nas;
+    if (m.ue_ambr) {
+        ue->ue_ambr = m.ue_ambr;
+    }
+    if (!m.sessions.empty()) {
+        Ue::Job j;
+        j.ics = true;
+        j.items = m.sessions;
+        ue->jobs.push_back(std::move(j));
+    }
     if (m.ue_radio_capability) {
         if (auto nr = rrc::nr_capability_of(*m.ue_radio_capability)) {
             ue->nr_capability = std::move(*nr);
@@ -488,6 +507,10 @@ void CuCp::handle(const ngap::UeContextReleaseCommand& m) {
     }
     ue->amf_ue = m.amf;
     ue->phase = Phase::releasing;
+    if (ue->cu_up_ue && e1_ != nullptr) {
+        send_e1(e1ap::BearerContextReleaseCommand{ue->cu_ue, *ue->cu_up_ue, e1ap::Cause{"radioNetwork", "normal-release"}}, true);
+        ue->cu_up_ue.reset();
+    }
     std::optional<Bytes> rrc_release;
     if (ue->srb1) {
         ue->capture = true;
@@ -610,13 +633,20 @@ void CuCp::on_dcch(std::uint32_t cu_ue, Bytes sdu) {
                        reconfigure(*ue);
                    },
                    [&](const rrc::ReconfigurationComplete&) {
+                       if (ue->phase == Phase::active && !ue->jobs.empty() && ue->jobs.front().stage == Ue::Job::Stage::rrc) {
+                           job_done(*ue);
+                           return;
+                       }
                        if (ue->phase != Phase::reconfiguring || !ue->amf_ue) {
                            return;
                        }
                        ue->phase = Phase::active;
-                       ++stats_.ics_ok;
-                       events_.emit("ran.ics.complete", cfg_.id, {{"ran_ue", str(ue->ran_ue)}});
-                       send_ngap(ngap::InitialContextSetupResponse{*ue->amf_ue, ue->ran_ue}, ue->ran_ue);
+                       if (!ue->jobs.empty() && ue->jobs.front().ics) {
+                           start_job(*ue);   // the ICS response waits for its sessions
+                           return;
+                       }
+                       finish_ics(*ue, {}, {});
+                       start_job(*ue);
                    },
                },
                *d);
@@ -693,6 +723,483 @@ void CuCp::on_srb_integrity_failure(std::uint32_t cu_ue) {
         // SecurityModeFailure fails here (TS 38.331 §5.3.4.3).
         ics_failed(*ue, "radioNetwork", "failure-in-radio-interface-procedure");
     }
+}
+
+// ---- E1 and PDU sessions (P1 N10) ------------------------------------------------------------
+
+namespace {
+
+e1ap::GtpTunnel e1_tunnel(const ngap::GtpTunnel& t) { return {t.addr, t.teid}; }
+ngap::GtpTunnel ng_tunnel(const e1ap::GtpTunnel& t) { return {t.addr, t.teid}; }
+f1ap::GtpTunnel f1_tunnel(const e1ap::GtpTunnel& t) { return {t.addr, t.teid}; }
+e1ap::GtpTunnel e1_from_f1(const f1ap::GtpTunnel& t) { return {t.addr, t.teid}; }
+
+} // namespace
+
+CuCp::Ue* CuCp::by_cu_up(std::uint32_t id) {
+    for (auto& [cu, ue] : ues_) {
+        if (ue.cu_up_ue == id) {
+            return &ue;
+        }
+    }
+    return nullptr;
+}
+
+std::vector<std::uint8_t> CuCp::sessions_of(std::uint32_t ran_ue) const {
+    std::vector<std::uint8_t> out;
+    for (const auto& [cu, ue] : ues_) {
+        if (ue.ran_ue == ran_ue) {
+            for (const auto& [psi, s] : ue.sessions) {
+                out.push_back(psi);
+            }
+        }
+    }
+    return out;
+}
+
+void CuCp::send_e1(const e1ap::Pdu& p, bool ue_associated) {
+    if (e1_ == nullptr) {
+        return;
+    }
+    auto wire = e1ap::encode(p);
+    if (!wire) {
+        events_.emit("ran.encode_error", cfg_.id, {{"what", wire.error().what}});
+        return;
+    }
+    (void)e1_->send(*wire, SctpMeta{kE1apPpid, static_cast<std::uint16_t>(ue_associated && e1_->out_streams() > 1 ? 1 : 0)});
+}
+
+void CuCp::on_e1_event(LinkEvent e) {
+    if (e != LinkEvent::up && e != LinkEvent::restart) {
+        e1_ready_ = false;
+        for (auto& [cu, ue] : ues_) {
+            ue.cu_up_ue.reset();   // the bearer contexts went with the association
+        }
+    }
+}
+
+void CuCp::on_e1(ByteView msg) {
+    auto p = e1ap::decode(msg);
+    if (!p) {
+        events_.emit("ran.e1.error", cfg_.id, {{"what", p.error().what}});
+        return;
+    }
+    std::visit(Overload{
+                   [this](const e1ap::E1SetupRequest& m) {
+                       e1_ready_ = true;
+                       send_e1(e1ap::E1SetupResponse{m.transaction, cfg_.name}, false);
+                       events_.emit("ran.e1.setup", cfg_.id, {{"cu_up", m.name}});
+                   },
+                   [this](const e1ap::BearerContextSetupResponse& m) { handle(m); },
+                   [this](const e1ap::BearerContextModificationResponse& m) { handle(m); },
+                   [this](const e1ap::BearerContextSetupFailure& m) {
+                       if (Ue* ue = by_cu(m.cu_cp_ue)) {
+                           job_failed(*ue, "radioNetwork", "unspecified");
+                       }
+                   },
+                   [this](const e1ap::BearerContextModificationFailure& m) {
+                       if (Ue* ue = by_cu(m.cu_cp_ue)) {
+                           job_failed(*ue, "radioNetwork", "unspecified");
+                       }
+                   },
+                   [](const e1ap::BearerContextReleaseComplete&) {},
+                   [this](const e1ap::ErrorIndication& m) {
+                       events_.emit("ran.e1.error", cfg_.id, {{"what", "ERROR INDICATION " + (m.cause ? m.cause->value : std::string("-"))}});
+                   },
+                   [this](const auto&) { events_.emit("ran.e1.error", cfg_.id, {{"what", "an E1AP message the CU-CP does not take"}}); },
+               },
+               *p);
+}
+
+void CuCp::handle(const ngap::PduSessionResourceSetupRequest& m) {
+    Ue* ue = by_ran(m.ran);
+    if (ue == nullptr) {
+        error_indication(ngap::UeIds{m.amf, m.ran}, "radioNetwork", "unknown-local-UE-NGAP-ID");
+        return;
+    }
+    if (ue->amf_ue && *ue->amf_ue != m.amf) {
+        error_indication(ngap::UeIds{m.amf, m.ran}, "radioNetwork", "inconsistent-remote-UE-NGAP-ID");
+        return;
+    }
+    if (m.ue_ambr) {
+        ue->ue_ambr = m.ue_ambr;
+    }
+    Ue::Job j;
+    j.items = m.sessions;
+    j.nas = m.nas;
+    ue->jobs.push_back(std::move(j));
+    start_job(*ue);
+}
+
+void CuCp::handle(const ngap::PduSessionResourceReleaseCommand& m) {
+    Ue* ue = by_ran(m.ran);
+    if (ue == nullptr) {
+        error_indication(ngap::UeIds{m.amf, m.ran}, "radioNetwork", "unknown-local-UE-NGAP-ID");
+        return;
+    }
+    Ue::Job j;
+    j.kind = Ue::Job::Kind::release;
+    j.nas = m.nas;
+    j.release = m.sessions;
+    ue->jobs.push_back(std::move(j));
+    start_job(*ue);
+}
+
+void CuCp::handle(const ngap::PduSessionResourceModifyRequest& m) {
+    Ue* ue = by_ran(m.ran);
+    if (ue == nullptr) {
+        error_indication(ngap::UeIds{m.amf, m.ran}, "radioNetwork", "unknown-local-UE-NGAP-ID");
+        return;
+    }
+    // P1 applies no QoS change to the DRB mapping (KS-NGAP-G4); the NAS PDU goes to
+    // the UE and the flows are acknowledged as asked.
+    ngap::PduSessionResourceModifyResponse r{m.amf, m.ran, {}, {}};
+    for (const auto& s : m.sessions) {
+        if (ue->sessions.count(s.psi) == 0) {
+            r.failed.push_back(ngap::SessionCause{s.psi, ngap::Cause{"radioNetwork", "unknown-PDU-session-ID"}});
+            continue;
+        }
+        ngap::ModifyResponseTransfer t;
+        for (const auto& f : s.transfer.add_or_modify) {
+            t.added_or_modified.push_back(f.qfi);
+        }
+        r.sessions.push_back(ngap::SessionModifyOk{s.psi, t});
+        if (const auto& nas = s.nas) {
+            dl_dcch(*ue, rrc::encode(rrc::DlInformationTransfer{next_tid(*ue), *nas}), ue->srb2 ? 2 : 1);
+        }
+    }
+    send_ngap(r, ue->ran_ue);
+}
+
+void CuCp::start_job(Ue& ue) {
+    if (ue.jobs.empty() || ue.jobs.front().stage != Ue::Job::Stage::waiting || ue.phase != Phase::active) {
+        return;
+    }
+    Ue::Job& j = ue.jobs.front();
+    if (j.kind == Ue::Job::Kind::release) {
+        rrc::RadioBearers b;
+        rrc::CellGroup cg;
+        for (const auto& s : j.release) {
+            auto it = ue.sessions.find(s.psi);
+            if (it == ue.sessions.end()) {
+                continue;
+            }
+            b.drb_release.push_back(it->second.drb_id);
+            if (it->second.du && it->second.du->lcid) {
+                cg.release_lcids.push_back(*it->second.du->lcid);
+            }
+        }
+        rrc::Reconfiguration r;
+        r.tid = next_tid(ue);
+        r.bearers = b;
+        if (!cg.release_lcids.empty()) {
+            r.cell_group = cg;
+        }
+        if (j.nas) {
+            r.nas.push_back(*j.nas);
+        }
+        j.stage = Ue::Job::Stage::rrc;
+        dl_dcch(ue, rrc::encode(r), ue.srb2 ? 2 : 1);
+        return;
+    }
+    // Setup: a DRB per session, every flow on it, the default DRB.
+    if (e1_ == nullptr || !e1_ready_ || !ue.nea || !ue.nia) {
+        job_failed(ue, "radioNetwork", "unspecified");
+        return;
+    }
+    std::uint8_t next_drb = 1;
+    auto drb_free = [&](std::uint8_t d) {
+        for (const auto& [psi, s] : ue.sessions) {
+            if (s.drb_id == d) {
+                return false;
+            }
+        }
+        for (const auto& [psi, s] : j.pending) {
+            if (s.drb_id == d) {
+                return false;
+            }
+        }
+        return true;
+    };
+    std::vector<e1ap::SessionToSetup> up;
+    for (const auto& item : j.items) {
+        if (ue.sessions.count(item.psi) != 0 || j.pending.count(item.psi) != 0) {
+            j.failed.push_back(ngap::SessionCause{item.psi, ngap::Cause{"radioNetwork", "multiple-PDU-session-ID-instances"}});
+            continue;
+        }
+        while (next_drb <= 32 && !drb_free(next_drb)) {
+            ++next_drb;
+        }
+        if (next_drb > 32) {
+            j.failed.push_back(ngap::SessionCause{item.psi, ngap::Cause{"radioNetwork", "unspecified"}});
+            continue;
+        }
+        Ue::Session s;
+        s.item = item;
+        s.drb_id = next_drb;
+        // UP security policy: integrity when required, never when preferred (KS-NGAP-B5).
+        const auto& policy = item.transfer.security;
+        s.integrity = policy.has_value() && policy->integrity == "required";
+        e1ap::SessionToSetup t;
+        t.psi = item.psi;
+        t.type = item.transfer.type;
+        t.snssai = e1ap::Snssai{item.snssai.sst, item.snssai.sd};
+        t.security = e1ap::SecurityIndication{s.integrity ? "required" : "not-needed", "required"};
+        t.ng_ul = e1_tunnel(item.transfer.ul);
+        e1ap::DrbToSetup d;
+        d.drb_id = next_drb;
+        for (const auto& f : item.transfer.flows) {
+            d.flows.push_back(e1ap::QosFlow{f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable});
+        }
+        t.drbs = {d};
+        up.push_back(std::move(t));
+        j.pending.emplace(item.psi, std::move(s));
+    }
+    if (j.pending.empty()) {
+        job_failed(ue, "radioNetwork", "unspecified");
+        return;
+    }
+    j.stage = Ue::Job::Stage::e1;
+    if (ue.cu_up_ue) {
+        send_e1(e1ap::BearerContextModificationRequest{ue.cu_ue, *ue.cu_up_ue, std::move(up), {}, {}}, true);
+        return;
+    }
+    const std::uint8_t nea = ue.nea.value_or(0);
+    const std::uint8_t nia = ue.nia.value_or(0);
+    auto ke = crypto::keys5g::algorithm_key(ue.kgnb, AlgType::up_enc, nea);
+    auto ki = crypto::keys5g::algorithm_key(ue.kgnb, AlgType::up_int, nia);
+    if (!ke || !ki) {
+        job_failed(ue, "radioNetwork", "unspecified");
+        return;
+    }
+    e1ap::BearerContextSetupRequest r;
+    r.cu_cp_ue = ue.cu_ue;
+    // The UP keys cross the E1AP codec as octets (rule R3), wiped once encoded.
+    r.security = e1ap::Security{nea, nia, Bytes(ke->expose().begin(), ke->expose().end()),
+                                Bytes(ki->expose().begin(), ki->expose().end())};
+    r.ue_dl_ambr = ue.ue_ambr ? ue.ue_ambr->dl : 1'000'000'000;
+    r.serving_plmn = e1ap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc);
+    r.sessions = std::move(up);
+    send_e1(r, true);
+    secure_zero(r.security.enc_key);
+    if (r.security.int_key) {
+        secure_zero(*r.security.int_key);
+    }
+}
+
+void CuCp::handle(const e1ap::BearerContextSetupResponse& m) {
+    Ue* ue = by_cu(m.cu_cp_ue);
+    if (ue == nullptr || ue->jobs.empty() || ue->jobs.front().stage != Ue::Job::Stage::e1) {
+        return;
+    }
+    ue->cu_up_ue = m.cu_up_ue;
+    e1ap::BearerContextModificationResponse as_mod{m.cu_cp_ue, m.cu_up_ue, m.sessions, {}};
+    handle(as_mod);
+}
+
+void CuCp::handle(const e1ap::BearerContextModificationResponse& m) {
+    Ue* ue = by_cu(m.cu_cp_ue);
+    if (ue == nullptr || ue->jobs.empty()) {
+        return;
+    }
+    Ue::Job& j = ue->jobs.front();
+    if (j.stage == Ue::Job::Stage::e1_mod) {
+        job_rrc(*ue);
+        return;
+    }
+    if (j.stage != Ue::Job::Stage::e1) {
+        return;
+    }
+    for (const auto& s : m.added) {
+        auto it = j.pending.find(s.psi);
+        if (it != j.pending.end() && !s.drbs.empty()) {
+            it->second.up = s;
+        }
+    }
+    f1ap::UeContextModificationRequest r;
+    r.cu_ue = ue->cu_ue;
+    r.du_ue = ue->du_ue;
+    for (auto it = j.pending.begin(); it != j.pending.end();) {
+        const auto& item = it->second.item;
+        f1ap::DrbToSetup d;
+        d.drb_id = it->second.drb_id;
+        d.snssai = f1ap::Snssai{item.snssai.sst, item.snssai.sd};
+        for (const auto& f : item.transfer.flows) {
+            d.flows.push_back(f1ap::Flow{f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable});
+        }
+        const auto& up = it->second.up;
+        if (!up || up->drbs.empty()) {
+            j.failed.push_back(ngap::SessionCause{it->first, ngap::Cause{"radioNetwork", "unspecified"}});
+            it = j.pending.erase(it);
+            continue;
+        }
+        d.ul = f1_tunnel(up->drbs.front().f1u_ul);
+        r.drbs.push_back(std::move(d));
+        ++it;
+    }
+    if (r.drbs.empty()) {
+        job_failed(*ue, "radioNetwork", "unspecified");
+        return;
+    }
+    j.stage = Ue::Job::Stage::f1;
+    send_f1(r, true);
+}
+
+void CuCp::handle(const f1ap::UeContextModificationResponse& m) {
+    Ue* ue = by_cu(m.cu_ue);
+    if (ue == nullptr || ue->jobs.empty() || ue->jobs.front().stage != Ue::Job::Stage::f1) {
+        return;
+    }
+    Ue::Job& j = ue->jobs.front();
+    if (m.cell_group) {
+        if (auto cg = rrc::decode_cell_group(*m.cell_group)) {
+            j.cell_group = std::move(*cg);
+        }
+    }
+    e1ap::BearerContextModificationRequest r;
+    r.cu_cp_ue = ue->cu_ue;
+    r.cu_up_ue = ue->cu_up_ue.value_or(0);
+    for (auto& [psi, s] : j.pending) {
+        for (const auto& d : m.drbs) {
+            if (d.drb_id == s.drb_id) {
+                s.du = d;
+                r.modify.push_back(e1ap::SessionToModify{psi, {e1ap::DrbToModify{d.drb_id, e1_from_f1(d.dl)}}});
+            }
+        }
+    }
+    if (r.modify.empty() || !ue->cu_up_ue) {
+        job_failed(*ue, "radioNetwork", "unspecified");
+        return;
+    }
+    j.stage = Ue::Job::Stage::e1_mod;
+    send_e1(r, true);
+}
+
+void CuCp::job_rrc(Ue& ue) {
+    Ue::Job& j = ue.jobs.front();
+    rrc::Reconfiguration r;
+    r.tid = next_tid(ue);
+    rrc::RadioBearers b;
+    for (const auto& [psi, s] : j.pending) {
+        rrc::DrbAdd d;
+        d.drb_id = s.drb_id;
+        d.pdu_session = psi;
+        d.sdap_header_dl = true;
+        d.sdap_header_ul = true;
+        d.default_drb = true;
+        for (const auto& f : s.item.transfer.flows) {
+            d.qfis.push_back(f.qfi);
+        }
+        d.pdcp.integrity = s.integrity;
+        b.drbs.push_back(std::move(d));
+        if (s.item.nas) {
+            r.nas.push_back(*s.item.nas);
+        }
+    }
+    if (j.nas) {
+        r.nas.push_back(*j.nas);
+    }
+    r.bearers = b;
+    r.cell_group = j.cell_group;
+    j.stage = Ue::Job::Stage::rrc;
+    dl_dcch(ue, rrc::encode(r), ue.srb2 ? 2 : 1);
+}
+
+void CuCp::job_done(Ue& ue) {
+    Ue::Job j = std::move(ue.jobs.front());
+    ue.jobs.pop_front();
+    if (j.kind == Ue::Job::Kind::release) {
+        std::vector<std::uint8_t> released;
+        f1ap::UeContextModificationRequest f1;
+        f1.cu_ue = ue.cu_ue;
+        f1.du_ue = ue.du_ue;
+        std::vector<std::uint8_t> remove;
+        for (const auto& s : j.release) {
+            auto it = ue.sessions.find(s.psi);
+            if (it == ue.sessions.end()) {
+                continue;
+            }
+            f1.release_drbs.push_back(it->second.drb_id);
+            remove.push_back(s.psi);
+            released.push_back(s.psi);
+            ue.sessions.erase(it);
+            events_.emit("ran.session.release", cfg_.id, {{"ran_ue", str(ue.ran_ue)}, {"psi", str(s.psi)}});
+        }
+        if (!f1.release_drbs.empty()) {
+            send_f1(f1, true);
+        }
+        if (ue.cu_up_ue) {
+            if (ue.sessions.empty()) {
+                send_e1(e1ap::BearerContextReleaseCommand{ue.cu_ue, *ue.cu_up_ue, e1ap::Cause{"radioNetwork", "normal-release"}}, true);
+                ue.cu_up_ue.reset();
+            } else if (!remove.empty()) {
+                send_e1(e1ap::BearerContextModificationRequest{ue.cu_ue, *ue.cu_up_ue, {}, {}, remove}, true);
+            }
+        }
+        if (ue.amf_ue) {
+            if (released.empty()) {
+                released.push_back(j.release.empty() ? 1 : j.release.front().psi);   // nothing held: answered as released
+            }
+            send_ngap(ngap::PduSessionResourceReleaseResponse{*ue.amf_ue, ue.ran_ue, released}, ue.ran_ue);
+        }
+        start_job(ue);
+        return;
+    }
+    std::vector<ngap::SessionSetupOk> ok;
+    for (auto& [psi, s] : j.pending) {
+        ngap::SetupResponseTransfer t;
+        if (s.up) {
+            t.dl = ng_tunnel(s.up->ng_dl);
+        }
+        for (const auto& f : s.item.transfer.flows) {
+            t.qfis.push_back(f.qfi);
+        }
+        if (s.item.transfer.security) {
+            t.security = ngap::SecurityResult{s.integrity, true};
+        }
+        ok.push_back(ngap::SessionSetupOk{psi, std::move(t)});
+        events_.emit("ran.session.setup", cfg_.id,
+                     {{"ran_ue", str(ue.ran_ue)}, {"psi", str(psi)}, {"drb", str(s.drb_id)}, {"integrity", s.integrity ? "1" : "0"}});
+        ue.sessions.emplace(psi, std::move(s));
+    }
+    if (j.ics) {
+        finish_ics(ue, std::move(ok), std::move(j.failed));
+    } else if (ue.amf_ue) {
+        send_ngap(ngap::PduSessionResourceSetupResponse{*ue.amf_ue, ue.ran_ue, std::move(ok), std::move(j.failed)}, ue.ran_ue);
+    }
+    start_job(ue);
+}
+
+void CuCp::job_failed(Ue& ue, const char* group, const char* value) {
+    if (ue.jobs.empty()) {
+        return;
+    }
+    Ue::Job j = std::move(ue.jobs.front());
+    ue.jobs.pop_front();
+    if (j.kind == Ue::Job::Kind::setup) {
+        for (const auto& item : j.items) {
+            const bool listed = std::any_of(j.failed.begin(), j.failed.end(), [&](const auto& f) { return f.psi == item.psi; });
+            if (!listed) {
+                j.failed.push_back(ngap::SessionCause{item.psi, ngap::Cause{group, value}});
+            }
+        }
+        events_.emit("ran.session.failure", cfg_.id, {{"ran_ue", str(ue.ran_ue)}, {"cause", std::string(group) + "/" + value}});
+        if (j.ics) {
+            finish_ics(ue, {}, std::move(j.failed));
+        } else if (ue.amf_ue) {
+            send_ngap(ngap::PduSessionResourceSetupResponse{*ue.amf_ue, ue.ran_ue, {}, std::move(j.failed)}, ue.ran_ue);
+        }
+    }
+    start_job(ue);
+}
+
+void CuCp::finish_ics(Ue& ue, std::vector<ngap::SessionSetupOk> ok, std::vector<ngap::SessionCause> failed) {
+    if (!ue.amf_ue) {
+        return;
+    }
+    ++stats_.ics_ok;
+    events_.emit("ran.ics.complete", cfg_.id, {{"ran_ue", str(ue.ran_ue)}});
+    send_ngap(ngap::InitialContextSetupResponse{*ue.amf_ue, ue.ran_ue, std::move(ok), std::move(failed)}, ue.ran_ue);
 }
 
 } // namespace ksim::proc::ran

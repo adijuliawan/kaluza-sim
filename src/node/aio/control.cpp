@@ -8,6 +8,9 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <cctype>
+#include <exception>
+#include <optional>
 #include <thread>
 
 #include "api/wait.hpp"
@@ -39,6 +42,50 @@ std::uint64_t number(const std::string& v, std::uint64_t fallback) {
         return fallback;
     }
     return std::stoull(v);
+}
+
+/// "10.60.0.1" -> its four octets.
+std::optional<ip::Addr> ipv4_arg(const std::string& s) {
+    auto e = Endpoint::parse(s, 0);
+    if (!e || e->family != Endpoint::Family::v4) {
+        return std::nullopt;
+    }
+    return ip::Addr{e->addr[0], e->addr[1], e->addr[2], e->addr[3]};
+}
+
+std::string ipv4_text(const ip::Addr& a) { return fmt::format("{}.{}.{}.{}", a[0], a[1], a[2], a[3]); }
+
+/// "1", "0x01", "1-000001" style S-NSSAI parts from the request; nullopt for none, an error text for a bad one.
+std::optional<nas::ie::Snssai> snssai_arg(const Request& req, std::string& bad) {
+    const std::string sst = req.arg("sst");
+    const std::string sd = req.arg("sd");
+    if (sst.empty()) {
+        if (!sd.empty()) {
+            bad = "--sd needs --sst";
+        }
+        return std::nullopt;
+    }
+    nas::ie::Snssai s;
+    try {
+        const unsigned long v = std::stoul(sst, nullptr, 0);
+        if (v > 255) {
+            bad = "--sst is 0..255";
+            return std::nullopt;
+        }
+        s.sst = static_cast<std::uint8_t>(v);
+        if (!sd.empty()) {
+            const unsigned long d = std::stoul(sd, nullptr, 16);
+            if (d > 0xFFFFFF) {
+                bad = "--sd is six hex digits";
+                return std::nullopt;
+            }
+            s.sd = static_cast<std::uint32_t>(d);
+        }
+    } catch (const std::exception&) {
+        bad = "--sst takes a number, --sd hex digits";
+        return std::nullopt;
+    }
+    return s;
 }
 
 void add_pairs(Reply& r, const std::vector<std::pair<std::string, std::string>>& kv) {
@@ -136,7 +183,8 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         Reply r;
         r.set("CAP.NAS_MM", "1");
         r.set("CAP.AS_SECURITY", "nia2/nea2");
-        r.set("CAP.PDU_SESSION", "0");
+        r.set("CAP.PDU_SESSION", "ipv4");
+        r.set("CAP.PING", "inject");
         r.set("CAP.SMS_NAS", "0");
         r.set("CAP.SUCI", "null");
         r.set("CAP.NETNS", "0");
@@ -265,6 +313,90 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         }
         return Reply::fail(Exit::capability, "deregister " + type + " comes with N12");
     });
+    // ---- 5GSM and the inject-mode ping (P1 N10) ----
+    server.get("/v1/ue/:sel/ps", [&aio](const Request& req) {
+        const std::string sel = req.params.at("sel");
+        auto s = aio.call<Reply>([&aio, sel] {
+            UeDevice* ue = aio.ue(sel);
+            if (ue == nullptr) {
+                return Reply::fail(Exit::unknown, "no such UE");
+            }
+            Reply r;
+            r.set("UE", ue->subject().substr(3));
+            const auto list = ue->sessions();
+            r.set("PDU_SESSIONS", static_cast<std::int64_t>(list.size()));
+            for (const auto& p : list) {
+                const std::string k = "PS." + std::to_string(p.psi);
+                r.set(k + ".STATE", proc::ue::sm_state_name(p.state));
+                r.set(k + ".DNN", p.dnn);
+                r.set(k + ".SNSSAI", p.snssai ? proc::ue::snssai_text(*p.snssai) : "-");
+                r.set(k + ".TYPE", "ipv4");
+                r.set(k + ".IP", p.ipv4 ? ipv4_text(*p.ipv4) : "");
+                r.set(k + ".DNS", p.dns ? ipv4_text(*p.dns) : "");
+                r.set(k + ".MTU", p.mtu ? std::to_string(*p.mtu) : "");
+                r.set(k + ".QFI", static_cast<std::int64_t>(p.default_qfi));
+                r.set(k + ".AMBR_DL", p.ambr_dl_bps ? std::to_string(*p.ambr_dl_bps) : "");
+                r.set(k + ".AMBR_UL", p.ambr_ul_bps ? std::to_string(*p.ambr_ul_bps) : "");
+            }
+            return r;
+        });
+        return s ? *s : unsound();
+    });
+    server.post("/v1/ue/:sel/ps-establish", [&aio](const Request& req) {
+        std::string type = req.arg("type", "ipv4");
+        std::transform(type.begin(), type.end(), type.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        if (type != "ipv4") {
+            return Reply::fail(Exit::capability, "ps-establish " + type + " comes in v1.x (P1 is IPv4)");
+        }
+        std::string bad;
+        const auto snssai = snssai_arg(req, bad);
+        if (!bad.empty()) {
+            return Reply::fail(Exit::usage, bad);
+        }
+        const std::uint64_t psi = number(req.arg("psi"), 0);
+        if (psi > 15) {
+            return Reply::fail(Exit::usage, "--psi is 1..15");
+        }
+        proc::ue::SessionRequest r{static_cast<std::uint8_t>(psi), req.arg("dnn"), snssai};
+        return run_ue_command(aio, req,
+                              UeCommand{[r](UeDevice& u) { return u.ps_establish(r); },
+                                        {"nas.sm.est.accept"},
+                                        {"nas.sm.est.reject", "nas.sm.est.abort", "nas.sm.not_forwarded"},
+                                        {},
+                                        "pdu-session-establishment"});
+    });
+    server.post("/v1/ue/:sel/ps-release", [&aio](const Request& req) {
+        const std::uint64_t psi = number(req.arg("psi"), 0);
+        if (psi < 1 || psi > 15) {
+            return Reply::fail(Exit::usage, "ps-release <psi 1..15>");
+        }
+        return run_ue_command(aio, req,
+                              UeCommand{[psi](UeDevice& u) { return u.ps_release(static_cast<std::uint8_t>(psi)); },
+                                        {"nas.sm.release"},
+                                        {"nas.sm.rel.reject"},
+                                        {{"psi", std::to_string(psi)}},
+                                        "pdu-session-release"});
+    });
+    server.post("/v1/ue/:sel/ping", [&aio](const Request& req) {
+        const auto dst = ipv4_arg(req.arg("dst"));
+        if (!dst) {
+            return Reply::fail(Exit::usage, "ping <IPv4 address>");
+        }
+        PingRequest p;
+        p.dst = *dst;
+        p.psi = static_cast<std::uint8_t>(std::min<std::uint64_t>(number(req.arg("psi"), 0), 15));
+        p.count = static_cast<int>(std::clamp<std::uint64_t>(number(req.arg("count"), 3), 1, 1000));
+        p.interval = static_cast<Millis>(std::clamp<std::uint64_t>(number(req.arg("interval_ms"), 1000), 10, 60'000));
+        p.size = static_cast<std::size_t>(std::min<std::uint64_t>(number(req.arg("size"), 56), 8952));
+        Reply r = run_ue_command(aio, req,
+                                 UeCommand{[p](UeDevice& u) { return u.ping(p); }, {"ue.ping.done"}, {}, {}, "ping"});
+        if (r.exit == Exit::ok && r.kv.value("RECEIVED", std::string("0")) == "0" && r.kv.contains("SENT")) {
+            r.exit = Exit::failed;   // cli.md §2: no reply at all is a failed ping
+            r.set("CAUSE", "no echo reply");
+        }
+        return r;
+    });
+
     server.get("/v1/wait", [&aio](const Request& req) {
         api::WaitQuery q;
         q.until = api::split_names(req.arg("event"));

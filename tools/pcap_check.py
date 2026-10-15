@@ -2,8 +2,9 @@
 # SPDX-FileCopyrightText: 2026 Adi Juliawan
 # SPDX-License-Identifier: LicenseRef-kaluza-sim-private
 """The run capture check (P1 N8; verification.md section 2): every frame of a
-run's ngap.pcapng, f1ap.pcapng and uu.pcapng through two decoders that are not
-ours.
+run's ngap.pcapng, f1ap.pcapng, e1ap.pcapng and uu.pcapng through two decoders
+that are not ours, and (P1 N10) every frame of gtpu.pcapng (N3 and F1-U as
+IPv4/UDP 2152) through tshark.
 
   tshark   the whole capture on stdin (AppArmor keeps it out of ~/Development);
            a frame fails on a malformed mark or an expert item of severity
@@ -11,7 +12,7 @@ ours.
            hands its keys to a tool, so Wireshark would compute every MAC-I
            with no key and flag it (our PDCP entities verify every MAC-I, and a
            failure is an event the gates read).
-  pycrate  each PDU on its own: NGAP and F1AP (APER) and RRC (UPER, by the
+  pycrate  each PDU on its own: NGAP, F1AP and E1AP (APER) and RRC (UPER, by the
            channel the frame names) from our extracted Rel-19 modules, NAS
            with pycrate_mobile's 5GS parser.
 
@@ -33,7 +34,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests" / "oracles"))
 from ksimoracle import asn, pcap, tshark  # noqa: E402
 
-CAPTURES = ("ngap.pcapng", "f1ap.pcapng", "uu.pcapng")
+CAPTURES = ("ngap.pcapng", "f1ap.pcapng", "e1ap.pcapng", "uu.pcapng")
+RAW_CAPTURES = ("gtpu.pcapng",)   # raw IPv4 frames: tshark only (pycrate has no GTP-U)
 RRC = {
     "nr-rrc.bcch.bch": "BCCH_BCH_Message",
     "nr-rrc.bcch.dl.sch": "BCCH_DL_SCH_Message",
@@ -48,7 +50,7 @@ RRC = {
 def pycrate_check(name: str, pdu: bytes) -> str:
     """'' when pycrate decodes the PDU and re-encodes it to the same octets, else why not."""
     try:
-        if name in ("ngap", "f1ap"):
+        if name in ("ngap", "f1ap", "e1ap"):
             o, enc = asn.top(name)
             asn.decode(o, pdu, enc)
             again = o.to_aper()
@@ -97,6 +99,21 @@ def main() -> int:
             if why:
                 pyfail += 1
                 bad.append(f"{cap} frame {n} ({name}, {comment}): {why}")
+    for cap in RAW_CAPTURES:
+        f = run / cap
+        if not f.is_file():
+            bad.append(f"{cap}: missing")
+            continue
+        packets = tshark.decode(f.read_bytes())
+        if not packets:
+            bad.append(f"{cap}: no frames")
+            continue
+        frames += len(packets)
+        for i, p in enumerate(packets, start=1):
+            errs = tshark.errors(p)
+            if errs:
+                malformed += 1
+                bad.append(f"{cap} frame {i}: tshark: {'; '.join(errs)[:160]}")
     for b in bad:
         print(f"PCAP_BAD {b}")
     ok = not bad and frames > 0

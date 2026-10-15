@@ -10,6 +10,14 @@
 
 extern "C" {
 #include "NGAP_NGAP-PDU.h"
+#include "NGAP_PDUSessionResourceModifyRequestTransfer.h"
+#include "NGAP_PDUSessionResourceModifyResponseTransfer.h"
+#include "NGAP_PDUSessionResourceModifyUnsuccessfulTransfer.h"
+#include "NGAP_PDUSessionResourceReleaseCommandTransfer.h"
+#include "NGAP_PDUSessionResourceReleaseResponseTransfer.h"
+#include "NGAP_PDUSessionResourceSetupRequestTransfer.h"
+#include "NGAP_PDUSessionResourceSetupResponseTransfer.h"
+#include "NGAP_PDUSessionResourceSetupUnsuccessfulTransfer.h"
 }
 
 namespace ksim::ngap {
@@ -41,6 +49,9 @@ constexpr int kUeContextRelease = 41;
 constexpr int kUeContextReleaseRequest = 42;
 constexpr int kUeRadioCapabilityInfoIndication = 44;
 constexpr int kUplinkNasTransport = 46;
+constexpr int kPduSessionResourceModify = 26;
+constexpr int kPduSessionResourceRelease = 28;
+constexpr int kPduSessionResourceSetup = 29;
 
 // Protocol IE identifiers.
 constexpr int kAllowedNssai = 0;
@@ -68,6 +79,25 @@ constexpr int kTimeToWait = 107;
 constexpr int kUeAssociatedConnectionList = 111;
 constexpr int kUeContextRequest = 112;
 constexpr int kUeNgapIds = 114;
+constexpr int kFailedToModifyListModRes = 54;
+constexpr int kFailedToSetupListCxtRes = 55;
+constexpr int kFailedToSetupListSuRes = 58;
+constexpr int kModifyListModReq = 64;
+constexpr int kModifyListModRes = 65;
+constexpr int kReleasedListRelRes = 70;
+constexpr int kSetupListCxtReq = 71;
+constexpr int kSetupListCxtRes = 72;
+constexpr int kSetupListSuReq = 74;
+constexpr int kSetupListSuRes = 75;
+constexpr int kToReleaseListRelCmd = 79;
+constexpr int kUeAmbr = 110;
+constexpr int kSessionAmbr = 130;
+constexpr int kPduSessionType = 134;
+constexpr int kQosFlowAddOrModifyRequestList = 135;
+constexpr int kQosFlowSetupRequestList = 136;
+constexpr int kQosFlowToReleaseList = 137;
+constexpr int kSecurityIndication = 138;
+constexpr int kUlNguUpTnlInformation = 139;
 constexpr int kUePagingIdentity = 115;
 constexpr int kUeRadioCapability = 117;
 constexpr int kUeSecurityCapabilities = 119;
@@ -417,6 +447,470 @@ Result<Bytes> build(const NasNonDeliveryIndication& m) {
     return per(initiating(kNasNonDeliveryIndication, "ignore", "NASNonDeliveryIndication", ies));
 }
 
+// ---- PDU sessions (P1 N10) ------------------------------------------------------------------
+
+bool psi_ok(std::uint8_t psi) { return psi >= 1 && psi <= 15; }
+
+json gtp_tunnel(const GtpTunnel& t) {
+    const std::uint64_t a = (std::uint64_t{t.addr[0]} << 24) | (std::uint64_t{t.addr[1]} << 16) |
+                            (std::uint64_t{t.addr[2]} << 8) | t.addr[3];
+    return {{"gTPTunnel", {{"transportLayerAddress", jer::var_bits(a, 32)}, {"gTP-TEID", octets(t.teid, 4)}}}};
+}
+
+GtpTunnel read_gtp_tunnel(const json& j) {
+    const json& g = j.at("gTPTunnel");
+    if (jer::bits_length(g.at("transportLayerAddress")) != 32) {
+        throw jer::NotP1("an IPv6 or dual transport address");
+    }
+    const auto a = read_bits(g.at("transportLayerAddress"), 32);
+    GtpTunnel t;
+    t.addr = {static_cast<std::uint8_t>(a >> 24), static_cast<std::uint8_t>(a >> 16), static_cast<std::uint8_t>(a >> 8),
+              static_cast<std::uint8_t>(a)};
+    t.teid = static_cast<std::uint32_t>(read_number(g.at("gTP-TEID")));
+    return t;
+}
+
+json qos_params(const QosFlowRequest& f) {
+    return {{"qosCharacteristics", {{"nonDynamic5QI", {{"fiveQI", f.five_qi}}}}},
+            {"allocationAndRetentionPriority",
+             {{"priorityLevelARP", f.arp.priority},
+              {"pre-emptionCapability", f.arp.may_preempt ? "may-trigger-pre-emption" : "shall-not-trigger-pre-emption"},
+              {"pre-emptionVulnerability", f.arp.preemptable ? "pre-emptable" : "not-pre-emptable"}}}};
+}
+
+QosFlowRequest read_qos_flow(const json& j) {
+    QosFlowRequest f;
+    f.qfi = j.at("qosFlowIdentifier").get<std::uint8_t>();
+    const json& p = j.at("qosFlowLevelQosParameters");
+    const json& c = p.at("qosCharacteristics");
+    if (!c.contains("nonDynamic5QI")) {
+        throw jer::NotP1("a dynamic 5QI");
+    }
+    f.five_qi = c.at("nonDynamic5QI").at("fiveQI").get<std::uint16_t>();
+    const json& arp = p.at("allocationAndRetentionPriority");
+    f.arp.priority = arp.at("priorityLevelARP").get<std::uint8_t>();
+    f.arp.may_preempt = arp.at("pre-emptionCapability").get<std::string>() == "may-trigger-pre-emption";
+    f.arp.preemptable = arp.at("pre-emptionVulnerability").get<std::string>() == "pre-emptable";
+    return f;
+}
+
+bool flows_ok(const std::vector<QosFlowRequest>& l) {
+    return std::all_of(l.begin(), l.end(), [](const QosFlowRequest& f) {
+        return f.qfi <= 63 && f.five_qi <= 255 && f.arp.priority >= 1 && f.arp.priority <= 15;
+    });
+}
+
+json ambr(const Ambr& a, const char* dl, const char* ul) { return {{dl, a.dl}, {ul, a.ul}}; }
+Ambr read_ambr(const json& j, const char* dl, const char* ul) { return {j.at(dl).get<std::uint64_t>(), j.at(ul).get<std::uint64_t>()}; }
+
+template <class T>
+Result<Bytes> per_of(const asn_TYPE_descriptor_t& td, const json& j) {
+    return jer::encode(td, j, asn1::Rules::aper);
+}
+
+Result<json> jer_of(const asn_TYPE_descriptor_t& td, ByteView in) { return jer::decode(td, in, asn1::Rules::aper); }
+
+Result<Bytes> encode_transfer(const SetupRequestTransfer& t) {
+    if (t.flows.empty() || !flows_ok(t.flows)) {
+        return bad("NGAP: a session needs QoS flows with QFI 0..63 and ARP priority 1..15");
+    }
+    json ies = json::array();
+    if (t.session_ambr) {
+        ies.push_back(ie(kSessionAmbr, "reject", "PDUSessionAggregateMaximumBitRate",
+                         ambr(*t.session_ambr, "pDUSessionAggregateMaximumBitRateDL", "pDUSessionAggregateMaximumBitRateUL")));
+    }
+    ies.push_back(ie(kUlNguUpTnlInformation, "reject", "UPTransportLayerInformation", gtp_tunnel(t.ul)));
+    ies.push_back(ie(kPduSessionType, "reject", "PDUSessionType", t.type));
+    if (t.security) {
+        json s = {{"integrityProtectionIndication", t.security->integrity},
+                  {"confidentialityProtectionIndication", t.security->confidentiality}};
+        if (t.security->integrity != "not-needed") {
+            s["maximumIntegrityProtectedDataRate-UL"] = "maximum-UE-rate";
+        }
+        ies.push_back(ie(kSecurityIndication, "reject", "SecurityIndication", s));
+    }
+    json flows = json::array();
+    for (const auto& f : t.flows) {
+        flows.push_back({{"qosFlowIdentifier", f.qfi}, {"qosFlowLevelQosParameters", qos_params(f)}});
+    }
+    ies.push_back(ie(kQosFlowSetupRequestList, "reject", "QosFlowSetupRequestList", flows));
+    return per_of<SetupRequestTransfer>(asn_DEF_NGAP_PDUSessionResourceSetupRequestTransfer, {{"protocolIEs", ies}});
+}
+
+Result<Bytes> encode_transfer(const SetupResponseTransfer& t) {
+    if (t.qfis.empty()) {
+        return bad("NGAP: a set-up session names its QoS flows");
+    }
+    json flows = json::array();
+    for (std::uint8_t q : t.qfis) {
+        flows.push_back({{"qosFlowIdentifier", q}});
+    }
+    json j = {{"dLQosFlowPerTNLInformation", {{"uPTransportLayerInformation", gtp_tunnel(t.dl)}, {"associatedQosFlowList", flows}}}};
+    if (t.security) {
+        j["securityResult"] = {{"integrityProtectionResult", t.security->integrity ? "performed" : "not-performed"},
+                               {"confidentialityProtectionResult", t.security->confidentiality ? "performed" : "not-performed"}};
+    }
+    return per_of<SetupResponseTransfer>(asn_DEF_NGAP_PDUSessionResourceSetupResponseTransfer, j);
+}
+
+Result<Bytes> encode_transfer(const ModifyRequestTransfer& t) {
+    if (!flows_ok(t.add_or_modify)) {
+        return bad("NGAP: QoS flows with QFI 0..63 and ARP priority 1..15");
+    }
+    json ies = json::array();
+    if (t.session_ambr) {
+        ies.push_back(ie(kSessionAmbr, "reject", "PDUSessionAggregateMaximumBitRate",
+                         ambr(*t.session_ambr, "pDUSessionAggregateMaximumBitRateDL", "pDUSessionAggregateMaximumBitRateUL")));
+    }
+    if (!t.add_or_modify.empty()) {
+        json flows = json::array();
+        for (const auto& f : t.add_or_modify) {
+            flows.push_back({{"qosFlowIdentifier", f.qfi}, {"qosFlowLevelQosParameters", qos_params(f)}});
+        }
+        ies.push_back(ie(kQosFlowAddOrModifyRequestList, "reject", "QosFlowAddOrModifyRequestList", flows));
+    }
+    if (!t.release.empty()) {
+        json flows = json::array();
+        for (std::uint8_t q : t.release) {
+            flows.push_back({{"qosFlowIdentifier", q}, {"cause", cause(Cause{"nas", "normal-release"})}});
+        }
+        ies.push_back(ie(kQosFlowToReleaseList, "reject", "QosFlowListWithCause", flows));
+    }
+    return per_of<ModifyRequestTransfer>(asn_DEF_NGAP_PDUSessionResourceModifyRequestTransfer, {{"protocolIEs", ies}});
+}
+
+Result<Bytes> encode_transfer(const ModifyResponseTransfer& t) {
+    json j = json::object();
+    if (!t.added_or_modified.empty()) {
+        json flows = json::array();
+        for (std::uint8_t q : t.added_or_modified) {
+            flows.push_back({{"qosFlowIdentifier", q}});
+        }
+        j["qosFlowAddOrModifyResponseList"] = flows;
+    }
+    return per_of<ModifyResponseTransfer>(asn_DEF_NGAP_PDUSessionResourceModifyResponseTransfer, j);
+}
+
+Result<Bytes> cause_transfer(const asn_TYPE_descriptor_t& td, const Cause& c) { return jer::encode(td, json{{"cause", cause(c)}}, asn1::Rules::aper); }
+
+/// The IEs of a transfer's protocolIEs, by id.
+std::map<int, json> transfer_ies(const json& j) {
+    std::map<int, json> out;
+    for (const auto& e : j.at("protocolIEs")) {
+        auto [type, value] = arm(e.at("value"));
+        (void)type;
+        out.emplace(e.at("id").get<int>(), *value);
+    }
+    return out;
+}
+
+Result<SetupRequestTransfer> decode_setup_request_transfer(ByteView in) {
+    auto j = jer_of(asn_DEF_NGAP_PDUSessionResourceSetupRequestTransfer, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<SetupRequestTransfer> {
+        auto ies = transfer_ies(*j);
+        SetupRequestTransfer t;
+        if (auto it = ies.find(kSessionAmbr); it != ies.end()) {
+            t.session_ambr = read_ambr(it->second, "pDUSessionAggregateMaximumBitRateDL", "pDUSessionAggregateMaximumBitRateUL");
+        }
+        t.ul = read_gtp_tunnel(ies.at(kUlNguUpTnlInformation));
+        t.type = ies.at(kPduSessionType).get<std::string>();
+        if (auto it = ies.find(kSecurityIndication); it != ies.end()) {
+            t.security = SecurityIndication{it->second.at("integrityProtectionIndication").get<std::string>(),
+                                            it->second.at("confidentialityProtectionIndication").get<std::string>()};
+        }
+        for (const auto& f : ies.at(kQosFlowSetupRequestList)) {
+            t.flows.push_back(read_qos_flow(f));
+        }
+        return t;
+    });
+}
+
+Result<SetupResponseTransfer> decode_setup_response_transfer(ByteView in) {
+    auto j = jer_of(asn_DEF_NGAP_PDUSessionResourceSetupResponseTransfer, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<SetupResponseTransfer> {
+        SetupResponseTransfer t;
+        const json& d = j->at("dLQosFlowPerTNLInformation");
+        t.dl = read_gtp_tunnel(d.at("uPTransportLayerInformation"));
+        for (const auto& f : d.at("associatedQosFlowList")) {
+            t.qfis.push_back(f.at("qosFlowIdentifier").get<std::uint8_t>());
+        }
+        if (j->contains("securityResult")) {
+            const json& s = j->at("securityResult");
+            t.security = SecurityResult{s.at("integrityProtectionResult").get<std::string>() == "performed",
+                                        s.at("confidentialityProtectionResult").get<std::string>() == "performed"};
+        }
+        return t;
+    });
+}
+
+Result<ModifyRequestTransfer> decode_modify_request_transfer(ByteView in) {
+    auto j = jer_of(asn_DEF_NGAP_PDUSessionResourceModifyRequestTransfer, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<ModifyRequestTransfer> {
+        auto ies = transfer_ies(*j);
+        ModifyRequestTransfer t;
+        if (auto it = ies.find(kSessionAmbr); it != ies.end()) {
+            t.session_ambr = read_ambr(it->second, "pDUSessionAggregateMaximumBitRateDL", "pDUSessionAggregateMaximumBitRateUL");
+        }
+        if (auto it = ies.find(kQosFlowAddOrModifyRequestList); it != ies.end()) {
+            for (const auto& f : it->second) {
+                t.add_or_modify.push_back(read_qos_flow(f));
+            }
+        }
+        if (auto it = ies.find(kQosFlowToReleaseList); it != ies.end()) {
+            for (const auto& f : it->second) {
+                t.release.push_back(f.at("qosFlowIdentifier").get<std::uint8_t>());
+            }
+        }
+        return t;
+    });
+}
+
+Result<ModifyResponseTransfer> decode_modify_response_transfer(ByteView in) {
+    auto j = jer_of(asn_DEF_NGAP_PDUSessionResourceModifyResponseTransfer, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<ModifyResponseTransfer> {
+        ModifyResponseTransfer t;
+        if (j->contains("qosFlowAddOrModifyResponseList")) {
+            for (const auto& f : j->at("qosFlowAddOrModifyResponseList")) {
+                t.added_or_modified.push_back(f.at("qosFlowIdentifier").get<std::uint8_t>());
+            }
+        }
+        return t;
+    });
+}
+
+Result<Cause> decode_cause_transfer(const asn_TYPE_descriptor_t& td, ByteView in) {
+    auto j = jer_of(td, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<Cause> { return read_cause(j->at("cause")); });
+}
+
+/// The setup items of a request (SUReq or CxtReq: their NAS field's name differs).
+Result<json> setup_items(const std::vector<SessionSetupItem>& l, const char* nas_field) {
+    json items = json::array();
+    for (const auto& s : l) {
+        if (!psi_ok(s.psi)) {
+            return bad("NGAP: a PDU session ID is 1..15");
+        }
+        auto t = encode_transfer(s.transfer);
+        if (!t) {
+            return t.error();
+        }
+        json item = {{"pDUSessionID", s.psi}};
+        if (s.nas) {
+            item[nas_field] = hex(*s.nas);
+        }
+        item["s-NSSAI"] = snssai(s.snssai);
+        item["pDUSessionResourceSetupRequestTransfer"] = hex(*t);
+        items.push_back(item);
+    }
+    return items;
+}
+
+Result<json> setup_ok_items(const std::vector<SessionSetupOk>& l) {
+    json items = json::array();
+    for (const auto& s : l) {
+        auto t = encode_transfer(s.transfer);
+        if (!t || !psi_ok(s.psi)) {
+            return t ? Result<json>(bad("NGAP: a PDU session ID is 1..15")) : Result<json>(t.error());
+        }
+        items.push_back({{"pDUSessionID", s.psi}, {"pDUSessionResourceSetupResponseTransfer", hex(*t)}});
+    }
+    return items;
+}
+
+Result<json> cause_items(const std::vector<SessionCause>& l, const asn_TYPE_descriptor_t& td, const char* field) {
+    json items = json::array();
+    for (const auto& s : l) {
+        auto t = cause_transfer(td, s.cause);
+        if (!t || !psi_ok(s.psi)) {
+            return t ? Result<json>(bad("NGAP: a PDU session ID is 1..15")) : Result<json>(t.error());
+        }
+        items.push_back({{"pDUSessionID", s.psi}, {field, hex(*t)}});
+    }
+    return items;
+}
+
+Result<std::vector<SessionSetupItem>> read_setup_items(const json& l, const char* nas_field) {
+    std::vector<SessionSetupItem> out;
+    for (const auto& i : l) {
+        SessionSetupItem s;
+        s.psi = i.at("pDUSessionID").get<std::uint8_t>();
+        if (i.contains(nas_field)) {
+            s.nas = read_octets(i.at(nas_field));
+        }
+        s.snssai = read_snssai(i.at("s-NSSAI"));
+        auto t = decode_setup_request_transfer(read_octets(i.at("pDUSessionResourceSetupRequestTransfer")));
+        if (!t) {
+            return t.error();
+        }
+        s.transfer = std::move(*t);
+        out.push_back(std::move(s));
+    }
+    return out;
+}
+
+Result<std::vector<SessionSetupOk>> read_setup_ok_items(const json& l) {
+    std::vector<SessionSetupOk> out;
+    for (const auto& i : l) {
+        auto t = decode_setup_response_transfer(read_octets(i.at("pDUSessionResourceSetupResponseTransfer")));
+        if (!t) {
+            return t.error();
+        }
+        out.push_back({i.at("pDUSessionID").get<std::uint8_t>(), std::move(*t)});
+    }
+    return out;
+}
+
+Result<std::vector<SessionCause>> read_cause_items(const json& l, const asn_TYPE_descriptor_t& td, const char* field) {
+    std::vector<SessionCause> out;
+    for (const auto& i : l) {
+        auto c = decode_cause_transfer(td, read_octets(i.at(field)));
+        if (!c) {
+            return c.error();
+        }
+        out.push_back({i.at("pDUSessionID").get<std::uint8_t>(), std::move(*c)});
+    }
+    return out;
+}
+
+json ue_ambr(const Ambr& a) { return ambr(a, "uEAggregateMaximumBitRateDL", "uEAggregateMaximumBitRateUL"); }
+
+Result<Bytes> build(const PduSessionResourceSetupRequest& m) {
+    if (!ids_ok(m.amf) || m.sessions.empty() || m.sessions.size() > 256) {
+        return bad("NGAP: PDU SESSION RESOURCE SETUP REQUEST needs 1..256 sessions");
+    }
+    auto items = setup_items(m.sessions, "pDUSessionNAS-PDU");
+    if (!items) {
+        return items.error();
+    }
+    json ies = ids(m.amf, m.ran);
+    if (m.nas) {
+        ies.push_back(ie(kNasPdu, "reject", "NAS-PDU", hex(*m.nas)));
+    }
+    ies.push_back(ie(kSetupListSuReq, "reject", "PDUSessionResourceSetupListSUReq", *items));
+    if (m.ue_ambr) {
+        ies.push_back(ie(kUeAmbr, "ignore", "UEAggregateMaximumBitRate", ue_ambr(*m.ue_ambr)));
+    }
+    return per(initiating(kPduSessionResourceSetup, "reject", "PDUSessionResourceSetupRequest", ies));
+}
+
+Result<Bytes> build(const PduSessionResourceSetupResponse& m) {
+    json ies = ids(m.amf, m.ran, "ignore");
+    if (!m.sessions.empty()) {
+        auto items = setup_ok_items(m.sessions);
+        if (!items) {
+            return items.error();
+        }
+        ies.push_back(ie(kSetupListSuRes, "ignore", "PDUSessionResourceSetupListSURes", *items));
+    }
+    if (!m.failed.empty()) {
+        auto items = cause_items(m.failed, asn_DEF_NGAP_PDUSessionResourceSetupUnsuccessfulTransfer,
+                                 "pDUSessionResourceSetupUnsuccessfulTransfer");
+        if (!items) {
+            return items.error();
+        }
+        ies.push_back(ie(kFailedToSetupListSuRes, "ignore", "PDUSessionResourceFailedToSetupListSURes", *items));
+    }
+    return per(successful(kPduSessionResourceSetup, "reject", "PDUSessionResourceSetupResponse", ies));
+}
+
+Result<Bytes> build(const PduSessionResourceReleaseCommand& m) {
+    if (!ids_ok(m.amf) || m.sessions.empty()) {
+        return bad("NGAP: PDU SESSION RESOURCE RELEASE COMMAND needs sessions");
+    }
+    auto items = cause_items(m.sessions, asn_DEF_NGAP_PDUSessionResourceReleaseCommandTransfer,
+                             "pDUSessionResourceReleaseCommandTransfer");
+    if (!items) {
+        return items.error();
+    }
+    json ies = ids(m.amf, m.ran);
+    if (m.nas) {
+        ies.push_back(ie(kNasPdu, "ignore", "NAS-PDU", hex(*m.nas)));
+    }
+    ies.push_back(ie(kToReleaseListRelCmd, "reject", "PDUSessionResourceToReleaseListRelCmd", *items));
+    return per(initiating(kPduSessionResourceRelease, "reject", "PDUSessionResourceReleaseCommand", ies));
+}
+
+Result<Bytes> build(const PduSessionResourceReleaseResponse& m) {
+    if (m.released.empty()) {
+        return bad("NGAP: PDU SESSION RESOURCE RELEASE RESPONSE lists the released sessions");
+    }
+    auto empty = jer::encode(asn_DEF_NGAP_PDUSessionResourceReleaseResponseTransfer, json::object(), asn1::Rules::aper);
+    if (!empty) {
+        return empty.error();
+    }
+    json items = json::array();
+    for (std::uint8_t psi : m.released) {
+        if (!psi_ok(psi)) {
+            return bad("NGAP: a PDU session ID is 1..15");
+        }
+        items.push_back({{"pDUSessionID", psi}, {"pDUSessionResourceReleaseResponseTransfer", hex(*empty)}});
+    }
+    json ies = ids(m.amf, m.ran, "ignore");
+    ies.push_back(ie(kReleasedListRelRes, "ignore", "PDUSessionResourceReleasedListRelRes", items));
+    return per(successful(kPduSessionResourceRelease, "reject", "PDUSessionResourceReleaseResponse", ies));
+}
+
+Result<Bytes> build(const PduSessionResourceModifyRequest& m) {
+    if (!ids_ok(m.amf) || m.sessions.empty()) {
+        return bad("NGAP: PDU SESSION RESOURCE MODIFY REQUEST needs sessions");
+    }
+    json items = json::array();
+    for (const auto& s : m.sessions) {
+        auto t = encode_transfer(s.transfer);
+        if (!t || !psi_ok(s.psi)) {
+            return t ? Result<Bytes>(bad("NGAP: a PDU session ID is 1..15")) : Result<Bytes>(t.error());
+        }
+        json item = {{"pDUSessionID", s.psi}};
+        if (s.nas) {
+            item["nAS-PDU"] = hex(*s.nas);
+        }
+        item["pDUSessionResourceModifyRequestTransfer"] = hex(*t);
+        items.push_back(item);
+    }
+    json ies = ids(m.amf, m.ran);
+    ies.push_back(ie(kModifyListModReq, "reject", "PDUSessionResourceModifyListModReq", items));
+    return per(initiating(kPduSessionResourceModify, "reject", "PDUSessionResourceModifyRequest", ies));
+}
+
+Result<Bytes> build(const PduSessionResourceModifyResponse& m) {
+    json ies = ids(m.amf, m.ran, "ignore");
+    if (!m.sessions.empty()) {
+        json items = json::array();
+        for (const auto& s : m.sessions) {
+            auto t = encode_transfer(s.transfer);
+            if (!t || !psi_ok(s.psi)) {
+                return t ? Result<Bytes>(bad("NGAP: a PDU session ID is 1..15")) : Result<Bytes>(t.error());
+            }
+            items.push_back({{"pDUSessionID", s.psi}, {"pDUSessionResourceModifyResponseTransfer", hex(*t)}});
+        }
+        ies.push_back(ie(kModifyListModRes, "ignore", "PDUSessionResourceModifyListModRes", items));
+    }
+    if (!m.failed.empty()) {
+        auto items = cause_items(m.failed, asn_DEF_NGAP_PDUSessionResourceModifyUnsuccessfulTransfer,
+                                 "pDUSessionResourceModifyUnsuccessfulTransfer");
+        if (!items) {
+            return items.error();
+        }
+        ies.push_back(ie(kFailedToModifyListModRes, "ignore", "PDUSessionResourceFailedToModifyListModRes", *items));
+    }
+    return per(successful(kPduSessionResourceModify, "reject", "PDUSessionResourceModifyResponse", ies));
+}
+
 json sec_caps(const InitialContextSetupRequest& m) {
     return {{"nRencryptionAlgorithms", jer::var_bits(m.nr_enc, 16)},
             {"nRintegrityProtectionAlgorithms", jer::var_bits(m.nr_int, 16)},
@@ -428,8 +922,21 @@ Result<Bytes> build(const InitialContextSetupRequest& m) {
     if (!ids_ok(m.amf) || m.security_key.size() != 32 || m.allowed_nssai.empty()) {
         return bad("NGAP: INITIAL CONTEXT SETUP REQUEST needs a 256-bit key and an allowed NSSAI");
     }
+    if (!m.sessions.empty() && !m.ue_ambr) {
+        return bad("NGAP: an INITIAL CONTEXT SETUP REQUEST with sessions carries the UE-AMBR (9.2.2.1)");
+    }
     json ies = ids(m.amf, m.ran);
+    if (m.ue_ambr) {
+        ies.push_back(ie(kUeAmbr, "reject", "UEAggregateMaximumBitRate", ue_ambr(*m.ue_ambr)));
+    }
     ies.push_back(ie(kGuami, "reject", "GUAMI", guami(m.guami)));
+    if (!m.sessions.empty()) {
+        auto items = setup_items(m.sessions, "nAS-PDU");
+        if (!items) {
+            return items.error();
+        }
+        ies.push_back(ie(kSetupListCxtReq, "reject", "PDUSessionResourceSetupListCxtReq", *items));
+    }
     ies.push_back(ie(kAllowedNssai, "reject", "AllowedNSSAI", slice_list(m.allowed_nssai)));
     ies.push_back(ie(kUeSecurityCapabilities, "reject", "UESecurityCapabilities", sec_caps(m)));
     ies.push_back(ie(kSecurityKey, "reject", "SecurityKey", hex(m.security_key)));
@@ -446,7 +953,23 @@ Result<Bytes> build(const InitialContextSetupRequest& m) {
 }
 
 Result<Bytes> build(const InitialContextSetupResponse& m) {
-    return per(successful(kInitialContextSetup, "reject", "InitialContextSetupResponse", ids(m.amf, m.ran, "ignore")));
+    json ies = ids(m.amf, m.ran, "ignore");
+    if (!m.sessions.empty()) {
+        auto items = setup_ok_items(m.sessions);
+        if (!items) {
+            return items.error();
+        }
+        ies.push_back(ie(kSetupListCxtRes, "ignore", "PDUSessionResourceSetupListCxtRes", *items));
+    }
+    if (!m.failed.empty()) {
+        auto items = cause_items(m.failed, asn_DEF_NGAP_PDUSessionResourceSetupUnsuccessfulTransfer,
+                                 "pDUSessionResourceSetupUnsuccessfulTransfer");
+        if (!items) {
+            return items.error();
+        }
+        ies.push_back(ie(kFailedToSetupListCxtRes, "ignore", "PDUSessionResourceFailedToSetupListCxtRes", *items));
+    }
+    return per(successful(kInitialContextSetup, "reject", "InitialContextSetupResponse", ies));
 }
 
 Result<Bytes> build(const InitialContextSetupFailure& m) {
@@ -688,10 +1211,36 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             if (const json* n = maybe(ies, kNasPdu)) {
                 m.nas = read_octets(*n);
             }
+            if (const json* a = maybe(ies, kUeAmbr)) {
+                m.ue_ambr = read_ambr(*a, "uEAggregateMaximumBitRateDL", "uEAggregateMaximumBitRateUL");
+            }
+            if (const json* l = maybe(ies, kSetupListCxtReq)) {
+                auto s = read_setup_items(*l, "nAS-PDU");
+                if (!s) {
+                    return s.error();
+                }
+                m.sessions = std::move(*s);
+            }
             return Pdu{std::move(m)};
         }
         if (kind == K::successful) {
-            return Pdu{InitialContextSetupResponse{amf_id(ies), ran_id(ies)}};
+            InitialContextSetupResponse m{amf_id(ies), ran_id(ies), {}, {}};
+            if (const json* l = maybe(ies, kSetupListCxtRes)) {
+                auto s = read_setup_ok_items(*l);
+                if (!s) {
+                    return s.error();
+                }
+                m.sessions = std::move(*s);
+            }
+            if (const json* l = maybe(ies, kFailedToSetupListCxtRes)) {
+                auto f = read_cause_items(*l, asn_DEF_NGAP_PDUSessionResourceSetupUnsuccessfulTransfer,
+                                          "pDUSessionResourceSetupUnsuccessfulTransfer");
+                if (!f) {
+                    return f.error();
+                }
+                m.failed = std::move(*f);
+            }
+            return Pdu{std::move(m)};
         }
         return Pdu{InitialContextSetupFailure{amf_id(ies), ran_id(ies), read_cause(need(ies, kCause))}};
     case kUeContextReleaseRequest:
@@ -726,6 +1275,116 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
         break;
     case kUeRadioCapabilityInfoIndication:
         return Pdu{UeRadioCapabilityInfoIndication{amf_id(ies), ran_id(ies), read_octets(need(ies, kUeRadioCapability))}};
+    case kPduSessionResourceSetup:
+        if (kind == K::initiating) {
+            PduSessionResourceSetupRequest m;
+            m.amf = amf_id(ies);
+            m.ran = ran_id(ies);
+            if (const json* n = maybe(ies, kNasPdu)) {
+                m.nas = read_octets(*n);
+            }
+            auto s = read_setup_items(need(ies, kSetupListSuReq), "pDUSessionNAS-PDU");
+            if (!s) {
+                return s.error();
+            }
+            m.sessions = std::move(*s);
+            if (const json* a = maybe(ies, kUeAmbr)) {
+                m.ue_ambr = read_ambr(*a, "uEAggregateMaximumBitRateDL", "uEAggregateMaximumBitRateUL");
+            }
+            return Pdu{std::move(m)};
+        }
+        if (kind == K::successful) {
+            PduSessionResourceSetupResponse m;
+            m.amf = amf_id(ies);
+            m.ran = ran_id(ies);
+            if (const json* l = maybe(ies, kSetupListSuRes)) {
+                auto s = read_setup_ok_items(*l);
+                if (!s) {
+                    return s.error();
+                }
+                m.sessions = std::move(*s);
+            }
+            if (const json* l = maybe(ies, kFailedToSetupListSuRes)) {
+                auto f = read_cause_items(*l, asn_DEF_NGAP_PDUSessionResourceSetupUnsuccessfulTransfer,
+                                          "pDUSessionResourceSetupUnsuccessfulTransfer");
+                if (!f) {
+                    return f.error();
+                }
+                m.failed = std::move(*f);
+            }
+            return Pdu{std::move(m)};
+        }
+        break;
+    case kPduSessionResourceRelease:
+        if (kind == K::initiating) {
+            PduSessionResourceReleaseCommand m;
+            m.amf = amf_id(ies);
+            m.ran = ran_id(ies);
+            if (const json* n = maybe(ies, kNasPdu)) {
+                m.nas = read_octets(*n);
+            }
+            auto s = read_cause_items(need(ies, kToReleaseListRelCmd), asn_DEF_NGAP_PDUSessionResourceReleaseCommandTransfer,
+                                      "pDUSessionResourceReleaseCommandTransfer");
+            if (!s) {
+                return s.error();
+            }
+            m.sessions = std::move(*s);
+            return Pdu{std::move(m)};
+        }
+        if (kind == K::successful) {
+            PduSessionResourceReleaseResponse m;
+            m.amf = amf_id(ies);
+            m.ran = ran_id(ies);
+            for (const auto& i : need(ies, kReleasedListRelRes)) {
+                m.released.push_back(i.at("pDUSessionID").get<std::uint8_t>());
+            }
+            return Pdu{std::move(m)};
+        }
+        break;
+    case kPduSessionResourceModify:
+        if (kind == K::initiating) {
+            PduSessionResourceModifyRequest m;
+            m.amf = amf_id(ies);
+            m.ran = ran_id(ies);
+            for (const auto& i : need(ies, kModifyListModReq)) {
+                SessionModifyItem s;
+                s.psi = i.at("pDUSessionID").get<std::uint8_t>();
+                if (i.contains("nAS-PDU")) {
+                    s.nas = read_octets(i.at("nAS-PDU"));
+                }
+                auto t = decode_modify_request_transfer(read_octets(i.at("pDUSessionResourceModifyRequestTransfer")));
+                if (!t) {
+                    return t.error();
+                }
+                s.transfer = std::move(*t);
+                m.sessions.push_back(std::move(s));
+            }
+            return Pdu{std::move(m)};
+        }
+        if (kind == K::successful) {
+            PduSessionResourceModifyResponse m;
+            m.amf = amf_id(ies);
+            m.ran = ran_id(ies);
+            if (const json* l = maybe(ies, kModifyListModRes)) {
+                for (const auto& i : *l) {
+                    auto t = decode_modify_response_transfer(read_octets(i.at("pDUSessionResourceModifyResponseTransfer")));
+                    if (!t) {
+                        return t.error();
+                    }
+                    m.sessions.push_back({i.at("pDUSessionID").get<std::uint8_t>(), std::move(*t)});
+                }
+            }
+            if (const json* l = maybe(ies, kFailedToModifyListModRes)) {
+                auto f = read_cause_items(*l, asn_DEF_NGAP_PDUSessionResourceModifyUnsuccessfulTransfer,
+                                          "pDUSessionResourceModifyUnsuccessfulTransfer");
+                if (!f) {
+                    return f.error();
+                }
+                m.failed = std::move(*f);
+            }
+            return Pdu{std::move(m)};
+        }
+        break;
     default:
         break;
     }

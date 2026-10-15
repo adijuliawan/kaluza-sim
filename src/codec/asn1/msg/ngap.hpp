@@ -153,6 +153,97 @@ struct Paging {
     friend bool operator==(const Paging&, const Paging&) = default;
 };
 
+// ---- PDU sessions (P1 N10; TS 38.413 9.3.4) ----------------------------------------
+
+/// UP Transport Layer Information: an IPv4 GTP-U tunnel end (P1 has no IPv6 transport).
+struct GtpTunnel {
+    std::array<std::uint8_t, 4> addr{};
+    std::uint32_t teid = 0;
+    friend bool operator==(const GtpTunnel&, const GtpTunnel&) = default;
+};
+struct Arp {
+    std::uint8_t priority = 8;     // 1..15
+    bool may_preempt = false;      // pre-emptionCapability may-trigger-pre-emption
+    bool preemptable = true;       // pre-emptionVulnerability pre-emptable
+    friend bool operator==(const Arp&, const Arp&) = default;
+};
+/// A non-GBR flow with a standardised 5QI (GBR and dynamic 5QIs are not P1's).
+struct QosFlowRequest {
+    std::uint8_t qfi = 1;
+    std::uint16_t five_qi = 9;
+    Arp arp;
+    friend bool operator==(const QosFlowRequest&, const QosFlowRequest&) = default;
+};
+struct Ambr {
+    std::uint64_t dl = 0;   // bit/s
+    std::uint64_t ul = 0;
+    friend bool operator==(const Ambr&, const Ambr&) = default;
+};
+/// "required", "preferred" or "not-needed" (9.3.1.27).
+struct SecurityIndication {
+    std::string integrity = "not-needed";
+    std::string confidentiality = "not-needed";
+    friend bool operator==(const SecurityIndication&, const SecurityIndication&) = default;
+};
+struct SecurityResult {
+    bool integrity = false;         // performed
+    bool confidentiality = false;
+    friend bool operator==(const SecurityResult&, const SecurityResult&) = default;
+};
+struct SetupRequestTransfer {
+    std::optional<Ambr> session_ambr;
+    GtpTunnel ul;                    // the UPF's N3 end
+    std::string type = "ipv4";       // PDUSessionType
+    std::optional<SecurityIndication> security;
+    std::vector<QosFlowRequest> flows;
+    friend bool operator==(const SetupRequestTransfer&, const SetupRequestTransfer&) = default;
+};
+struct SetupResponseTransfer {
+    GtpTunnel dl;                    // the gNB's N3 end
+    std::vector<std::uint8_t> qfis;  // the flows set up on it
+    std::optional<SecurityResult> security;
+    friend bool operator==(const SetupResponseTransfer&, const SetupResponseTransfer&) = default;
+};
+struct SessionSetupItem {
+    std::uint8_t psi = 1;
+    std::optional<Bytes> nas;        // the session's own NAS PDU (5GSM)
+    Snssai snssai;
+    SetupRequestTransfer transfer;
+    friend bool operator==(const SessionSetupItem&, const SessionSetupItem&) = default;
+};
+struct SessionSetupOk {
+    std::uint8_t psi = 1;
+    SetupResponseTransfer transfer;
+    friend bool operator==(const SessionSetupOk&, const SessionSetupOk&) = default;
+};
+/// A session with a cause: failed to set up or modify, or to be released.
+struct SessionCause {
+    std::uint8_t psi = 1;
+    Cause cause;
+    friend bool operator==(const SessionCause&, const SessionCause&) = default;
+};
+struct ModifyRequestTransfer {
+    std::optional<Ambr> session_ambr;
+    std::vector<QosFlowRequest> add_or_modify;
+    std::vector<std::uint8_t> release;   // QFIs, with cause nas/normal-release
+    friend bool operator==(const ModifyRequestTransfer&, const ModifyRequestTransfer&) = default;
+};
+struct ModifyResponseTransfer {
+    std::vector<std::uint8_t> added_or_modified;   // QFIs
+    friend bool operator==(const ModifyResponseTransfer&, const ModifyResponseTransfer&) = default;
+};
+struct SessionModifyItem {
+    std::uint8_t psi = 1;
+    std::optional<Bytes> nas;
+    ModifyRequestTransfer transfer;
+    friend bool operator==(const SessionModifyItem&, const SessionModifyItem&) = default;
+};
+struct SessionModifyOk {
+    std::uint8_t psi = 1;
+    ModifyResponseTransfer transfer;
+    friend bool operator==(const SessionModifyOk&, const SessionModifyOk&) = default;
+};
+
 // ---- UE-associated ------------------------------------------------------------------
 
 struct InitialUeMessage {
@@ -199,11 +290,15 @@ struct InitialContextSetupRequest {
     std::optional<Bytes> nas;
     std::optional<Bytes> ue_radio_capability;
     std::optional<std::uint64_t> masked_imeisv;
+    std::vector<SessionSetupItem> sessions;   // PDUSessionResourceSetupListCxtReq
+    std::optional<Ambr> ue_ambr;              // mandatory when sessions are set up (9.2.2.1)
     friend bool operator==(const InitialContextSetupRequest&, const InitialContextSetupRequest&) = default;
 };
 struct InitialContextSetupResponse {
     std::uint64_t amf = 0;
     std::uint32_t ran = 0;
+    std::vector<SessionSetupOk> sessions;
+    std::vector<SessionCause> failed;
     friend bool operator==(const InitialContextSetupResponse&, const InitialContextSetupResponse&) = default;
 };
 struct InitialContextSetupFailure {
@@ -247,12 +342,56 @@ struct UeRadioCapabilityInfoIndication {
     friend bool operator==(const UeRadioCapabilityInfoIndication&, const UeRadioCapabilityInfoIndication&) = default;
 };
 
+struct PduSessionResourceSetupRequest {
+    std::uint64_t amf = 0;
+    std::uint32_t ran = 0;
+    std::optional<Bytes> nas;
+    std::vector<SessionSetupItem> sessions;
+    std::optional<Ambr> ue_ambr;
+    friend bool operator==(const PduSessionResourceSetupRequest&, const PduSessionResourceSetupRequest&) = default;
+};
+struct PduSessionResourceSetupResponse {
+    std::uint64_t amf = 0;
+    std::uint32_t ran = 0;
+    std::vector<SessionSetupOk> sessions;
+    std::vector<SessionCause> failed;
+    friend bool operator==(const PduSessionResourceSetupResponse&, const PduSessionResourceSetupResponse&) = default;
+};
+struct PduSessionResourceReleaseCommand {
+    std::uint64_t amf = 0;
+    std::uint32_t ran = 0;
+    std::optional<Bytes> nas;
+    std::vector<SessionCause> sessions;
+    friend bool operator==(const PduSessionResourceReleaseCommand&, const PduSessionResourceReleaseCommand&) = default;
+};
+struct PduSessionResourceReleaseResponse {
+    std::uint64_t amf = 0;
+    std::uint32_t ran = 0;
+    std::vector<std::uint8_t> released;
+    friend bool operator==(const PduSessionResourceReleaseResponse&, const PduSessionResourceReleaseResponse&) = default;
+};
+struct PduSessionResourceModifyRequest {
+    std::uint64_t amf = 0;
+    std::uint32_t ran = 0;
+    std::vector<SessionModifyItem> sessions;
+    friend bool operator==(const PduSessionResourceModifyRequest&, const PduSessionResourceModifyRequest&) = default;
+};
+struct PduSessionResourceModifyResponse {
+    std::uint64_t amf = 0;
+    std::uint32_t ran = 0;
+    std::vector<SessionModifyOk> sessions;
+    std::vector<SessionCause> failed;
+    friend bool operator==(const PduSessionResourceModifyResponse&, const PduSessionResourceModifyResponse&) = default;
+};
+
 using Pdu = std::variant<NgSetupRequest, NgSetupResponse, NgSetupFailure, NgReset, NgResetAcknowledge,
                          ErrorIndication, AmfStatusIndication, AmfConfigurationUpdate, AmfConfigurationUpdateAcknowledge,
                          Paging, InitialUeMessage, DownlinkNasTransport, UplinkNasTransport, NasNonDeliveryIndication,
                          InitialContextSetupRequest, InitialContextSetupResponse, InitialContextSetupFailure,
                          UeContextReleaseRequest, UeContextReleaseCommand, UeContextReleaseComplete,
-                         UeContextModificationRequest, UeContextModificationResponse, UeRadioCapabilityInfoIndication>;
+                         UeContextModificationRequest, UeContextModificationResponse, UeRadioCapabilityInfoIndication,
+                         PduSessionResourceSetupRequest, PduSessionResourceSetupResponse, PduSessionResourceReleaseCommand,
+                         PduSessionResourceReleaseResponse, PduSessionResourceModifyRequest, PduSessionResourceModifyResponse>;
 
 Result<Bytes> encode(const Pdu& p);
 

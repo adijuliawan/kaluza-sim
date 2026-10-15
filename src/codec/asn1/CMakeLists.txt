@@ -72,6 +72,13 @@ target_include_directories(ksim_codec_ngap PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_codec_ngap PUBLIC ksim::platform PRIVATE ksim_codec_jer ksim::asn1_ngap ksim::warnings)
 ksim_layer(ksim_codec_ngap codec)
 
+# Typed E1AP builders and readers (P1 N10), the same route.
+add_library(ksim_codec_e1ap STATIC msg/e1ap.cpp)
+add_library(ksim::codec_e1ap ALIAS ksim_codec_e1ap)
+target_include_directories(ksim_codec_e1ap PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(ksim_codec_e1ap PUBLIC ksim::platform PRIVATE ksim_codec_jer ksim::asn1_e1ap ksim::warnings)
+ksim_layer(ksim_codec_e1ap codec)
+
 # Typed F1AP builders and readers (P1 N7), the same route.
 add_library(ksim_codec_f1ap STATIC msg/f1ap.cpp)
 add_library(ksim::codec_f1ap ALIAS ksim_codec_f1ap)

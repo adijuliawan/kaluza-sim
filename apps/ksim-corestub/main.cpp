@@ -3,21 +3,25 @@
 //
 // ksim-corestub: the scripted core stub on loopback (P1 N8; ADR 0009 point 8).
 // The AMF's NGAP and NAS sides and the home functions of tests/corestub over a
-// real SCTP listener, for component runs of `ksim` in real time.
+// real SCTP listener, for component runs of `ksim` in real time; from P1 N10
+// its SMF, and its UPF with the DN reflector on a real UDP socket (N3).
 //
 //   ksim-corestub --listen 127.0.0.1:38412 --master <file> --block 001010000300000/100
-//                 --ctl <socket> [--profile <yaml>] [--plmn 00101]
+//                 --ctl <socket> [--profile <yaml>] [--plmn 00101] [--n3 127.0.0.1:2152]
 //
 // It binds 127.0.0.0/8 only. The subscribers' K and OPc derive from the range
 // master (sim-uicc.md §8) and are never printed. GET /v1/stub on the control
 // socket reports what it saw and its verdicts (every check it made, with the
-// clause); POST /v1/stop ends it.
+// clause); POST /v1/stub/release (ue, psi, cause) releases a session from the
+// network side and POST /v1/stub/ping-ue (ue, psi, seq) pings a UE from the DN,
+// for the gate rows a UE cannot trigger; POST /v1/stop ends it.
 
 #include <CLI/CLI.hpp>
 
 #include <cstdio>
 #include <exception>
 
+#include <algorithm>
 #include <atomic>
 #include <csignal>
 #include <future>
@@ -28,6 +32,7 @@
 
 #include "api/http.hpp"
 #include "net/sctp.hpp"
+#include "net/udp.hpp"
 #include "ngap_amf.hpp"
 #include "platform/clock.hpp"
 #include "platform/shard.hpp"
@@ -51,6 +56,8 @@ struct Stub {
     ksim::corestub::Profile profile;
     // On the shard.
     std::unique_ptr<ksim::net::SctpListener> listener;
+    std::unique_ptr<ksim::net::UdpSocket> n3;
+    std::array<std::uint8_t, 4> n3_addr{127, 0, 0, 1};
     std::unique_ptr<ksim::IAssoc> assoc;
     std::unique_ptr<ksim::corestub::NgapAmf> amf;
     std::vector<ksim::corestub::Verdict> past;   // the verdicts of associations that ended
@@ -118,6 +125,15 @@ Reply report(Stub& s) {
             }
             out.set("REGISTERED", registered);
             out.set("ERROR_INDICATIONS", static_cast<std::int64_t>(s.amf->error_indications()));
+            out.set("SESSIONS", static_cast<std::int64_t>(s.amf->smf().sessions()));
+            out.set("SM_REQUESTS", static_cast<std::int64_t>(s.amf->smf().requests()));
+            if (const auto* upf = s.amf->upf()) {
+                out.set("UPF_UL", static_cast<std::int64_t>(upf->stats().ul_packets));
+                out.set("UPF_DL", static_cast<std::int64_t>(upf->stats().dl_packets));
+                out.set("UPF_ECHO_REPLIES", static_cast<std::int64_t>(upf->stats().echo_replies));
+                out.set("UPF_ECHO_FROM_UE", static_cast<std::int64_t>(upf->stats().echo_from_ue));
+                out.set("UPF_ERROR_INDICATIONS", static_cast<std::int64_t>(upf->error_indications()));
+            }
         }
         out.set("FAILURES", static_cast<std::int64_t>(all.size()));
         int n = 0;
@@ -139,7 +155,9 @@ static int run_main(int argc, char** argv) {
     std::string ctl;
     std::string profile_file;
     std::string plmn = "00101";
+    std::string n3 = "127.0.0.1:2152";
     app.add_option("--listen", listen, "the NG-C address, 127.0.0.0/8 only");
+    app.add_option("--n3", n3, "the UPF's GTP-U address, 127.0.0.0/8 only");
     app.add_option("--master", master, "the range master file (0600)")->required();
     app.add_option("--block", block, "the subscribers: <first IMSI>/<count>")->required();
     app.add_option("--ctl", ctl, "the control socket")->required();
@@ -155,7 +173,13 @@ static int run_main(int argc, char** argv) {
         std::cerr << "ksim-corestub: refused: --listen must be 127.0.0.0/8:port (ADR 0009 point 11)\n";
         return 7;
     }
+    auto n3_ep = ksim::Endpoint::parse(n3);
+    if (!n3_ep || n3_ep->family != ksim::Endpoint::Family::v4 || !n3_ep->in(ksim::Endpoint::v4(127, 0, 0, 0, 0), 8)) {
+        std::cerr << "ksim-corestub: refused: --n3 must be 127.0.0.0/8:port (ADR 0009 point 11)\n";
+        return 7;
+    }
     Stub s;
+    s.n3_addr = {n3_ep->addr[0], n3_ep->addr[1], n3_ep->addr[2], n3_ep->addr[3]};
     if (plmn.size() < 5 || plmn.size() > 6 || plmn.find_first_not_of("0123456789") != std::string::npos) {
         std::cerr << "ksim-corestub: --plmn is MCC and MNC digits\n";
         return 2;
@@ -176,7 +200,12 @@ static int run_main(int argc, char** argv) {
         return 2;
     }
     s.shard.start();
-    auto started = s.call<std::string>([&s, &ep] {
+    auto started = s.call<std::string>([&s, &ep, &n3_ep] {
+        auto u = ksim::net::UdpSocket::bind(s.shard.reactor(), *n3_ep);
+        if (!u) {
+            return "N3 " + n3_ep->to_string() + ": " + std::string(u.error().what);
+        }
+        s.n3 = std::move(*u);
         ksim::net::SctpOptions opt;
         opt.out_streams = 3;
         opt.max_in_streams = 3;
@@ -188,7 +217,8 @@ static int run_main(int argc, char** argv) {
             }
             s.amf.reset();
             s.assoc = std::move(a);
-            s.amf = std::make_unique<ksim::corestub::NgapAmf>(s.shard, s.home, s.plmn, s.profile, *s.assoc);
+            s.amf = std::make_unique<ksim::corestub::NgapAmf>(s.shard, s.home, s.plmn, s.profile, *s.assoc, s.n3.get(),
+                                                              s.n3_addr);
             ++s.associations;
         });
         if (!l) {
@@ -204,6 +234,62 @@ static int run_main(int argc, char** argv) {
     std::atomic<bool> stop{false};
     ksim::api::Server server;
     server.get("/v1/stub", [&s](const ksim::api::Request&) { return report(s); });
+    // The UE is the n-th that came (0 first), as `ue`; the session by `psi`.
+    auto num = [](const ksim::api::Request& req, const char* key, unsigned long fallback, unsigned long max) {
+        const std::string v = req.arg(key);
+        if (v.empty() || v.size() > 6 || v.find_first_not_of("0123456789") != std::string::npos) {
+            return fallback;
+        }
+        return std::min(std::stoul(v), max);
+    };
+    // `ue`: the SUPI's 15 digits (its latest registration), or the n-th UE that came (0 first).
+    auto find_ue = [num](Stub& st, const ksim::api::Request& req) -> ksim::corestub::Amf* {
+        if (!st.amf) {
+            return nullptr;
+        }
+        std::string u = req.arg("ue");
+        if (u.rfind("imsi-", 0) == 0) {
+            u = u.substr(5);
+        }
+        if (u.size() == 15) {
+            return st.amf->nas_by_supi(u);
+        }
+        return st.amf->nas(static_cast<std::size_t>(num(req, "ue", 0, 1000)));
+    };
+    server.post("/v1/stub/release", [&s, find_ue, num](const ksim::api::Request& req) {
+        const auto psi = static_cast<std::uint8_t>(num(req, "psi", 1, 15));
+        const auto cause = static_cast<std::uint8_t>(num(req, "cause", 36, 255));
+        auto r = s.call<bool>([&s, &req, find_ue, psi, cause] {
+            auto* nas = find_ue(s, req);
+            return nas != nullptr && nas->release_session(psi, cause);
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        if (!*r) {
+            return Reply::fail(Exit::wrong_state, "no such registered UE or session");
+        }
+        Reply out;
+        out.set("RELEASE", "sent");
+        return out;
+    });
+    server.post("/v1/stub/ping-ue", [&s, find_ue, num](const ksim::api::Request& req) {
+        const auto psi = static_cast<std::uint8_t>(num(req, "psi", 1, 15));
+        const auto seq = static_cast<std::uint16_t>(num(req, "seq", 1, 65535));
+        auto r = s.call<bool>([&s, &req, find_ue, psi, seq] {
+            auto* nas = find_ue(s, req);
+            return nas != nullptr && s.amf->smf().ping_ue(nas->supi(), psi, seq).has_value();
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        if (!*r) {
+            return Reply::fail(Exit::wrong_state, "no such UE session with a downlink tunnel");
+        }
+        Reply out;
+        out.set("PING", "sent");
+        return out;
+    });
     server.post("/v1/stop", [&stop](const ksim::api::Request&) {
         stop.store(true);
         Reply r;
@@ -223,6 +309,7 @@ static int run_main(int argc, char** argv) {
         s.amf.reset();
         s.assoc.reset();
         s.listener.reset();
+        s.n3.reset();
         return true;
     });
     s.shard.stop();

@@ -30,18 +30,30 @@
 //    unknown RAN UE NGAP ID is answered with an ERROR INDICATION; nothing an
 //    AMF sends ends the process (L15).
 //
-// Not in P1: PDU sessions and the CU-UP (N10), handover (P3), several DUs or
-// AMFs.
+//  - PDU sessions (P1 N10), one procedure at a time per UE: a PDU SESSION
+//    RESOURCE SETUP REQUEST (or the sessions of an INITIAL CONTEXT SETUP
+//    REQUEST, after its first reconfiguration) gets a DRB per session (all its
+//    flows, the default DRB), the CU-UP's bearer context over E1 (BEARER
+//    CONTEXT SETUP, then MODIFICATION to add), the DU's DRB over F1 (UE
+//    CONTEXT MODIFICATION with the CU-UP's F1-U end), the DU's F1-U end back to
+//    the CU-UP, then RRCReconfiguration with the DRB and the session's NAS, and
+//    the response with the CU-UP's N3 end once the UE completes it. A release
+//    reconfigures the UE first, then the DU and the CU-UP. E1 is the CU-UP's
+//    association (it sends gNB-CU-UP E1 SETUP).
+//
+// Not in P1: handover (P3), several DUs, CU-UPs or AMFs.
 
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "codec/asn1/msg/e1ap.hpp"
 #include "codec/asn1/msg/f1ap.hpp"
 #include "proc/ran/du.hpp"
 #include "codec/asn1/msg/ngap.hpp"
@@ -88,7 +100,8 @@ struct CuCpUeView {
 
 class CuCp {
 public:
-    CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1);
+    /// `e1`: the CU-UP's association (none: sessions are refused).
+    CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1, IAssoc* e1 = nullptr);
     ~CuCp();
     CuCp(const CuCp&) = delete;
     CuCp& operator=(const CuCp&) = delete;
@@ -98,6 +111,9 @@ public:
     std::size_t ues() const noexcept { return ues_.size(); }
     const CuCpStats& stats() const noexcept { return stats_; }
     std::vector<CuCpUeView> ue_list() const;
+    bool e1_ready() const noexcept { return e1_ready_; }
+    /// The PDU sessions the RAN holds for the UE with this RAN UE NGAP ID.
+    std::vector<std::uint8_t> sessions_of(std::uint32_t ran_ue) const;
     /// The AMF Name of the last NG SETUP RESPONSE, "" before one.
     const std::string& amf_name() const noexcept { return amf_name_; }
 
@@ -130,6 +146,29 @@ private:
         SecretBytes k_rrc_enc;
         bool capture = false;            // the next SRB1 PDU goes into a release command
         std::optional<Bytes> captured;
+        // PDU sessions (N10)
+        struct Session {
+            ngap::SessionSetupItem item;
+            std::uint8_t drb_id = 1;
+            std::optional<e1ap::SessionSetup> up;       // the CU-UP's answer (N3 DL end, F1-U UL ends)
+            std::optional<f1ap::DrbSetup> du;           // the DU's answer (F1-U DL end)
+            bool integrity = false;
+        };
+        std::map<std::uint8_t, Session> sessions;       // set up, by PSI
+        std::optional<std::uint32_t> cu_up_ue;
+        std::optional<ngap::Ambr> ue_ambr;
+        struct Job {
+            enum class Kind : std::uint8_t { setup, release } kind = Kind::setup;
+            bool ics = false;                           // the sessions of an INITIAL CONTEXT SETUP
+            std::vector<ngap::SessionSetupItem> items;
+            std::optional<Bytes> nas;                   // the message's own NAS PDU
+            std::vector<ngap::SessionCause> release;
+            enum class Stage : std::uint8_t { waiting, e1, f1, e1_mod, rrc } stage = Stage::waiting;
+            std::map<std::uint8_t, Session> pending;    // being set up
+            std::vector<ngap::SessionCause> failed;
+            std::optional<rrc::CellGroup> cell_group;   // the DU's, for the new DRBs
+        };
+        std::deque<Job> jobs;
     };
 
     void on_ng_event(LinkEvent e);
@@ -159,6 +198,23 @@ private:
     void handle(const ngap::Paging& m);
     void handle(const ngap::NgReset& m);
 
+    // E1 and sessions (N10)
+    void on_e1(ByteView msg);
+    void on_e1_event(LinkEvent e);
+    void send_e1(const e1ap::Pdu& p, bool ue_associated);
+    void handle(const ngap::PduSessionResourceSetupRequest& m);
+    void handle(const ngap::PduSessionResourceReleaseCommand& m);
+    void handle(const ngap::PduSessionResourceModifyRequest& m);
+    void handle(const f1ap::UeContextModificationResponse& m);
+    void handle(const e1ap::BearerContextSetupResponse& m);
+    void handle(const e1ap::BearerContextModificationResponse& m);
+    void start_job(Ue& ue);
+    void job_failed(Ue& ue, const char* group, const char* value);
+    void job_rrc(Ue& ue);
+    void job_done(Ue& ue);
+    void finish_ics(Ue& ue, std::vector<ngap::SessionSetupOk> ok, std::vector<ngap::SessionCause> failed);
+    Ue* by_cu_up(std::uint32_t id);
+
     // RRC
     void on_dcch(std::uint32_t cu_ue, Bytes sdu);
     void on_srb_integrity_failure(std::uint32_t cu_ue);
@@ -183,6 +239,8 @@ private:
     IAssoc& f1_;
     std::shared_ptr<bool> alive_;
 
+    IAssoc* e1_ = nullptr;
+    bool e1_ready_ = false;
     bool ng_ready_ = false;
     std::string amf_name_;
     std::optional<TimerId> ng_retry_;

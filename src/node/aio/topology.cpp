@@ -60,7 +60,7 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             gnbs.fail("P1 runs one gNB");
         }
         const Yaml g = gnbs.at(0);
-        g.only({"id", "name", "cucp", "dus"});
+        g.only({"id", "name", "cucp", "cuup", "dus"});
         g.at("id").only({"value", "bits"});
         t.gnb_id = g.at("id").at("value").as<std::uint32_t>();
         t.gnb_id_bits = g.at("id").get<std::uint8_t>("bits", 22);
@@ -75,6 +75,16 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         }
         t.ng_bind = *bind;
         t.ng_streams = g.at("cucp").get<std::uint16_t>("ng_streams", 2);
+        // N3 (P1 N10): the CU-UP's address, GTP-U's port; by default the CU-CP's address.
+        t.n3_bind = Endpoint::v4(t.ng_bind.addr[0], t.ng_bind.addr[1], t.ng_bind.addr[2], t.ng_bind.addr[3], 2152);
+        if (g.has("cuup")) {
+            g.at("cuup").only({"n3_bind"});
+            auto n3 = Endpoint::parse(g.at("cuup").at("n3_bind").as<std::string>(), 2152);
+            if (!n3 || n3->family != Endpoint::Family::v4) {
+                g.at("cuup").at("n3_bind").fail("a numeric IPv4 address (P1 N3 is IPv4)");
+            }
+            t.n3_bind = *n3;
+        }
         const Yaml dus = g.at("dus");
         if (!dus.is_seq() || dus.size() != 1 || dus.at(0).at("cells").size() != 1) {
             dus.fail("P1 runs one DU with one cell");
@@ -141,13 +151,15 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         }
         if (y.has("netd")) {
             const Yaml n = y.at("netd");
-            n.only({"socket", "netns", "parent", "prefix"});
+            n.only({"socket", "netns", "cuup_netns", "parent", "prefix"});
             t.netd.enabled = true;
             t.netd.socket = n.get<std::string>("socket", t.netd.socket);
             t.netd.netns = n.get<std::string>("netns", t.netd.netns);
+            t.netd.cuup_netns = n.get<std::string>("cuup_netns", t.netd.cuup_netns);
             t.netd.parent = n.get<std::string>("parent", "");
             t.netd.prefix = n.get<std::uint8_t>("prefix", 24);
-            if (t.netd.netns.rfind("ksim-", 0) != 0 || t.ng_bind.family != Endpoint::Family::v4 || t.netd.prefix > 32) {
+            if (t.netd.netns.rfind("ksim-", 0) != 0 || t.netd.cuup_netns.rfind("ksim-", 0) != 0 ||
+                t.netd.cuup_netns == t.netd.netns || t.ng_bind.family != Endpoint::Family::v4 || t.netd.prefix > 32) {
                 n.fail("netd needs a ksim- namespace, an IPv4 ng_bind and a prefix up to 32");
             }
         }

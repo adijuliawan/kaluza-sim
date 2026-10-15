@@ -34,6 +34,7 @@
 
 #include "codec/air/kair.hpp"
 #include "codec/asn1/msg/f1ap.hpp"
+#include "entity/gtpu/gtpu.hpp"
 #include "codec/asn1/msg/rrc.hpp"
 #include "platform/event.hpp"
 #include "platform/executor.hpp"
@@ -59,6 +60,8 @@ struct DuConfig {
     std::optional<rrc::UeTimers> timers = rrc::UeTimers{};
     Millis mib_period = 80;
     Millis sib1_period = 160;
+    std::array<std::uint8_t, 4> f1u_addr{};   // the F1-U tunnel address it advertises (N10)
+    std::uint16_t gtpu_port = 2152;
 };
 
 struct DuStats {
@@ -67,12 +70,16 @@ struct DuStats {
     std::uint64_t msg3_lost_contention = 0;
     std::uint64_t ul_sdus = 0;
     std::uint64_t dl_sdus = 0;
+    std::uint64_t ul_user = 0;         // DRB SDUs sent on F1-U
+    std::uint64_t dl_user = 0;         // F1-U PDUs sent to a UE
     std::uint64_t f1_errors = 0;       // F1AP messages refused or for no UE
 };
 
 class Du {
 public:
-    Du(Executor& ex, IEventSink& events, DuConfig cfg, IAssoc& f1, std::function<void(air::Frame)> to_air);
+    /// `f1u`: the F1-U port (none: DRBs are refused).
+    Du(Executor& ex, IEventSink& events, DuConfig cfg, IAssoc& f1, std::function<void(air::Frame)> to_air,
+       IDatagram* f1u = nullptr);
     ~Du();
     Du(const Du&) = delete;
     Du& operator=(const Du&) = delete;
@@ -93,6 +100,13 @@ private:
         std::uint32_t radio_id = 0;
         std::optional<std::array<std::uint8_t, 6>> contention;   // until Msg4 goes
         std::set<std::uint8_t> srbs{1};
+        struct Drb {
+            std::uint8_t id = 1;
+            std::uint8_t lcid = 4;
+            f1ap::GtpTunnel ul;           // the CU-UP's F1-U end
+            std::uint32_t dl_teid = 0;    // ours
+        };
+        std::map<std::uint8_t, Drb> drbs;   // by DRB ID
     };
 
     void on_f1_event(LinkEvent e);
@@ -114,7 +128,13 @@ private:
     void handle(const f1ap::UeContextReleaseCommand& m);
     void handle(const f1ap::Paging& m);
     void dl_sdu(const Ue& ue, std::uint8_t lcid, Bytes sdu);
-    Result<Bytes> cell_group(const std::set<std::uint8_t>& srbs) const;
+    void drop_drbs(Ue& ue);
+    Result<Bytes> cell_group(const std::set<std::uint8_t>& srbs, const std::vector<Ue::Drb>& drbs = {},
+                             const std::vector<std::uint8_t>& release_lcids = {}) const;
+    /// Sets up and releases DRBs; their F1-U ends and the cell group's RLC bearers.
+    std::vector<f1ap::DrbSetup> drbs_change(Ue& ue, const std::vector<f1ap::DrbToSetup>& add,
+                                            const std::vector<std::uint8_t>& release, std::vector<Ue::Drb>& added,
+                                            std::vector<std::uint8_t>& released_lcids);
     Ue* by_du(std::uint32_t id);
     air::Frame frame(air::FrameType t, std::uint32_t radio_id) const;
     std::uint16_t sfn() const noexcept;
@@ -143,6 +163,7 @@ private:
     std::map<std::uint32_t, Ra> ra_;   // (RA-RNTI << 8 | preamble) -> the TC-RNTI given
     std::map<std::uint32_t, Ue> ues_;   // by gNB-DU UE F1AP ID
     std::map<std::uint16_t, std::uint32_t> by_rnti_;
+    std::unique_ptr<entity::gtpu::Endpoint> f1u_;
     std::uint16_t seq_ = 0;
     DuStats stats_;
 };

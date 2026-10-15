@@ -43,14 +43,19 @@ Row suffixes (requirements.md): -D defect in the sim, -B a choice the spec leave
 
 ## Requirements built
 
-None yet.
+| Row | What | Clause | Verified by | Status |
+|---|---|---|---|---|
+| KS-E1AP-001 | SCTP (PPID 64, port 38462); E1 Setup from either side | 37.482; 37.483 §8.2 (T0) | P: tests/procedure Session.E1_*; U: tests/unit/asn1 E1apMsg | built in P1 N10: GNB-CU-UP E1 SETUP from the CU-UP, PPID 64, over memlink (the split processes and SCTP port 38462 are P2) |
+| KS-E1AP-002 | Bearer Context Setup, Modification and Release (plus Modification Required and Release Request), with UP security and PDCP COUNT status for handover | 37.483 §8.3 (T0) | P: tests/procedure Session; U: tests/unit/asn1 E1apMsg; oracle builders | built in P1 N10, partly: Bearer Context Setup, Modification and Release with UP security; Modification Required, Release Request and the PDCP COUNT for handover are later |
 
 ## Typed rows
 
 | Row | Date | What | Evidence |
 |---|---|---|---|
 | KS-E1AP-S1 | 2026-10-14 | TS 37.483 j40: the last ASN.1 block (E1AP-Containers) ends with '-- ASN1STO', a typo for ASN1STOP. The reading chosen: that one paragraph closes the block. It is a recorded repair in spec/tools/docx_asn1.py REPAIRS and only applies to 37.483 j40 | spec/tools/docx_asn1.py; tests/spec_tools test_stop_typo_needs_a_recorded_repair, M5 |
+| KS-E1AP-B1 | 2026-10-15 | E1AP builders and readers as built in P1 N10 (src/codec/asn1/msg/e1ap; TS 37.483 j40): GNB-CU-UP E1 SETUP and its response and failure, BEARER CONTEXT SETUP, MODIFICATION (sessions added, modified with the DU's F1-U end, removed) and RELEASE with their responses and failures, ERROR INDICATION; P1's subset (IPv4 transport, non-GBR flows with standardised 5QIs, one cell group) with anything outside it unsupported, never guessed. redact_keys re-encodes any E1AP PDU with its UP keys zeroed, for captures. Like NGAP (KS-NGAP-B2), the keys cross the codec as octets (rule R3) and the caller wipes them | src/codec/asn1/msg/e1ap.cpp; tests/unit/asn1/e1ap_msg_test.cpp; P1 N10 |
+| KS-E1AP-B2 | 2026-10-15 | The gNB-CU-UP as built in P1 N10 (src/proc/ran/cuup): E1 SETUP sent when its association comes up (PPID 64); a bearer context per UE with a PDCP entity per DRB on the gNB side (18-bit SNs, the SDAP header both ways), the N3 tunnel per session and an F1-U uplink tunnel per DRB, TEIDs tagged 0x31 (N3) and 0x32 (F1-U) in their top octet. Downlink: N3 G-PDU with the DL PDU Session Container, the flow's DRB by QFI, SDAP header, PDCP (ciphered; integrity only when the session asked for it), F1-U G-PDU with the NR-U DL USER DATA header and its sequence number. Uplink: F1-U G-PDU, PDCP, the SDAP header's QFI, N3 G-PDU with the UL PDU Session Container. A G-PDU for no DRB or before the DU's end is known is dropped and counted | src/proc/ran/cuup.cpp; tests/procedure/session_test.cpp; P1 N10 |
 
 ## Not built yet
 
-2 v1, 1 v1 / v1.x requirement(s): KS-E1AP-001, KS-E1AP-002, KS-E1AP-003.
+1 v1 / v1.x requirement(s): KS-E1AP-003.

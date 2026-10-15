@@ -46,6 +46,9 @@ const char* name_of(const ngap::Pdu& p) {
                           [](const ngap::NasNonDeliveryIndication&) { return "NASNonDeliveryIndication"; },
                           [](const ngap::UeContextModificationResponse&) { return "UEContextModificationResponse"; },
                           [](const ngap::AmfConfigurationUpdateAcknowledge&) { return "AMFConfigurationUpdateAcknowledge"; },
+                          [](const ngap::PduSessionResourceSetupResponse&) { return "PDUSessionResourceSetupResponse"; },
+                          [](const ngap::PduSessionResourceReleaseResponse&) { return "PDUSessionResourceReleaseResponse"; },
+                          [](const ngap::PduSessionResourceModifyResponse&) { return "PDUSessionResourceModifyResponse"; },
                           [](const auto&) { return "other"; },
                       },
                       p);
@@ -53,8 +56,10 @@ const char* name_of(const ngap::Pdu& p) {
 
 } // namespace
 
-NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc& ng)
-    : ex_(ex), home_(home), plmn_(std::move(plmn)), p_(std::move(p)), ng_(ng) {
+NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc& ng, IDatagram* n3,
+                 std::array<std::uint8_t, 4> n3_addr)
+    : ex_(ex), home_(home), plmn_(std::move(plmn)), p_(std::move(p)), ng_(ng),
+      upf_(n3 != nullptr ? std::make_unique<Upf>(*n3, n3_addr) : nullptr), smf_(p_.session, upf_.get()) {
     ng_.set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [](LinkEvent) {});
 }
 
@@ -65,6 +70,11 @@ void NgapAmf::check(bool ok, const char* clause, const char* what, std::string d
 std::vector<Verdict> NgapAmf::failures() const {
     std::vector<Verdict> out;
     std::copy_if(verdicts_.begin(), verdicts_.end(), std::back_inserter(out), [](const Verdict& v) { return !v.ok; });
+    std::copy_if(smf_.verdicts().begin(), smf_.verdicts().end(), std::back_inserter(out), [](const Verdict& v) { return !v.ok; });
+    if (upf_) {
+        std::copy_if(upf_->verdicts().begin(), upf_->verdicts().end(), std::back_inserter(out),
+                     [](const Verdict& v) { return !v.ok; });
+    }
     for (const auto& [id, ue] : ues_) {
         const auto f = ue.nas->failures();
         out.insert(out.end(), f.begin(), f.end());
@@ -82,6 +92,16 @@ Amf* NgapAmf::nas(std::size_t n) {
     }
     Ue* ue = by_amf(order_[n]);
     return ue != nullptr ? ue->nas.get() : nullptr;
+}
+
+Amf* NgapAmf::nas_by_supi(const std::string& supi) {
+    for (auto it = order_.rbegin(); it != order_.rend(); ++it) {
+        Ue* ue = by_amf(*it);
+        if (ue != nullptr && ue->nas->supi() == supi) {
+            return ue->nas.get();
+        }
+    }
+    return nullptr;
 }
 
 std::optional<NgapAmf::UeIds> NgapAmf::ids(std::size_t n) const {
@@ -172,7 +192,29 @@ void NgapAmf::attach_nas(Ue& ue) {
         send(r, stream_of(*u));
         secure_zero(r.security_key);
     };
+    link.session_setup = [this, id](Bytes nas, ngap::SessionSetupItem item) {
+        Ue* u = by_amf(id);
+        if (u == nullptr) {
+            return;
+        }
+        // TS 38.413 9.2.1.1: the 5GSM accept as the session's NAS-PDU.
+        item.nas = std::move(nas);
+        u->setups.push_back(item.psi);
+        ngap::PduSessionResourceSetupRequest r{u->amf_ue, u->ran_ue, std::nullopt, {std::move(item)}, std::nullopt};
+        send(r, stream_of(*u));
+    };
+    link.session_release = [this, id](Bytes nas, std::uint8_t psi) {
+        Ue* u = by_amf(id);
+        if (u == nullptr) {
+            return;
+        }
+        u->releases.push_back(psi);
+        send(ngap::PduSessionResourceReleaseCommand{u->amf_ue, u->ran_ue, std::move(nas),
+                                                    {ngap::SessionCause{psi, ngap::Cause{"nas", "normal-release"}}}},
+             stream_of(*u));
+    };
     ue.nas->attach(std::move(link));
+    ue.nas->attach_smf(&smf_);
 }
 
 void NgapAmf::on_message(ByteView msg) {
@@ -257,6 +299,45 @@ void NgapAmf::on_message(ByteView msg) {
                    [&](const ngap::ErrorIndication& m) {
                        ++error_indications_;
                        last_error_ = m.cause;
+                   },
+                   [&](const ngap::PduSessionResourceSetupResponse& m) {
+                       Ue* ue = by_amf(m.amf);
+                       check(ue != nullptr && ue->ran_ue == m.ran, "TS 38.413 10.6", "the UE NGAP IDs are a known pair");
+                       if (ue == nullptr) {
+                           return;
+                       }
+                       const std::string supi = ue->nas->supi();
+                       for (const auto& s : m.sessions) {
+                           auto it = std::find(ue->setups.begin(), ue->setups.end(), s.psi);
+                           check(it != ue->setups.end(), "TS 38.413 8.2.1.2", "the response answers a session setup request",
+                                 std::to_string(s.psi));
+                           if (it != ue->setups.end()) {
+                               ue->setups.erase(it);
+                           }
+                           check(!s.transfer.qfis.empty(), "TS 38.413 9.3.4.2", "the gNB set up the session's QoS flow");
+                           smf_.on_setup_response(supi, s.psi, s.transfer.dl);
+                       }
+                       for (const auto& f : m.failed) {
+                           check(false, "TS 38.413 8.2.1.2", "the gNB set up the session",
+                                 std::to_string(f.psi) + " " + f.cause.group + "/" + f.cause.value);
+                           ue->setups.erase(std::remove(ue->setups.begin(), ue->setups.end(), f.psi), ue->setups.end());
+                           smf_.on_setup_failed(supi, f.psi);
+                       }
+                   },
+                   [&](const ngap::PduSessionResourceReleaseResponse& m) {
+                       Ue* ue = by_amf(m.amf);
+                       check(ue != nullptr && ue->ran_ue == m.ran, "TS 38.413 10.6", "the UE NGAP IDs are a known pair");
+                       if (ue == nullptr) {
+                           return;
+                       }
+                       for (std::uint8_t psi : m.released) {
+                           auto it = std::find(ue->releases.begin(), ue->releases.end(), psi);
+                           check(it != ue->releases.end(), "TS 38.413 8.2.2.2", "the response answers a release command",
+                                 std::to_string(psi));
+                           if (it != ue->releases.end()) {
+                               ue->releases.erase(it);
+                           }
+                       }
                    },
                    [&](const auto&) {},
                },

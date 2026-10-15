@@ -23,6 +23,8 @@ public:
     static Result<std::unique_ptr<UdpSocket>> bind(Reactor& reactor, const Endpoint& local);
     /// From a socket already bound elsewhere (ksim-netd passes one in a netns).
     static Result<std::unique_ptr<UdpSocket>> adopt(Reactor& reactor, Fd fd);
+    /// Binds a socket made elsewhere (ksim-netd's, still unbound) to `local`, then adopts it.
+    static Result<std::unique_ptr<UdpSocket>> bind(Reactor& reactor, Fd fd, const Endpoint& local);
     ~UdpSocket() override;
     UdpSocket(const UdpSocket&) = delete;
     UdpSocket& operator=(const UdpSocket&) = delete;

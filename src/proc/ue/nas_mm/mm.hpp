@@ -21,6 +21,11 @@
 //  - UE-initiated de-registration, normal (T3521) and switch-off (§5.5.2.2);
 //  - 5GMM STATUS both ways (§7).
 //
+// N10 adds the NAS transport of 5GSM (§5.4.5): UL NAS TRANSPORT with payload
+// container type N1 SM, and DL NAS TRANSPORT handed to 5GSM with the PDU
+// session ID, or with the 5GMM cause and back-off timer of a message the AMF
+// could not forward.
+//
 // N12 adds the service request, idle mode, the periodic update, network
 // de-registration, identification, the configuration update and the protected
 // initial message of a UE that holds a context (§4.4.6). Until then an initial
@@ -64,6 +69,25 @@ struct MmTimerValues {
     Millis t3521 = 15'000;
 };
 
+/// A 5GSM message for UL NAS TRANSPORT (§5.4.5.2.1).
+struct SmUplink {
+    std::uint8_t psi = 0;
+    Bytes sm;
+    std::optional<std::uint8_t> request_type;   // §9.11.3.47; establishment: initial request
+    std::optional<nas::ie::Snssai> snssai;
+    std::optional<std::string> dnn;
+};
+
+/// A DL NAS TRANSPORT with an N1 SM payload (§5.4.5.3.1). With a 5GMM cause,
+/// the payload is the UE's own 5GSM message the network could not forward
+/// (§5.4.5.2.5, §5.4.5.3.3).
+struct SmDownlink {
+    std::uint8_t psi = 0;
+    Bytes sm;
+    std::optional<std::uint8_t> mm_cause;
+    std::optional<nas::ie::GprsTimer3> backoff;
+};
+
 struct MmConfig {
     std::string id;                                // the events' subject, e.g. "ue-1"
     nas::ie::Plmn plmn;                            // the selected PLMN (fixed camping, ledger A-12)
@@ -75,6 +99,8 @@ struct MmConfig {
     /// Each 5GMM message in clear, as sent before protection and as taken
     /// after its integrity check and deciphering, for the run's Uu capture.
     std::function<void(bool uplink, ByteView plain)> tap;
+    /// 5GSM's downlink (N10).
+    std::function<void(const SmDownlink&)> sm;
 };
 
 class Mm {
@@ -102,6 +128,12 @@ public:
     void on_nas(ByteView wire);
     /// The N1 signalling connection was released, or the lower layers failed.
     void on_released();
+
+    // ---- from 5GSM
+
+    /// UL NAS TRANSPORT (§5.4.5.2.2), in 5GMM-REGISTERED with an N1 signalling
+    /// connection; Errc::closed without one (the service request is N12).
+    Result<void> send_sm(const SmUplink& u);
 
     // ---- read side
 
@@ -151,6 +183,7 @@ private:
     void on_registration_accept(const nas::Message& m);
     void on_registration_reject(const nas::Message& m);
     void on_deregistration_accept();
+    void on_dl_nas_transport(const nas::Message& m);
     void reject_security_mode(std::uint8_t cause);
 
     nas::ie::MobileIdentity identity() const;

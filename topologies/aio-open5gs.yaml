@@ -16,7 +16,7 @@ gnbs:
     cucp: {ng_bind: 192.168.134.1}
     dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
 ues:
-  - {group: phones, count: 3, range: "001010000300001", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+  - {group: phones, count: 4, range: "001010000300001", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
      imeisv_tac: "86000000"}
 secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
 peer: {name: open5gs, repo: adijuliawan/open5gs, commit: 741c29d8d, rig: amadeus-open5gs, config: kaluza-sim-rig/etc}

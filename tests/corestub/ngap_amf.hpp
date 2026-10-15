@@ -8,6 +8,11 @@
 // location, the establishment cause, consistent UE NGAP IDs, the gNB ID and
 // TAs of NG Setup, the response to each context setup and release) and keeps
 // the verdicts with the NAS side's.
+//
+// N10: one SMF for every UE and, with an N3 port, a UPF behind it; a session's
+// accept goes to the gNB in PDU SESSION RESOURCE SETUP REQUEST (the gNB's N3
+// end comes back to the UPF), a release in PDU SESSION RESOURCE RELEASE
+// COMMAND, both answers checked.
 
 #pragma once
 
@@ -19,6 +24,8 @@
 #include <vector>
 
 #include "amf.hpp"
+#include "smf.hpp"
+#include "upf.hpp"
 #include "codec/asn1/msg/ngap.hpp"
 #include "platform/transport.hpp"
 
@@ -26,7 +33,9 @@ namespace ksim::corestub {
 
 class NgapAmf {
 public:
-    NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc& ng);
+    /// `n3`: the UPF's GTP-U port (none: sessions get no user plane), advertised as `n3_addr`.
+    NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc& ng, IDatagram* n3 = nullptr,
+            std::array<std::uint8_t, 4> n3_addr = {127, 0, 0, 1});
     NgapAmf(const NgapAmf&) = delete;
     NgapAmf& operator=(const NgapAmf&) = delete;
 
@@ -34,6 +43,8 @@ public:
     std::size_t ues() const noexcept { return ues_.size(); }
     /// The NAS side of the n-th UE that came (0 first), or nullptr.
     Amf* nas(std::size_t n = 0);
+    /// The NAS side of the latest UE with this SUPI, or nullptr.
+    Amf* nas_by_supi(const std::string& supi);
     std::vector<Verdict> failures() const;
     const std::vector<std::string>& received() const noexcept { return received_; }
     std::size_t count(std::string_view message) const;
@@ -50,6 +61,8 @@ public:
         std::uint32_t ran = 0;
     };
     std::optional<UeIds> ids(std::size_t n) const;
+    Smf& smf() noexcept { return smf_; }
+    Upf* upf() noexcept { return upf_.get(); }
 
 private:
     struct Ue {
@@ -60,6 +73,8 @@ private:
         bool ics_answered = false;
         bool releasing = false;
         std::optional<Bytes> radio_capability;
+        std::vector<std::uint8_t> setups;      // PSIs with a resource setup awaiting its response
+        std::vector<std::uint8_t> releases;    // and with a release awaiting its response
     };
 
     void on_message(ByteView msg);
@@ -73,6 +88,8 @@ private:
     nas::ie::Plmn plmn_;
     Profile p_;
     IAssoc& ng_;
+    std::unique_ptr<Upf> upf_;
+    Smf smf_;
     bool ng_setup_ = false;
     std::map<std::uint64_t, Ue> ues_;   // by AMF UE NGAP ID
     std::vector<std::uint64_t> order_;  // AMF UE NGAP IDs in arrival order

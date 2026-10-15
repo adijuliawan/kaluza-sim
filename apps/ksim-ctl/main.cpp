@@ -9,10 +9,15 @@
 //     ue <sel> power on|off [--switch-off] [--wait DUR]
 //     ue <sel> register [--wait DUR]
 //     ue <sel> deregister normal|switch-off [--wait DUR]
+//     ue <sel> ps-list
+//     ue <sel> ps-establish ipv4 [--dnn D] [--sst S [--sd SD]] [--psi N] [--wait DUR]
+//     ue <sel> ps-release <psi>|--all [--wait DUR]
+//     ue <sel> ping <IPv4> [--psi N] [-c N] [--interval MS] [--size N]
 //     ue <sel> wait <event>[,<event>…] [--fail <event>,…] [--where k=v]… [--since N | --new] [--timeout DUR]
 //     ue <sel> events [--since N] [--follow] [--filter PREFIX]
 //     wait <event> … (any subject)      events …
 //     gnb <name> ue-list | amf-list
+//     stub [release --ue SUPI --psi N [--cause C] | ping-ue --ue SUPI --psi N [--seq N]]   (--socket <stub ctl>)
 //
 // <sel> is imsi-…, a farm index, group:<name> or all; a group prints one block
 // per UE, separated by a blank line. Output is KEY=value lines (--json: one
@@ -129,10 +134,16 @@ struct Flags {
 };
 
 Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
-    static const std::vector<std::string> valued{"wait", "timeout", "where", "since", "fail", "filter", "cause"};
+    static const std::vector<std::string> valued{"wait", "timeout", "where", "since", "fail", "filter", "cause",
+                                                 "dnn", "sst", "sd", "psi", "count", "interval", "size", "type", "ue",
+                                                 "seq"};
     Flags f;
     for (std::size_t i = from; i < args.size(); ++i) {
         const std::string& a = args[i];
+        if (a == "-c" && i + 1 < args.size()) {   // ping's count, as ping(8) spells it
+            f.opts.emplace("count", args[++i]);
+            continue;
+        }
         if (a.rfind("--", 0) != 0) {
             f.words.push_back(a);
             continue;
@@ -290,6 +301,82 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
         }
         return wait_query(c, f, f.words[1], ue);
     }
+    if (cmd == "ps-list") {
+        return call(c, "GET", base + "/ps");
+    }
+    if (cmd == "ps-establish") {
+        auto w = wait_flag(f, err);
+        if (!w) {
+            return err;
+        }
+        json body = json::object();
+        body["wait_ms"] = std::to_string(*w);
+        body["type"] = f.words.size() > 1 ? f.words[1] : "ipv4";
+        for (const char* k : {"dnn", "sst", "sd", "psi"}) {
+            if (f.has(k)) {
+                body[k] = f.get(k);
+            }
+        }
+        return call(c, "POST", base + "/ps-establish", body, *w);
+    }
+    if (cmd == "ps-release") {
+        auto w = wait_flag(f, err);
+        if (!w) {
+            return err;
+        }
+        std::vector<std::string> psis;
+        if (f.has("all")) {
+            Reply list = call(c, "GET", base + "/ps");
+            if (list.exit != Exit::ok) {
+                return list;
+            }
+            for (const auto& [k, v] : list.kv.items()) {
+                if (k.rfind("PS.", 0) == 0 && k.size() > 6 && k.compare(k.size() - 6, 6, ".STATE") == 0) {
+                    psis.push_back(k.substr(3, k.size() - 9));
+                }
+            }
+            if (psis.empty()) {
+                Reply r;
+                r.set("RELEASED", "0");
+                return r;
+            }
+        } else if (f.words.size() > 1) {
+            psis.push_back(f.words[1]);
+        } else {
+            return Reply::fail(Exit::usage, "ps-release <psi>|--all");
+        }
+        Reply last;
+        for (const auto& psi : psis) {
+            json body = json::object();
+            body["wait_ms"] = std::to_string(*w);
+            body["psi"] = psi;
+            last = call(c, "POST", base + "/ps-release", body, *w);
+            if (last.exit != Exit::ok) {
+                return last;
+            }
+        }
+        return last;
+    }
+    if (cmd == "ping") {
+        if (f.words.size() < 2) {
+            return Reply::fail(Exit::usage, "ping <IPv4> [--psi N] [-c N]");
+        }
+        json body = json::object();
+        body["dst"] = f.words[1];
+        const long count = std::strtol(f.get("count", "3").c_str(), nullptr, 10);
+        const long interval = std::strtol(f.get("interval", "1000").c_str(), nullptr, 10);
+        body["count"] = std::to_string(count);
+        body["interval_ms"] = std::to_string(interval);
+        for (const char* k : {"psi", "size"}) {
+            if (f.has(k)) {
+                body[k] = f.get(k);
+            }
+        }
+        // The run waits for the last reply: the requests, then two seconds' linger and some slack.
+        const long w = std::max(1L, count) * std::max(10L, interval) + 5'000;
+        body["wait_ms"] = std::to_string(w);
+        return call(c, "POST", base + "/ping", body, w);
+    }
     return Reply::fail(Exit::capability, "ue " + cmd + " is not in ksim-ctl v0");
 }
 
@@ -306,7 +393,18 @@ int run(const Ctx& c, const std::vector<std::string>& args) {
     } else if (verb == "faults") {
         r = call(c, "GET", "/v1/faults");
     } else if (verb == "stub") {
-        r = call(c, "GET", "/v1/stub");   // ksim-corestub's report (--socket)
+        // ksim-corestub (--socket): its report, or a network-side trigger for the gates.
+        if (!f.words.empty() && (f.words[0] == "release" || f.words[0] == "ping-ue")) {
+            json body = json::object();
+            for (const char* k : {"ue", "psi", "cause", "seq"}) {
+                if (f.has(k)) {
+                    body[k] = f.get(k);
+                }
+            }
+            r = call(c, "POST", "/v1/stub/" + f.words[0], body);
+        } else {
+            r = call(c, "GET", "/v1/stub");
+        }
     } else if (verb == "stop") {
         r = call(c, "POST", "/v1/stop");
     } else if (verb == "wait") {

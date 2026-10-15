@@ -26,6 +26,15 @@ Result<std::unique_ptr<UdpSocket>> UdpSocket::bind(Reactor& reactor, const Endpo
     return adopt(reactor, std::move(fd));
 }
 
+Result<std::unique_ptr<UdpSocket>> UdpSocket::bind(Reactor& reactor, Fd fd, const Endpoint& local) {
+    sockaddr_storage ss{};
+    const socklen_t n = to_sockaddr(local, ss);
+    if (::bind(fd.get(), reinterpret_cast<const sockaddr*>(&ss), n) != 0) {
+        return os_error("udp: bind");
+    }
+    return adopt(reactor, std::move(fd));
+}
+
 Result<std::unique_ptr<UdpSocket>> UdpSocket::adopt(Reactor& reactor, Fd fd) {
     sockaddr_storage ss{};
     socklen_t n = sizeof ss;

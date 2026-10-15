@@ -5,13 +5,18 @@
 // the in-process transport and the terminal, its RRC and 5GMM entities wired
 // to each other, and the device commands of cli.md §3 that P1 N8 offers:
 // power on (card read, fixed camping, then initial registration), register,
-// deregister and power off with switch-off. Everything runs on the device's
+// deregister and power off with switch-off. N10 adds the 5GSM entity, the PDU
+// session commands (establish, release, list) and the inject-mode ping: ICMP
+// echo requests built by the device and carried on the session's DRB, the
+// replies matched and counted, and an echo request to the UE's address
+// answered (the TUN data plane is N11). Everything runs on the device's
 // executor; the node posts commands to it.
 
 #pragma once
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -20,11 +25,13 @@
 #include <vector>
 
 #include "codec/air/kair.hpp"
+#include "codec/ip/ipv4.hpp"
 #include "codec/nas/ie/ie.hpp"
 #include "platform/event.hpp"
 #include "platform/executor.hpp"
 #include "platform/result.hpp"
 #include "proc/ue/nas_mm/mm.hpp"
+#include "proc/ue/nas_sm/sm.hpp"
 #include "proc/ue/rrc/rrc.hpp"
 #include "uicc/os/card.hpp"
 #include "uicc/terminal/terminal.hpp"
@@ -41,6 +48,17 @@ struct UeDeviceConfig {
     std::string imeisv;                       // 16 digits
     bool allow_null_integrity = false;        // D1: the bisect switch only
     std::uint64_t seed = 0;
+};
+
+/// An inject-mode ping (cli.md §3 ping): `count` echo requests `interval` apart,
+/// then `linger` for the last reply; events ue.ping.reply and ue.ping.done.
+struct PingRequest {
+    std::uint8_t psi = 0;                     // 0: the lowest active session
+    ip::Addr dst{};
+    int count = 3;
+    Millis interval = 1'000;
+    std::size_t size = 56;
+    Millis linger = 2'000;
 };
 
 /// The run's capture of the UE's RRC and NAS in clear (architecture §9).
@@ -64,6 +82,10 @@ public:
     Result<void> power_on();
     Result<void> register_initial();
     Result<void> deregister(bool switch_off);
+    Result<void> ps_establish(const proc::ue::SessionRequest& r);
+    Result<void> ps_release(std::uint8_t psi);
+    Result<void> ping(const PingRequest& p);
+    std::vector<proc::ue::SessionInfo> sessions() const { return sm_->sessions(); }
 
     const UeDeviceConfig& config() const noexcept { return cfg_; }
     std::string subject() const { return "ue:imsi-" + cfg_.supi; }
@@ -72,7 +94,24 @@ public:
     std::vector<std::pair<std::string, std::string>> status() const;
 
 private:
+    struct Ping {
+        std::uint16_t id = 0;
+        PingRequest req;
+        std::uint8_t psi = 0;
+        ip::Addr src{};
+        int sent = 0;
+        int received = 0;
+        std::map<std::uint16_t, Millis> outstanding;   // seq -> sent at
+        Millis rtt_sum = 0;
+        Millis rtt_min = 0;
+        Millis rtt_max = 0;
+        std::optional<TimerId> timer;
+    };
+
     void poll_registration(int left);
+    void on_dl_ip(std::uint8_t psi, Bytes packet);
+    void ping_next();
+    void ping_done(const char* why);
 
     Executor& ex_;
     UeDeviceConfig cfg_;
@@ -81,6 +120,12 @@ private:
     uicc::Terminal terminal_;
     std::unique_ptr<proc::ue::UeRrc> rrc_;
     std::unique_ptr<proc::ue::Mm> mm_;
+    std::unique_ptr<proc::ue::Sm> sm_;
+    IEventSink& events_;
+    std::optional<Ping> ping_;
+    std::uint16_t ping_id_ = 0;
+    std::uint64_t dl_packets_ = 0;
+    std::uint64_t ul_packets_ = 0;
     bool powered_ = false;
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };

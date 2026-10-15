@@ -94,6 +94,41 @@ struct UlRrcMessageTransfer {
     Bytes rrc;                        // a PDCP PDU
     friend bool operator==(const UlRrcMessageTransfer&, const UlRrcMessageTransfer&) = default;
 };
+// ---- DRBs (P1 N10): F1-U ends and the QoS of the flows a DRB carries ----------------
+
+struct Snssai {
+    std::uint8_t sst = 1;
+    std::optional<std::uint32_t> sd;
+    friend bool operator==(const Snssai&, const Snssai&) = default;
+};
+struct GtpTunnel {
+    std::array<std::uint8_t, 4> addr{};   // IPv4 (P1)
+    std::uint32_t teid = 0;
+    friend bool operator==(const GtpTunnel&, const GtpTunnel&) = default;
+};
+/// A non-GBR flow with a standardised 5QI and its ARP.
+struct Flow {
+    std::uint8_t qfi = 1;
+    std::uint16_t five_qi = 9;
+    std::uint8_t arp_priority = 8;
+    bool may_preempt = false;
+    bool preemptable = true;
+    friend bool operator==(const Flow&, const Flow&) = default;
+};
+struct DrbToSetup {
+    std::uint8_t drb_id = 1;
+    Snssai snssai;
+    std::vector<Flow> flows;   // the DRB's own QoS is the first flow's
+    GtpTunnel ul;              // the CU-UP's F1-U end
+    friend bool operator==(const DrbToSetup&, const DrbToSetup&) = default;
+};
+struct DrbSetup {
+    std::uint8_t drb_id = 1;
+    std::optional<std::uint8_t> lcid;
+    GtpTunnel dl;              // the DU's F1-U end
+    friend bool operator==(const DrbSetup&, const DrbSetup&) = default;
+};
+
 struct UeContextSetupRequest {
     std::uint32_t cu_ue = 0;
     std::optional<std::uint32_t> du_ue;
@@ -101,6 +136,7 @@ struct UeContextSetupRequest {
     std::uint8_t serv_cell_index = 0;
     std::optional<Bytes> ue_capability;   // UE-CapabilityRAT-ContainerList
     std::vector<std::uint8_t> srbs;       // SRBs to be set up
+    std::vector<DrbToSetup> drbs;
     std::optional<Bytes> rrc;             // an RRC container (a PDCP PDU of SRB1)
     friend bool operator==(const UeContextSetupRequest&, const UeContextSetupRequest&) = default;
 };
@@ -109,6 +145,7 @@ struct UeContextSetupResponse {
     std::uint32_t du_ue = 0;
     Bytes cell_group;                     // CellGroupConfig
     std::vector<std::pair<std::uint8_t, std::uint8_t>> srbs;   // (SRB ID, LCID) set up
+    std::vector<DrbSetup> drbs;
     friend bool operator==(const UeContextSetupResponse&, const UeContextSetupResponse&) = default;
 };
 struct UeContextSetupFailure {
@@ -121,6 +158,8 @@ struct UeContextModificationRequest {
     std::uint32_t cu_ue = 0;
     std::uint32_t du_ue = 0;
     std::vector<std::uint8_t> srbs;
+    std::vector<DrbToSetup> drbs;
+    std::vector<std::uint8_t> release_drbs;
     std::optional<Bytes> rrc;
     friend bool operator==(const UeContextModificationRequest&, const UeContextModificationRequest&) = default;
 };
@@ -128,6 +167,7 @@ struct UeContextModificationResponse {
     std::uint32_t cu_ue = 0;
     std::uint32_t du_ue = 0;
     std::optional<Bytes> cell_group;
+    std::vector<DrbSetup> drbs;
     friend bool operator==(const UeContextModificationResponse&, const UeContextModificationResponse&) = default;
 };
 struct UeContextReleaseRequest {

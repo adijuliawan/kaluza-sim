@@ -152,6 +152,14 @@ def run_dir_secrets(run: Path, master: bytes, imsis: list[str], pci: int, arfcn:
             named = dict(zip(keychain.FIELDS, vals))
             for f in SECRET_FIELDS:
                 out[f"{f} {supi} #{challenges}/{count}"] = bytes.fromhex(named[f])
+            # The chain's RRC and UP keys are for one algorithm each; a run may use
+            # any (P1 N10: K_UPenc and K_UPint go over E1 for NEA2/NIA2), so every
+            # algorithm key of TS 33.501 A.8 from this K_gNB is scanned for.
+            kgnb = bytes.fromhex(named["K_gNB"])
+            for dist, label in ((3, "K_RRCenc"), (4, "K_RRCint"), (5, "K_UPenc"), (6, "K_UPint")):
+                for alg_id in (1, 2, 3):
+                    out[f"{label} {supi} #{challenges}/{count}/alg{alg_id}"] = \
+                        keychain.kdf(kgnb, 0x69, bytes([dist]), bytes([alg_id]))[16:]
     return out, challenges
 
 
@@ -177,10 +185,15 @@ def main_run_dir(a) -> int:
     hits, files = scan_tree(Path(a.run_dir), secret)
     for h in sorted(set(hits)):
         print(f"CANARY_HIT {h}")
-    # Must-fail: the same scan finds a K written into a file in clear hex.
+    # Must-fail: the same scan finds a K written into a file in clear hex, and a
+    # K_UPenc for NEA2 as raw octets (an E1AP capture that was not redacted).
     k0 = secret[f"K {imsis[0]}"]
     caught = any(needle in (b"x" + k0.hex().encode() + b"x") for _, needle in forms("K", k0))
     print(f"CANARY_MUSTFAIL {'CAUGHT' if caught else 'MISSED'} K as hex in a file")
+    up = next((v for n, v in secret.items() if n.startswith("K_UPenc ") and n.endswith("/alg2")), None)
+    up_caught = up is not None and any(needle in (b"\x00\x80" + up + b"\x00") for _, needle in forms("K_UPenc", up))
+    print(f"CANARY_MUSTFAIL {'CAUGHT' if up_caught else 'MISSED'} K_UPenc (NEA2) in an unredacted E1AP frame")
+    caught = caught and up_caught
     ok = not hits and caught and challenges > 0
     print(f"CANARY_RUN={'PASS' if ok else 'FAIL'} keys={len(secret)} challenges={challenges} files={files} "
           f"hits={len(set(hits))}")

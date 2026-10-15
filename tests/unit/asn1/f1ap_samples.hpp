@@ -56,11 +56,22 @@ inline std::vector<Sample> all() {
                  DlRrcMessageTransfer{7, 1, 1, pdcp(*rrc::encode(rrc::SecurityModeCommand{1, 2, 2}))}});
     s.push_back({"ULRRCMessageTransfer",
                  UlRrcMessageTransfer{7, 1, 1, pdcp(*rrc::encode(rrc::SetupComplete{0, 1, *from_hex("7e004179000d0100f110000000000000000001"), std::nullopt}))}});
-    s.push_back({"UEContextSetupRequest", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, std::nullopt}});
-    s.push_back({"UEContextSetupResponse", UeContextSetupResponse{7, 1, cell_group, {{2, 2}}}});
+    s.push_back({"UEContextSetupRequest", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {}, std::nullopt}});
+    s.push_back({"UEContextSetupResponse", UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {}}});
+    // P1 N10: DRBs, the CU-UP's F1-U end up, the DU's down.
+    const DrbToSetup drb{1, Snssai{1, 0x000001}, {Flow{1, 9, 8, false, true}}, GtpTunnel{{127, 0, 0, 4}, 0x20000001}};
+    s.push_back({"UEContextSetupRequest.drbs", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {drb}, std::nullopt}});
+    s.push_back({"UEContextSetupResponse.drbs",
+                 UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {DrbSetup{1, 4, GtpTunnel{{127, 0, 0, 3}, 0x30000001}}}}});
     s.push_back({"UEContextSetupFailure", UeContextSetupFailure{7, 1, Cause{"radioNetwork", "unspecified"}}});
-    s.push_back({"UEContextModificationRequest", UeContextModificationRequest{7, 1, {2}, std::nullopt}});
-    s.push_back({"UEContextModificationResponse", UeContextModificationResponse{7, 1, cell_group}});
+    s.push_back({"UEContextModificationRequest", UeContextModificationRequest{7, 1, {2}, {}, {}, std::nullopt}});
+    s.push_back({"UEContextModificationResponse", UeContextModificationResponse{7, 1, cell_group, {}}});
+    DrbToSetup drb2 = drb;
+    drb2.drb_id = 2;
+    drb2.flows = {Flow{1, 5, 1, false, false}, Flow{2, 9, 8, false, true}};
+    s.push_back({"UEContextModificationRequest.drbs", UeContextModificationRequest{7, 1, {}, {drb2}, {1}, std::nullopt}});
+    s.push_back({"UEContextModificationResponse.drbs",
+                 UeContextModificationResponse{7, 1, cell_group, {DrbSetup{2, std::nullopt, GtpTunnel{{127, 0, 0, 3}, 0x30000002}}}}});
     s.push_back({"UEContextReleaseRequest", UeContextReleaseRequest{7, 1, Cause{"radioNetwork", "rl-failure-others"}}});
     s.push_back({"UEContextReleaseCommand",
                  UeContextReleaseCommand{7, 1, Cause{"radioNetwork", "normal-release"}, pdcp(*rrc::encode(rrc::Release{0})), 1}});

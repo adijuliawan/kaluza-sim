@@ -72,6 +72,17 @@ constexpr int kCuRrcVersion = 170;
 constexpr int kDuRrcVersion = 171;
 constexpr int kSrbsSetupList = 202;
 constexpr int kSrbsSetupItem = 203;
+constexpr int kDrbsSetupItem = 26;
+constexpr int kDrbsSetupList = 27;
+constexpr int kDrbsSetupModItem = 28;
+constexpr int kDrbsSetupModList = 29;
+constexpr int kDrbsToBeReleasedItem = 32;
+constexpr int kDrbsToBeReleasedList = 33;
+constexpr int kDrbsToBeSetupItem = 34;
+constexpr int kDrbsToBeSetupList = 35;
+constexpr int kDrbsToBeSetupModItem = 36;
+constexpr int kDrbsToBeSetupModList = 37;
+constexpr int kDrbInformation = 164;
 
 const std::string kRrcVersion = bits(0x4, 3);   // latest-RRC-Version: the Rel-15 'version 15' bit
 
@@ -146,6 +157,79 @@ json srb_list(const std::vector<std::uint8_t>& srbs, int item_id, const char* it
 }
 
 Result<Bytes> per(const json& j) { return jer::encode(asn_DEF_F1AP_F1AP_PDU, j, asn1::Rules::aper); }
+
+json f1_tunnel(const GtpTunnel& t) {
+    const std::uint64_t a = (std::uint64_t{t.addr[0]} << 24) | (std::uint64_t{t.addr[1]} << 16) |
+                            (std::uint64_t{t.addr[2]} << 8) | t.addr[3];
+    return {{"gTPTunnel", {{"transportLayerAddress", jer::var_bits(a, 32)}, {"gTP-TEID", octets(t.teid, 4)}}}};
+}
+GtpTunnel read_f1_tunnel(const json& j) {
+    const json& g = j.at("gTPTunnel");
+    if (jer::bits_length(g.at("transportLayerAddress")) != 32) {
+        throw jer::NotP1("an IPv6 or dual transport address");
+    }
+    const auto a = read_bits(g.at("transportLayerAddress"), 32);
+    return {{static_cast<std::uint8_t>(a >> 24), static_cast<std::uint8_t>(a >> 16), static_cast<std::uint8_t>(a >> 8),
+             static_cast<std::uint8_t>(a)},
+            static_cast<std::uint32_t>(read_number(g.at("gTP-TEID")))};
+}
+
+json flow_qos(const Flow& f) {
+    return {{"qoS-Characteristics", {{"non-Dynamic-5QI", {{"fiveQI", f.five_qi}}}}},
+            {"nGRANallocationRetentionPriority",
+             {{"priorityLevel", f.arp_priority},
+              {"pre-emptionCapability", f.may_preempt ? "may-trigger-pre-emption" : "shall-not-trigger-pre-emption"},
+              {"pre-emptionVulnerability", f.preemptable ? "pre-emptable" : "not-pre-emptable"}}}};
+}
+Flow read_flow_qos(std::uint8_t qfi, const json& j) {
+    const json& c = j.at("qoS-Characteristics");
+    if (!c.contains("non-Dynamic-5QI")) {
+        throw jer::NotP1("a dynamic 5QI");
+    }
+    const json& arp = j.at("nGRANallocationRetentionPriority");
+    return {qfi, c.at("non-Dynamic-5QI").at("fiveQI").get<std::uint16_t>(), arp.at("priorityLevel").get<std::uint8_t>(),
+            arp.at("pre-emptionCapability").get<std::string>() == "may-trigger-pre-emption",
+            arp.at("pre-emptionVulnerability").get<std::string>() == "pre-emptable"};
+}
+
+bool drbs_ok(const std::vector<DrbToSetup>& l) {
+    return std::all_of(l.begin(), l.end(), [](const DrbToSetup& d) { return d.drb_id >= 1 && d.drb_id <= 32 && !d.flows.empty(); });
+}
+
+/// DRBs-ToBeSetup(-Mod)-Item: the DRB's QoS is its first flow's (TS 38.473 9.3.1.27).
+json drb_items(const std::vector<DrbToSetup>& l, int item_id, const char* item_type) {
+    json out = json::array();
+    for (const auto& d : l) {
+        json snssai = {{"sST", octets(d.snssai.sst, 1)}};
+        if (d.snssai.sd) {
+            snssai["sD"] = octets(*d.snssai.sd, 3);
+        }
+        json flows = json::array();
+        for (const auto& f : d.flows) {
+            flows.push_back({{"qoSFlowIdentifier", f.qfi}, {"qoSFlowLevelQoSParameters", flow_qos(f)}});
+        }
+        json info = {{"dRB-QoS", flow_qos(d.flows.front())}, {"sNSSAI", snssai}, {"flows-Mapped-To-DRB-List", flows}};
+        out.push_back(ie(item_id, "reject", item_type,
+                         {{"dRBID", d.drb_id},
+                          {"qoSInformation", {{"choice-extension", {{"id", kDrbInformation}, {"criticality", "ignore"}, {"value", {{"DRB-Information", info}}}}}}},
+                          {"uLUPTNLInformation-ToBeSetup-List", json::array({{{"uLUPTNLInformation", f1_tunnel(d.ul)}}})},
+                          {"rLCMode", "rlc-am"}}));
+    }
+    return out;
+}
+
+json drb_setup_items(const std::vector<DrbSetup>& l, int item_id, const char* item_type) {
+    json out = json::array();
+    for (const auto& d : l) {
+        json v = {{"dRBID", d.drb_id}};
+        if (d.lcid) {
+            v["lCID"] = *d.lcid;
+        }
+        v["dLUPTNLInformation-ToBeSetup-List"] = json::array({{{"dLUPTNLInformation", f1_tunnel(d.dl)}}});
+        out.push_back(ie(item_id, "ignore", item_type, v));
+    }
+    return out;
+}
 
 bool srbs_ok(const std::vector<std::uint8_t>& srbs) {
     return std::all_of(srbs.begin(), srbs.end(), [](std::uint8_t s) { return s <= 3; });
@@ -273,6 +357,12 @@ Result<Bytes> build(const UeContextSetupRequest& m) {
         ies.push_back(ie(kSrbsToBeSetupList, "reject", "SRBs-ToBeSetup-List",
                          srb_list(m.srbs, kSrbsToBeSetupItem, "SRBs-ToBeSetup-Item")));
     }
+    if (!drbs_ok(m.drbs)) {
+        return bad("F1AP: a DRB ID is 1..32 and a DRB maps at least one flow");
+    }
+    if (!m.drbs.empty()) {
+        ies.push_back(ie(kDrbsToBeSetupList, "reject", "DRBs-ToBeSetup-List", drb_items(m.drbs, kDrbsToBeSetupItem, "DRBs-ToBeSetup-Item")));
+    }
     if (m.rrc) {
         ies.push_back(ie(kRrcContainer, "ignore", "RRCContainer", hex(*m.rrc)));
     }
@@ -291,6 +381,9 @@ Result<Bytes> build(const UeContextSetupResponse& m) {
             l.push_back(ie(kSrbsSetupItem, "ignore", "SRBs-Setup-Item", {{"sRBID", srb}, {"lCID", lcid}}));
         }
         ies.push_back(ie(kSrbsSetupList, "ignore", "SRBs-Setup-List", l));
+    }
+    if (!m.drbs.empty()) {
+        ies.push_back(ie(kDrbsSetupList, "ignore", "DRBs-Setup-List", drb_setup_items(m.drbs, kDrbsSetupItem, "DRBs-Setup-Item")));
     }
     return per(successful(kUeContextSetup, "reject", "UEContextSetupResponse", ies));
 }
@@ -316,6 +409,20 @@ Result<Bytes> build(const UeContextModificationRequest& m) {
         ies.push_back(ie(kSrbsToBeSetupModList, "reject", "SRBs-ToBeSetupMod-List",
                          srb_list(m.srbs, kSrbsToBeSetupModItem, "SRBs-ToBeSetupMod-Item")));
     }
+    if (!drbs_ok(m.drbs)) {
+        return bad("F1AP: a DRB ID is 1..32 and a DRB maps at least one flow");
+    }
+    if (!m.drbs.empty()) {
+        ies.push_back(ie(kDrbsToBeSetupModList, "reject", "DRBs-ToBeSetupMod-List",
+                         drb_items(m.drbs, kDrbsToBeSetupModItem, "DRBs-ToBeSetupMod-Item")));
+    }
+    if (!m.release_drbs.empty()) {
+        json l = json::array();
+        for (std::uint8_t d : m.release_drbs) {
+            l.push_back(ie(kDrbsToBeReleasedItem, "reject", "DRBs-ToBeReleased-Item", {{"dRBID", d}}));
+        }
+        ies.push_back(ie(kDrbsToBeReleasedList, "reject", "DRBs-ToBeReleased-List", l));
+    }
     return per(initiating(kUeContextModification, "reject", "UEContextModificationRequest", ies));
 }
 
@@ -323,6 +430,9 @@ Result<Bytes> build(const UeContextModificationResponse& m) {
     json ies = ue_ids(m.cu_ue, m.du_ue);
     if (m.cell_group) {
         ies.push_back(ie(kDuToCuRrcInformation, "reject", "DUtoCURRCInformation", {{"cellGroupConfig", hex(*m.cell_group)}}));
+    }
+    if (!m.drbs.empty()) {
+        ies.push_back(ie(kDrbsSetupModList, "ignore", "DRBs-SetupMod-List", drb_setup_items(m.drbs, kDrbsSetupModItem, "DRBs-SetupMod-Item")));
     }
     return per(successful(kUeContextModification, "reject", "UEContextModificationResponse", ies));
 }
@@ -408,6 +518,45 @@ std::vector<const json*> items(const json& list) {
     std::vector<const json*> out;
     for (const auto& e : list) {
         out.push_back(arm(e.at("value")).second);
+    }
+    return out;
+}
+
+std::vector<DrbToSetup> read_drbs(const json& list) {
+    std::vector<DrbToSetup> out;
+    for (const json* i : items(list)) {
+        DrbToSetup d;
+        d.drb_id = i->at("dRBID").get<std::uint8_t>();
+        const json& q = i->at("qoSInformation");
+        if (!q.contains("choice-extension")) {
+            throw jer::NotP1("E-UTRAN QoS for a DRB");
+        }
+        auto [type, info] = arm(q.at("choice-extension").at("value"));
+        (void)type;
+        const json& sn = info->at("sNSSAI");
+        d.snssai.sst = static_cast<std::uint8_t>(read_number(sn.at("sST")));
+        if (sn.contains("sD")) {
+            d.snssai.sd = static_cast<std::uint32_t>(read_number(sn.at("sD")));
+        }
+        for (const auto& f : info->at("flows-Mapped-To-DRB-List")) {
+            d.flows.push_back(read_flow_qos(f.at("qoSFlowIdentifier").get<std::uint8_t>(), f.at("qoSFlowLevelQoSParameters")));
+        }
+        d.ul = read_f1_tunnel(i->at("uLUPTNLInformation-ToBeSetup-List").at(0).at("uLUPTNLInformation"));
+        out.push_back(std::move(d));
+    }
+    return out;
+}
+
+std::vector<DrbSetup> read_drbs_setup(const json& list) {
+    std::vector<DrbSetup> out;
+    for (const json* i : items(list)) {
+        DrbSetup d;
+        d.drb_id = i->at("dRBID").get<std::uint8_t>();
+        if (i->contains("lCID")) {
+            d.lcid = i->at("lCID").get<std::uint8_t>();
+        }
+        d.dl = read_f1_tunnel(i->at("dLUPTNLInformation-ToBeSetup-List").at(0).at("dLUPTNLInformation"));
+        out.push_back(d);
     }
     return out;
 }
@@ -522,6 +671,9 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             if (const json* l = maybe(ies, kSrbsToBeSetupList)) {
                 m.srbs = read_srbs(*l);
             }
+            if (const json* l = maybe(ies, kDrbsToBeSetupList)) {
+                m.drbs = read_drbs(*l);
+            }
             if (const json* r = maybe(ies, kRrcContainer)) {
                 m.rrc = read_octets(*r);
             }
@@ -536,6 +688,9 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
                 for (const json* i : items(*l)) {
                     m.srbs.emplace_back(i->at("sRBID").get<std::uint8_t>(), i->at("lCID").get<std::uint8_t>());
                 }
+            }
+            if (const json* l = maybe(ies, kDrbsSetupList)) {
+                m.drbs = read_drbs_setup(*l);
             }
             return Pdu{std::move(m)};
         }
@@ -559,6 +714,14 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             if (const json* l = maybe(ies, kSrbsToBeSetupModList)) {
                 m.srbs = read_srbs(*l);
             }
+            if (const json* l = maybe(ies, kDrbsToBeSetupModList)) {
+                m.drbs = read_drbs(*l);
+            }
+            if (const json* l = maybe(ies, kDrbsToBeReleasedList)) {
+                for (const json* i : items(*l)) {
+                    m.release_drbs.push_back(i->at("dRBID").get<std::uint8_t>());
+                }
+            }
             return Pdu{std::move(m)};
         }
         if (kind == K::successful) {
@@ -567,6 +730,9 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             m.du_ue = du_id(ies);
             if (const json* d = maybe(ies, kDuToCuRrcInformation)) {
                 m.cell_group = read_octets(d->at("cellGroupConfig"));
+            }
+            if (const json* l = maybe(ies, kDrbsSetupModList)) {
+                m.drbs = read_drbs_setup(*l);
             }
             return Pdu{std::move(m)};
         }

@@ -207,7 +207,7 @@ std::optional<Bytes> corpus_pdu(const std::string& pdu) {
 TEST(Ran, Ngap10_3_AProcedureOutsideP1WithCriticalityRejectIsReported) {
     Gnb g;
     g.start();
-    auto pdu = corpus_pdu("PDUSessionResourceSetupRequest");
+    auto pdu = corpus_pdu("HandoverRequest");   // handover is P3; PDU sessions came in with N10
     ASSERT_TRUE(pdu);
     g.amf.send_raw(*pdu, 1);
     ASSERT_TRUE(g.loop.run_until([&] { return g.amf.error_indications() == 1; }, g.loop.now() + 1'000));

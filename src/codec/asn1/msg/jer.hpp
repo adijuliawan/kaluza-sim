@@ -13,6 +13,7 @@
 #pragma once
 
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -52,10 +53,18 @@ Error bad(const char* what);      // Errc::invalid_argument: an input the builde
 Error unread(const char* what);   // Errc::malformed: a field P1 reads is missing or wrong
 
 /// Runs a reader, turning a missing or mistyped field into Errc::malformed.
+/// A value the readers understand but P1 does not take (an IPv6 transport
+/// address, a dynamic 5QI, …): Errc::unsupported, not malformed.
+struct NotP1 : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 template <class F>
 auto guarded(F&& f) -> decltype(f()) {
     try {
         return f();
+    } catch (const NotP1&) {
+        return Error{Errc::unsupported, 0, "a value P1 does not take"};
     } catch (const json::exception&) {
         return unread("a field P1 reads is missing or of the wrong type");
     } catch (const std::exception&) {

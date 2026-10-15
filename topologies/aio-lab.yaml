@@ -5,7 +5,9 @@
 # kaluza-uesim with ksim run --lab, in a window agreed with the kaluza-core
 # session. ksim-netd makes the CU-CP's namespace ksim-cucp with an L2 ipvlan
 # on ens19 carrying 172.30.30.30/24; NG-C goes from there to the AMF at
-# 172.30.30.1:38412. gNB 0x1A0 (22 bits), PCI 101, TAC 000001, S-NSSAI 1/000001.
+# 172.30.30.1:38412. From P1 N10 it also makes the CU-UP's namespace ksim-cuup
+# carrying 172.30.30.31/24 for N3 (GTP-U 2152 to the V-UPF at .2, agreed with
+# kaluza-core-1e). gNB 0x1A0 (22 bits), PCI 101, TAC 000001, S-NSSAI 1/000001.
 plmn: "00101"
 seed: 42
 amf: [{addr: 172.30.30.1, port: 38412}]
@@ -13,10 +15,11 @@ gnbs:
   - id: {value: 0x1A0, bits: 22}
     name: ksim-gnb1
     cucp: {ng_bind: 172.30.30.30}
+    cuup: {n3_bind: 172.30.30.31}
     dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
 ues:
-  - {group: w0, count: 3, range: "001010000300000", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+  - {group: w0, count: 4, range: "001010000300000", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
      imeisv_tac: "86000000"}
 secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
 peer: {name: kaluza-core}
-netd: {netns: ksim-cucp, parent: ens19, prefix: 24}
+netd: {netns: ksim-cucp, cuup_netns: ksim-cuup, parent: ens19, prefix: 24}

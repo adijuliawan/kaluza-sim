@@ -13,6 +13,11 @@ namespace {
 
 std::string str(std::int64_t v) { return std::to_string(v); }
 
+constexpr std::uint8_t kDuF1uTag = 0x21;   // TEIDs of the DU's F1-U ends
+
+/// TS 38.321 Table 6.2.1-1: LCIDs 4..32 for DRBs here, DRB n on LCID 3 + n.
+constexpr std::uint8_t lcid_of_drb(std::uint8_t drb) noexcept { return static_cast<std::uint8_t>(3 + drb); }
+
 template <class... F>
 struct Overload : F... {
     using F::operator()...;
@@ -29,10 +34,16 @@ Millis wait_of(const std::optional<std::string>& t) {
 
 } // namespace
 
-Du::Du(Executor& ex, IEventSink& events, DuConfig cfg, IAssoc& f1, std::function<void(air::Frame)> to_air)
+Du::Du(Executor& ex, IEventSink& events, DuConfig cfg, IAssoc& f1, std::function<void(air::Frame)> to_air, IDatagram* f1u)
     : ex_(ex), events_(events), cfg_(std::move(cfg)), f1_(f1), to_air_(std::move(to_air)),
       alive_(std::make_shared<bool>(true)) {
     f1_.set_handlers([this](ByteView msg, SctpMeta) { on_f1(msg); }, [this](LinkEvent e) { on_f1_event(e); });
+    if (f1u != nullptr) {
+        f1u_ = std::make_unique<entity::gtpu::Endpoint>(*f1u, kDuF1uTag);
+        f1u_->on_error_indication([this](std::uint32_t teid, const ksim::Endpoint& from) {
+            events_.emit("ran.gtpu.error_indication", cfg_.id, {{"direction", "rx"}, {"teid", str(teid)}, {"from", from.to_string()}});
+        });
+    }
 }
 
 Du::~Du() {
@@ -73,6 +84,9 @@ void Du::on_f1_event(LinkEvent e) {
             ex_.stop_timer(**t);
             t->reset();
         }
+    }
+    for (auto& [id, ue] : ues_) {
+        drop_drbs(ue);
     }
     ues_.clear();
     by_rnti_.clear();
@@ -288,12 +302,74 @@ void Du::on_prach(const air::Frame& f) {
     to_air_(std::move(r));
 }
 
-Result<Bytes> Du::cell_group(const std::set<std::uint8_t>& srbs) const {
+Result<Bytes> Du::cell_group(const std::set<std::uint8_t>& srbs, const std::vector<Ue::Drb>& drbs,
+                              const std::vector<std::uint8_t>& release_lcids) const {
     rrc::CellGroup cg;
     for (std::uint8_t s : srbs) {
         cg.bearers.push_back(rrc::RlcBearer{s, true, s, true});
     }
+    for (const auto& d : drbs) {
+        cg.bearers.push_back(rrc::RlcBearer{d.lcid, false, d.id, true});
+    }
+    cg.release_lcids = release_lcids;
     return rrc::encode(cg);
+}
+
+std::vector<f1ap::DrbSetup> Du::drbs_change(Ue& ue, const std::vector<f1ap::DrbToSetup>& add,
+                                            const std::vector<std::uint8_t>& release, std::vector<Ue::Drb>& added,
+                                            std::vector<std::uint8_t>& released_lcids) {
+    for (std::uint8_t id : release) {
+        auto it = ue.drbs.find(id);
+        if (it == ue.drbs.end()) {
+            continue;
+        }
+        if (f1u_) {
+            f1u_->unbind(it->second.dl_teid);
+        }
+        released_lcids.push_back(it->second.lcid);
+        ue.drbs.erase(it);
+    }
+    std::vector<f1ap::DrbSetup> out;
+    if (!f1u_) {
+        return out;   // no F1-U here: the DRBs are not set up
+    }
+    for (const auto& d : add) {
+        if (d.drb_id < 1 || d.drb_id > 29) {
+            continue;
+        }
+        if (auto old = ue.drbs.find(d.drb_id); old != ue.drbs.end()) {
+            f1u_->unbind(old->second.dl_teid);
+            ue.drbs.erase(old);
+        }
+        Ue::Drb drb;
+        drb.id = d.drb_id;
+        drb.lcid = lcid_of_drb(d.drb_id);
+        drb.ul = d.ul;
+        const std::uint32_t du_ue = ue.du_ue;
+        const std::uint8_t lcid = drb.lcid;
+        drb.dl_teid = f1u_->bind([this, alive = alive_, du_ue, lcid](const entity::gtpu::UserData& u, const ksim::Endpoint&) {
+            if (!*alive) {
+                return;
+            }
+            if (const Ue* target = by_du(du_ue)) {
+                ++stats_.dl_user;
+                dl_sdu(*target, lcid, u.payload);
+            }
+        });
+        out.push_back(f1ap::DrbSetup{drb.id, drb.lcid, f1ap::GtpTunnel{cfg_.f1u_addr, drb.dl_teid}});
+        added.push_back(drb);
+        ue.drbs.emplace(drb.id, drb);
+    }
+    return out;
+}
+
+void Du::drop_drbs(Ue& ue) {
+    if (f1u_) {
+        for (const auto& [id, d] : ue.drbs) {
+            f1u_->unbind(d.dl_teid);
+        }
+    }
+    ue.drbs.clear();
 }
 
 void Du::on_msg3(const air::Frame& f) {
@@ -332,8 +408,16 @@ void Du::on_ul_sdu(const air::Frame& f) {
         ++stats_.ul_sdus;
         if (ue->srbs.count(s.lcid) != 0) {
             send_f1(f1ap::UlRrcMessageTransfer{*ue->cu_ue, ue->du_ue, s.lcid, s.data}, true);
+            continue;
         }
-        // DRB logical channels go to F1-U (N10).
+        for (const auto& [id, d] : ue->drbs) {
+            if (d.lcid == s.lcid && f1u_) {
+                ++stats_.ul_user;
+                const auto& a = d.ul.addr;
+                (void)f1u_->send(ksim::Endpoint::v4(a[0], a[1], a[2], a[3], cfg_.gtpu_port),
+                                 entity::gtpu::UserData{d.ul.teid, std::nullopt, std::nullopt, std::nullopt, s.data});
+            }
+        }
     }
 }
 
@@ -387,7 +471,10 @@ void Du::handle(const f1ap::UeContextSetupRequest& m) {
     std::set<std::uint8_t> added(m.srbs.begin(), m.srbs.end());
     added.erase(0);
     ue->srbs.insert(added.begin(), added.end());
-    auto cg = cell_group(added);
+    std::vector<Ue::Drb> new_drbs;
+    std::vector<std::uint8_t> released;
+    auto drbs = drbs_change(*ue, m.drbs, {}, new_drbs, released);
+    auto cg = cell_group(added, new_drbs);
     if (!cg) {
         send_f1(f1ap::UeContextSetupFailure{m.cu_ue, ue->du_ue, f1ap::Cause{"misc", "unspecified"}}, true);
         return;
@@ -397,7 +484,7 @@ void Du::handle(const f1ap::UeContextSetupRequest& m) {
     for (std::uint8_t s : added) {
         setup.emplace_back(s, s);
     }
-    send_f1(f1ap::UeContextSetupResponse{m.cu_ue, ue->du_ue, std::move(*cg), setup}, true);
+    send_f1(f1ap::UeContextSetupResponse{m.cu_ue, ue->du_ue, std::move(*cg), setup, std::move(drbs)}, true);
     if (m.rrc) {
         dl_sdu(*ue, 1, *m.rrc);
     }
@@ -412,13 +499,16 @@ void Du::handle(const f1ap::UeContextModificationRequest& m) {
     std::set<std::uint8_t> added(m.srbs.begin(), m.srbs.end());
     added.erase(0);
     ue->srbs.insert(added.begin(), added.end());
+    std::vector<Ue::Drb> new_drbs;
+    std::vector<std::uint8_t> released;
+    auto drbs = drbs_change(*ue, m.drbs, m.release_drbs, new_drbs, released);
     std::optional<Bytes> cg;
-    if (!added.empty()) {
-        if (auto c = cell_group(added)) {
+    if (!added.empty() || !new_drbs.empty() || !released.empty()) {
+        if (auto c = cell_group(added, new_drbs, released)) {
             cg = std::move(*c);
         }
     }
-    send_f1(f1ap::UeContextModificationResponse{m.cu_ue, ue->du_ue, std::move(cg)}, true);
+    send_f1(f1ap::UeContextModificationResponse{m.cu_ue, ue->du_ue, std::move(cg), std::move(drbs)}, true);
     if (m.rrc) {
         dl_sdu(*ue, 1, *m.rrc);
     }
@@ -431,6 +521,7 @@ void Du::handle(const f1ap::UeContextReleaseCommand& m) {
             dl_sdu(*ue, *m.srb, *m.rrc);
         }
         by_rnti_.erase(ue->rnti);
+        drop_drbs(*ue);
         ues_.erase(m.du_ue);
     }
     send_f1(f1ap::UeContextReleaseComplete{m.cu_ue, m.du_ue}, true);
