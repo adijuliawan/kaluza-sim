@@ -32,7 +32,16 @@ ksim::Endpoint at(const e1ap::GtpTunnel& t, std::uint16_t port) {
 CuUp::CuUp(Executor& ex, IEventSink& events, CuUpConfig cfg, IAssoc& e1, IDatagram& n3, IDatagram& f1u)
     : ex_(ex), events_(events), cfg_(std::move(cfg)), e1_(e1), n3_(n3, kN3Tag), f1u_(f1u, kF1uTag),
       alive_(std::make_shared<bool>(true)) {
-    e1_.set_handlers([this](ByteView m, SctpMeta) { on_e1(m); }, [this](LinkEvent e) { on_e1_event(e); });
+    e1_.set_handlers(
+        [this](ByteView m, SctpMeta meta) {
+            if (meta.ppid != kE1apPpid && meta.ppid != 0) {   // 0: memlink in tests carries none
+                ++stats_.e1_errors;
+                events_.emit("ran.link.wrong_ppid", cfg_.id, {{"link", "e1ap"}, {"ppid", std::to_string(meta.ppid)}});
+                return;
+            }
+            on_e1(m);
+        },
+        [this](LinkEvent e) { on_e1_event(e); });
     n3_.on_error_indication([this](std::uint32_t teid, const ksim::Endpoint& from) {
         // TS 29.281 7.3.1: the peer has no tunnel for a TEID we sent to.
         events_.emit("ran.gtpu.error_indication", cfg_.id, {{"direction", "rx"}, {"teid", str(teid)}, {"from", from.to_string()}});
@@ -55,7 +64,8 @@ void CuUp::send_e1(const e1ap::Pdu& p, bool ue) {
         events_.emit("ran.encode_error", cfg_.id, {{"what", wire.error().what}});
         return;
     }
-    const std::uint16_t stream = ue && e1_.out_streams() > 1 ? 1 : 0;
+    const auto id = ue ? e1ap::cu_up_ue_of(p) : std::nullopt;
+    const std::uint16_t stream = id ? ue_stream(e1_.out_streams(), *id) : (ue && e1_.out_streams() > 1 ? std::uint16_t{1} : std::uint16_t{0});
     (void)e1_.send(*wire, SctpMeta{kE1apPpid, stream});
 }
 

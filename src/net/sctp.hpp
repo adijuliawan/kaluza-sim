@@ -52,8 +52,10 @@ public:
     /// Listens on `local` (the first address bound, the rest added with
     /// SCTP_SOCKOPT_BINDX_ADD; port 0 picks one). Each accepted association
     /// is born up: up() is true at once and no `up` event comes for it.
+    /// P2 Q2: with `source`, the socket comes from it (ksim-netd, made in the
+    /// CU-CP's namespace) instead of socket(2), as SctpClient's does.
     static Result<std::unique_ptr<SctpListener>> listen(Reactor& reactor, const std::vector<Endpoint>& local,
-                                                        SctpOptions options, OnAccept on_accept);
+                                                        SctpOptions options, OnAccept on_accept, const SocketSource& source = {});
     ~SctpListener();
     SctpListener(const SctpListener&) = delete;
     SctpListener& operator=(const SctpListener&) = delete;

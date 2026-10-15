@@ -67,6 +67,7 @@ struct DuConfig {
 };
 
 struct DuStats {
+    std::uint64_t wrong_ppid = 0;      // P2 Q2: F1-C messages under another PPID, dropped
     std::uint64_t prach = 0;
     std::uint64_t rar = 0;
     std::uint64_t msg3_lost_contention = 0;

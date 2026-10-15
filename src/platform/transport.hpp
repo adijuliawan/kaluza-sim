@@ -65,6 +65,13 @@ enum class LinkEvent : std::uint8_t {
 
 const char* link_event_name(LinkEvent e) noexcept;
 
+/// The stream a UE's signalling keeps for its whole context (P2 Q2; TS 38.412,
+/// 38.472 and 37.482 §7): stream 0 is for non-UE-associated messages, so a UE
+/// takes one of the others by its own AP ID; with one stream, stream 0.
+inline std::uint16_t ue_stream(std::uint16_t out_streams, std::uint32_t ue_id) noexcept {
+    return out_streams > 1 ? static_cast<std::uint16_t>(1 + ue_id % (out_streams - 1U)) : std::uint16_t{0};
+}
+
 class IAssoc {
 public:
     using OnMessage = std::function<void(ByteView msg, SctpMeta meta)>;
@@ -110,6 +117,22 @@ public:
     /// Best effort: a packet the device cannot take is dropped and counted.
     virtual Result<void> write(ByteView packet) = 0;
     virtual std::uint64_t dropped() const noexcept = 0;
+};
+
+/// A message channel (P2 Q2, ADR 0011 point 2): each send arrives whole, as
+/// one message, in order. UNIX SOCK_SEQPACKET between the UE farm and the DU
+/// when they are separate processes (net/seqpacket).
+class IChannel {
+public:
+    using OnMessage = std::function<void(ByteView message)>;
+    using OnClosed = std::function<void()>;
+
+    virtual ~IChannel() = default;
+    virtual void set_handlers(OnMessage on_message, OnClosed on_closed) = 0;
+    /// Queues the message when the peer cannot take it yet; Errc::closed once closed.
+    virtual Result<void> send(ByteView message) = 0;
+    virtual bool open() const noexcept = 0;
+    virtual void close() = 0;
 };
 
 class IStream {

@@ -25,6 +25,25 @@ TEST(Session, E1_8_2_1_TheCuUpSetsUpE1WithTheCuCp) {
     EXPECT_EQ(n.named("ran.e1.setup").size(), 2u);   // the CU-CP's and the CU-UP's
 }
 
+// P2 Q2: E1 lost under a UE with a session. The CU-CP asks for the UE's release, since its user plane went
+// with the bearer context (TS 38.413 §8.3.2); E1 back, the CU-UP sets E1 up again.
+TEST(Session, AnE1LossReleasesTheUesWithSessionsAndE1ComesBack) {
+    Net n;
+    n.register_ue();
+    n.establish();
+    n.e1.a().abort();   // the CU-UP's end goes (a CU-UP restart, as the CU-CP sees it)
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.count("UEContextReleaseRequest") == 1; }, n.loop.now() + 2'000))
+        << n.failures();
+    const Event* r = n.last("ran.ue.release_request");
+    ASSERT_NE(r, nullptr);
+    EXPECT_EQ(*r->find("cause"), "release-due-to-ngran-generated-reason");
+    EXPECT_FALSE(n.named("ran.e1.lost").empty());
+    n.e1.connect();
+    // The CU-CP's and the CU-UP's ran.e1.setup, twice.
+    ASSERT_TRUE(n.loop.run_until([&] { return n.cucp.e1_ready() && n.named("ran.e1.setup").size() == 4; },
+                                 n.loop.now() + 2'000));
+}
+
 TEST(Session, Ts24501_6_4_1_AnIpv4SessionIsEstablishedWithAddressDnsAndMtu) {
     Net n;
     n.register_ue();

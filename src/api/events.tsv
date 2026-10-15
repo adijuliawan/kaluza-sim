@@ -43,6 +43,9 @@ rrc.decode_error	38.331 5.7.3	a DL-DCCH message the UE could not decode; bearer,
 rrc.encode_error	sim	a message the UE's builders refused (a sim bug); what
 ran.f1.setup	38.473 8.2.3	F1 Setup done: at the CU-CP (du, tac) and at the DU (cu, cell_active)
 ran.f1.setup.failure	38.473 8.2.3.3	F1 SETUP FAILURE taken at the DU, retried after its time to wait; cause, retry_ms
+ran.f1.lost	38.413 8.3.2	P2 Q2: F1 lost at the CU-CP (event, ues); each UE the AMF knows is asked to be released, radio connection with UE lost
+ran.e1.lost	38.413 8.3.2	P2 Q2: E1 lost at the CU-CP (event); each UE that had a bearer context is asked to be released
+ran.link.wrong_ppid	38.472 7	P2 Q2: a message under another protocol's PPID on F1-C, E1 or NG-C, dropped (link, ppid)
 ran.f1.error	38.473 10	an F1AP message refused (it did not decode, or a procedure outside P1); what
 ran.f1.error_indication	38.473 8.2.2	an F1AP ERROR INDICATION received; cause
 ran.ng.setup	38.413 8.7.1.2	NG Setup done: NG SETUP RESPONSE taken; amf, capacity

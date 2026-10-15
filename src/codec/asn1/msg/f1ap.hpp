@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -209,6 +211,42 @@ using Pdu = std::variant<F1SetupRequest, F1SetupResponse, F1SetupFailure, Initia
                          UeContextSetupFailure, UeContextModificationRequest, UeContextModificationResponse,
                          UeContextReleaseRequest, UeContextReleaseCommand, UeContextReleaseComplete, Paging,
                          ErrorIndication>;
+
+namespace detail {
+template <class T>
+std::optional<std::uint32_t> id_of(const T& v) {
+    if constexpr (std::is_same_v<T, std::optional<std::uint32_t>>) {
+        return v;
+    } else {
+        return static_cast<std::uint32_t>(v);
+    }
+}
+} // namespace detail
+
+/// The UE a PDU is about, by the gNB-CU (cu_ue_of) or gNB-DU (du_ue_of) side's UE F1AP ID, or none for a non-UE-associated
+/// one (P2 Q2: TS 38.472 §7, a UE's signalling keeps one SCTP stream).
+inline std::optional<std::uint32_t> cu_ue_of(const Pdu& p) {
+    return std::visit(
+        [](const auto& m) -> std::optional<std::uint32_t> {
+            if constexpr (requires { m.cu_ue; }) {
+                return detail::id_of(m.cu_ue);
+            } else {
+                return std::nullopt;
+            }
+        },
+        p);
+}
+inline std::optional<std::uint32_t> du_ue_of(const Pdu& p) {
+    return std::visit(
+        [](const auto& m) -> std::optional<std::uint32_t> {
+            if constexpr (requires { m.du_ue; }) {
+                return detail::id_of(m.du_ue);
+            } else {
+                return std::nullopt;
+            }
+        },
+        p);
+}
 
 Result<Bytes> encode(const Pdu& p);
 

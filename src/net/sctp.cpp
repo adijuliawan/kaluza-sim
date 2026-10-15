@@ -462,11 +462,12 @@ private:
 // ---- the listener ----------------------------------------------------------
 
 Result<std::unique_ptr<SctpListener>> SctpListener::listen(Reactor& reactor, const std::vector<Endpoint>& local,
-                                                           SctpOptions options, OnAccept on_accept) {
+                                                           SctpOptions options, OnAccept on_accept, const SocketSource& source) {
     if (local.empty()) {
         return make_error(Errc::invalid_argument, 0, "sctp: a listener needs an address");
     }
-    auto fd = open_socket(family_of(local.front()), options);
+    auto fd = source ? configure_from(source(family_of(local.front())), options)
+                     : open_socket(family_of(local.front()), options);
     if (!fd) {
         return fd.error();
     }

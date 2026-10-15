@@ -3,6 +3,8 @@
 
 #include "proc/ran/cucp.hpp"
 
+#include "platform/mutation.hpp"
+
 #include <algorithm>
 #include <utility>
 
@@ -40,10 +42,29 @@ bool supports(std::uint16_t map, std::uint8_t alg) { return alg == 0 || (map & (
 
 CuCp::CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1, IAssoc* e1)
     : ex_(ex), events_(events), cfg_(std::move(cfg)), ng_(ngap), f1_(f1), alive_(std::make_shared<bool>(true)), e1_(e1) {
-    ng_.set_handlers([this](ByteView msg, SctpMeta) { on_ngap(msg); }, [this](LinkEvent e) { on_ng_event(e); });
-    f1_.set_handlers([this](ByteView msg, SctpMeta) { on_f1(msg); }, [this](LinkEvent e) { on_f1_event(e); });
+    // P2 Q2: a message under another protocol's PPID is dropped and counted (TS 38.412, 38.472, 37.482 §7).
+    ng_.set_handlers(
+        [this](ByteView msg, SctpMeta m) {
+            if (ppid_ok(m, kNgapPpid, "ngap")) {
+                on_ngap(msg);
+            }
+        },
+        [this](LinkEvent e) { on_ng_event(e); });
+    f1_.set_handlers(
+        [this](ByteView msg, SctpMeta m) {
+            if (ppid_ok(m, kF1apPpid, "f1ap")) {
+                on_f1(msg);
+            }
+        },
+        [this](LinkEvent e) { on_f1_event(e); });
     if (e1_ != nullptr) {
-        e1_->set_handlers([this](ByteView msg, SctpMeta) { on_e1(msg); }, [this](LinkEvent e) { on_e1_event(e); });
+        e1_->set_handlers(
+            [this](ByteView msg, SctpMeta m) {
+                if (ppid_ok(m, kE1apPpid, "e1ap")) {
+                    on_e1(msg);
+                }
+            },
+            [this](LinkEvent e) { on_e1_event(e); });
     }
 }
 
@@ -95,13 +116,23 @@ void CuCp::send_ngap(const ngap::Pdu& p, std::optional<std::uint32_t> ran_ue) {
     (void)ng_.send(*wire, SctpMeta{kNgapPpid, stream});
 }
 
+bool CuCp::ppid_ok(const SctpMeta& m, std::uint32_t want, const char* link) {
+    if (m.ppid == want || m.ppid == 0) {
+        return true;   // 0: a transport with no PPIDs (memlink in tests)
+    }
+    ++stats_.wrong_ppid;
+    events_.emit("ran.link.wrong_ppid", cfg_.id, {{"link", link}, {"ppid", std::to_string(m.ppid)}});
+    return false;
+}
+
 void CuCp::send_f1(const f1ap::Pdu& p, bool ue_associated) {
     auto wire = f1ap::encode(p);
     if (!wire) {
         events_.emit("ran.encode_error", cfg_.id, {{"what", wire.error().what}});
         return;
     }
-    (void)f1_.send(*wire, SctpMeta{kF1apPpid, static_cast<std::uint16_t>(ue_associated && f1_.out_streams() > 1 ? 1 : 0)});
+    const auto ue = ue_associated ? f1ap::cu_ue_of(p) : std::nullopt;
+    (void)f1_.send(*wire, SctpMeta{kF1apPpid, ue ? ue_stream(f1_.out_streams(), *ue) : static_cast<std::uint16_t>(0)});
 }
 
 void CuCp::error_indication(ngap::UeIds ids, const char* group, const char* value) {
@@ -133,9 +164,28 @@ void CuCp::on_ng_event(LinkEvent e) {
 }
 
 void CuCp::on_f1_event(LinkEvent e) {
-    if (e != LinkEvent::up && e != LinkEvent::restart) {
-        du_.reset();
-        ues_.clear();
+    if (e == LinkEvent::up || e == LinkEvent::restart || e == LinkEvent::refused) {
+        return;
+    }
+    // P2 Q2 (row ksim-p2.f1-loss-release): with F1 gone the UEs' radio connections are gone too.
+    // A UE the AMF knows is asked to be released (TS 38.413 §8.3.2); the others go at once.
+    du_.reset();
+    events_.emit("ran.f1.lost", cfg_.id, {{"event", link_event_name(e)}, {"ues", std::to_string(ues_.size())}});
+    std::vector<std::uint32_t> local;
+    for (auto& [cu, ue] : ues_) {
+        if (!ue.amf_ue || KSIM_MUTANT("f1_loss_silent")) {
+            local.push_back(cu);
+            continue;
+        }
+        ue.du_gone = true;
+        if (ue.phase != Phase::releasing) {
+            events_.emit("ran.ue.release_request", cfg_.id, {{"ran_ue", str(ue.ran_ue)}, {"cause", "radio-connection-with-ue-lost"}});
+            send_ngap(ngap::UeContextReleaseRequest{*ue.amf_ue, ue.ran_ue, ngap::Cause{"radioNetwork", "radio-connection-with-ue-lost"}},
+                      ue.ran_ue);
+        }
+    }
+    for (std::uint32_t cu : local) {
+        ues_.erase(cu);
     }
 }
 
@@ -538,6 +588,13 @@ void CuCp::handle(const ngap::UeContextReleaseCommand& m) {
         send_e1(e1ap::BearerContextReleaseCommand{ue->cu_ue, *ue->cu_up_ue, e1ap::Cause{"radioNetwork", "normal-release"}}, true);
         ue->cu_up_ue.reset();
     }
+    if (ue->du_gone || !f1_.up()) {
+        // No DU to release it on (F1 lost): the release completes here.
+        send_ngap(ngap::UeContextReleaseComplete{*ue->amf_ue, ue->ran_ue}, ue->ran_ue);
+        events_.emit("ran.ue.released", cfg_.id, {{"ran_ue", str(ue->ran_ue)}});
+        ues_.erase(ue->cu_ue);
+        return;
+    }
     std::optional<Bytes> rrc_release;
     if (ue->srb1) {
         ue->capture = true;
@@ -793,14 +850,28 @@ void CuCp::send_e1(const e1ap::Pdu& p, bool ue_associated) {
         events_.emit("ran.encode_error", cfg_.id, {{"what", wire.error().what}});
         return;
     }
-    (void)e1_->send(*wire, SctpMeta{kE1apPpid, static_cast<std::uint16_t>(ue_associated && e1_->out_streams() > 1 ? 1 : 0)});
+    const auto ue = ue_associated ? e1ap::cu_cp_ue_of(p) : std::nullopt;
+    (void)e1_->send(*wire, SctpMeta{kE1apPpid, ue ? ue_stream(e1_->out_streams(), *ue) : static_cast<std::uint16_t>(0)});
 }
 
 void CuCp::on_e1_event(LinkEvent e) {
-    if (e != LinkEvent::up && e != LinkEvent::restart) {
-        e1_ready_ = false;
-        for (auto& [cu, ue] : ues_) {
-            ue.cu_up_ue.reset();   // the bearer contexts went with the association
+    if (e == LinkEvent::up || e == LinkEvent::restart || e == LinkEvent::refused) {
+        return;
+    }
+    // P2 Q2: the bearer contexts went with the association, and with them the UEs' user plane. A UE
+    // that had one is asked to be released (TS 38.413 §8.3.2), so the core does not keep sessions
+    // that carry nothing.
+    e1_ready_ = false;
+    events_.emit("ran.e1.lost", cfg_.id, {{"event", link_event_name(e)}});
+    for (auto& [cu, ue] : ues_) {
+        const bool had = ue.cu_up_ue.has_value();
+        ue.cu_up_ue.reset();
+        if (had && ue.amf_ue && ue.phase != Phase::releasing) {
+            events_.emit("ran.ue.release_request", cfg_.id,
+                         {{"ran_ue", str(ue.ran_ue)}, {"cause", "release-due-to-ngran-generated-reason"}});
+            send_ngap(ngap::UeContextReleaseRequest{*ue.amf_ue, ue.ran_ue,
+                                                    ngap::Cause{"radioNetwork", "release-due-to-ngran-generated-reason"}},
+                      ue.ran_ue);
         }
     }
 }

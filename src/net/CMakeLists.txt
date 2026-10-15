@@ -10,6 +10,7 @@ add_library(ksim_net STATIC
     udp.cpp
     tun.cpp
     tcp.cpp
+    seqpacket.cpp
     netlink.cpp
     netns.cpp
     netd.cpp

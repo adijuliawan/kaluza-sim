@@ -38,6 +38,11 @@ killed=0; total=0
 while IFS=$'\t' read -r name row _; do
     [[ -z "$name" || "$name" == name || "$name" == \#* ]] && continue
     if [[ ${#want[@]} -gt 0 && ! " ${want[*]} " == *" $name "* ]]; then continue; fi
+    if [[ "$row" == - ]]; then
+        # A mutant only a procedure test kills runs in the mutants preset's ctest, not here.
+        echo "MUTANT=$name PROCEDURE row=- (tests/procedure, the mutants preset)" | tee -a "$OUT/summary.txt"
+        continue
+    fi
     total=$((total + 1))
     gate=$(grep -l "row $row " "$ROOT"/gates/verification/ksim-p[12]-*.sh | head -n 1)
     if [[ -z "$gate" ]]; then

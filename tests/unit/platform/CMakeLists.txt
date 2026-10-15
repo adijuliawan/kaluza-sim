@@ -4,6 +4,7 @@
 add_executable(unit_platform
     result_test.cpp
     blocking_test.cpp
+    assoc_slot_test.cpp
     buf_test.cpp
     secret_test.cpp
     timer_wheel_test.cpp

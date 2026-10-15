@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include <array>
 #include <cstdint>
 #include <optional>
@@ -194,6 +196,42 @@ using Pdu = std::variant<E1SetupRequest, E1SetupResponse, E1SetupFailure, Bearer
                          BearerContextSetupResponse, BearerContextSetupFailure, BearerContextModificationRequest,
                          BearerContextModificationResponse, BearerContextModificationFailure, BearerContextReleaseCommand,
                          BearerContextReleaseComplete, ErrorIndication>;
+
+namespace detail {
+template <class T>
+std::optional<std::uint32_t> id_of(const T& v) {
+    if constexpr (std::is_same_v<T, std::optional<std::uint32_t>>) {
+        return v;
+    } else {
+        return static_cast<std::uint32_t>(v);
+    }
+}
+} // namespace detail
+
+/// The UE a PDU is about, by the gNB-CU-CP (cu_cp_ue_of) or gNB-CU-UP (cu_up_ue_of) side's UE E1AP ID, or none for a non-UE-associated
+/// one (P2 Q2: TS 37.482 §7, a UE's signalling keeps one SCTP stream).
+inline std::optional<std::uint32_t> cu_cp_ue_of(const Pdu& p) {
+    return std::visit(
+        [](const auto& m) -> std::optional<std::uint32_t> {
+            if constexpr (requires { m.cu_cp_ue; }) {
+                return detail::id_of(m.cu_cp_ue);
+            } else {
+                return std::nullopt;
+            }
+        },
+        p);
+}
+inline std::optional<std::uint32_t> cu_up_ue_of(const Pdu& p) {
+    return std::visit(
+        [](const auto& m) -> std::optional<std::uint32_t> {
+            if constexpr (requires { m.cu_up_ue; }) {
+                return detail::id_of(m.cu_up_ue);
+            } else {
+                return std::nullopt;
+            }
+        },
+        p);
+}
 
 Result<Bytes> encode(const Pdu& p);
 /// Errc::unsupported for a procedure outside the P1 set, Errc::malformed for

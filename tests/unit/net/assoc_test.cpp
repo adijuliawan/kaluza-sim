@@ -384,5 +384,51 @@ TEST(SctpClient, TakesItsSocketsFromASourceWhenGivenOne) {
     shard.join();
 }
 
+TEST(SctpListener, TakesItsSocketFromASourceWhenGivenOne) {
+    // P2 Q2: the CU-CP listens for F1-C and E1 inside its namespace, on a socket from ksim-netd.
+    MonotonicClock clock;
+    Shard shard{6, 1024, clock};
+    shard.start();
+    Recorder rec;
+    std::unique_ptr<net::SctpListener> l;
+    std::unique_ptr<IAssoc> server;
+    std::unique_ptr<net::SctpClient> c;
+    std::atomic<int> made{0};
+    std::atomic<bool> accepted{false};
+    on_shard(shard, [&] {
+        net::SocketSource source = [&](int family) -> Result<Fd> {
+            ++made;
+            Fd fd(::socket(family, SOCK_STREAM | SOCK_CLOEXEC, IPPROTO_SCTP));   // blocking: the listener fixes it
+            if (!fd) {
+                return make_error(Errc::io, 0, "test: socket");
+            }
+            return fd;
+        };
+        auto r = net::SctpListener::listen(
+            shard.reactor(), {Endpoint::v4(127, 0, 0, 1, 0)}, {},
+            [&](std::unique_ptr<IAssoc> a) {
+                server = std::move(a);
+                accepted = true;
+            },
+            source);
+        ASSERT_TRUE(r.has_value());
+        l = std::move(*r);
+        c = std::make_unique<net::SctpClient>(shard.reactor(), shard, std::vector<Endpoint>{Endpoint::v4(127, 0, 0, 1, 0)},
+                                              std::vector<Endpoint>{l->local()}, net::SctpOptions{},
+                                              net::SctpBackoff{20, 40});
+        attach(*c, rec, 0);
+        c->start();
+    });
+    ASSERT_TRUE(poll([&] { return rec.count(0, LinkEvent::up) == 1 && accepted.load(); }));
+    EXPECT_EQ(made.load(), 1);
+    on_shard(shard, [&] {
+        c.reset();
+        server.reset();
+        l.reset();
+    });
+    shard.stop();
+    shard.join();
+}
+
 } // namespace
 } // namespace ksim

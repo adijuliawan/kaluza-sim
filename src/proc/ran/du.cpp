@@ -38,7 +38,16 @@ Millis wait_of(const std::optional<std::string>& t) {
 Du::Du(Executor& ex, IEventSink& events, DuConfig cfg, IAssoc& f1, std::function<void(air::Frame)> to_air, IDatagram* f1u)
     : ex_(ex), events_(events), cfg_(std::move(cfg)), f1_(f1), to_air_(std::move(to_air)),
       alive_(std::make_shared<bool>(true)) {
-    f1_.set_handlers([this](ByteView msg, SctpMeta) { on_f1(msg); }, [this](LinkEvent e) { on_f1_event(e); });
+    f1_.set_handlers(
+        [this](ByteView msg, SctpMeta m) {
+            if (m.ppid != kF1apPpid && m.ppid != 0) {   // 0: memlink in tests carries none
+                ++stats_.wrong_ppid;
+                events_.emit("ran.link.wrong_ppid", cfg_.id, {{"link", "f1ap"}, {"ppid", std::to_string(m.ppid)}});
+                return;
+            }
+            on_f1(msg);
+        },
+        [this](LinkEvent e) { on_f1_event(e); });
     if (f1u != nullptr) {
         f1u_ = std::make_unique<entity::gtpu::Endpoint>(*f1u, kDuF1uTag);
         f1u_->on_error_indication([this](std::uint32_t teid, const ksim::Endpoint& from) {
@@ -123,7 +132,9 @@ void Du::send_f1(const f1ap::Pdu& p, bool ue_associated) {
         events_.emit("ran.encode_error", cfg_.id, {{"what", wire.error().what}});
         return;
     }
-    const std::uint16_t stream = ue_associated && f1_.out_streams() > 1 ? 1 : 0;
+    const auto ue = ue_associated ? f1ap::du_ue_of(p) : std::nullopt;
+    const std::uint16_t stream = ue && !KSIM_MUTANT("single_ue_stream") ? ue_stream(f1_.out_streams(), *ue)
+                                 : (ue_associated && f1_.out_streams() > 1 ? std::uint16_t{1} : std::uint16_t{0});
     (void)f1_.send(*wire, SctpMeta{kF1apPpid, stream});
 }
 

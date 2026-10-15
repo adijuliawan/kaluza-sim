@@ -12,6 +12,7 @@
 
 #include <fstream>
 #include <memory>
+#include <set>
 #include <sstream>
 
 #include "../unit/uicc_card/fixture.hpp"
@@ -31,7 +32,34 @@ namespace {
 using proc::ue::MmState;
 
 const char* kSupi = "001010000300001";
+
+std::string field(const Event& e, std::string_view key) {
+    const std::string* v = e.find(key);
+    return v != nullptr ? *v : std::string("<none>");
+}
 const nas::ie::Plmn kPlmn{"001", "01"};
+
+/// The DU's end of F1, recording the stream of each message it sends (P2 Q2, ksim-p2.per-ue-stream).
+class StreamTap final : public IAssoc {
+public:
+    explicit StreamTap(IAssoc& in) : in_(in) {}
+    void set_handlers(OnMessage m, OnEvent e) override { in_.set_handlers(std::move(m), std::move(e)); }
+    Result<void> send(ByteView msg, SctpMeta meta) override {
+        streams.push_back(meta.stream);
+        return in_.send(msg, meta);
+    }
+    bool up() const noexcept override { return in_.up(); }
+    std::uint16_t out_streams() const noexcept override { return in_.out_streams(); }
+    std::uint16_t in_streams() const noexcept override { return in_.in_streams(); }
+    void shutdown() override { in_.shutdown(); }
+    void abort() override { in_.abort(); }
+    Endpoint peer() const override { return in_.peer(); }
+
+    std::vector<std::uint16_t> streams;
+
+private:
+    IAssoc& in_;
+};
 
 struct Gnb {
     explicit Gnb(corestub::Profile p = {}) : amf(loop, home, kPlmn, std::move(p), ng.b()) {
@@ -102,11 +130,12 @@ struct Gnb {
     SimLoop loop{0};
     EventRing events{16384, loop.clock()};
     corestub::Home home{Rng(7, {1})};
-    MemAssocPair f1{loop, Endpoint::v4(127, 0, 0, 3, 0), loop, Endpoint::v4(127, 0, 0, 2, 38472), 2};
+    MemAssocPair f1{loop, Endpoint::v4(127, 0, 0, 3, 0), loop, Endpoint::v4(127, 0, 0, 2, 38472), 4};
+    StreamTap du_f1{f1.a()};
     MemAssocPair ng{loop, Endpoint::v4(127, 0, 0, 2, 0), loop, Endpoint::v4(127, 0, 0, 1, 38412), 3};
     corestub::NgapAmf amf;
     proc::ran::CuCp cucp{loop, events, proc::ran::CuCpConfig{}, ng.a(), f1.b()};
-    proc::ran::Du du{loop, events, proc::ran::DuConfig{}, f1.a(), [this](const air::Frame& f) {
+    proc::ran::Du du{loop, events, proc::ran::DuConfig{}, du_f1, [this](const air::Frame& f) {
                          loop.start_timer(1, [this, f] {
                              if (f.radio_id == 0 || f.radio_id == 7) {
                                  rrc->on_frame(f);
@@ -238,6 +267,71 @@ TEST(Ran, Ngap8_7_3_AnAmfConfigurationUpdateIsAcknowledged) {
     g.amf.send(ngap::AmfConfigurationUpdate{"ksim-stub-amf-2"});
     ASSERT_TRUE(g.loop.run_until([&] { return g.amf.count("AMFConfigurationUpdateAcknowledge") == 1; },
                                  g.loop.now() + 1'000));
+}
+
+// P2 Q2 (row ksim-p2.f1-loss-release; TS 38.413 §8.3.2): F1 lost under a registered UE. The CU-CP asks
+// the AMF to release it (radio connection with UE lost), and the release completes with no DU to go through.
+TEST(Ran, F1LossAsksTheAmfToReleaseTheUeAndTheReleaseCompletesWithoutTheDu) {
+    Gnb g;
+    g.register_ue();
+    g.f1.a().abort();   // the DU's end goes
+    ASSERT_TRUE(g.loop.run_until([&] { return g.amf.count("UEContextReleaseComplete") == 1; }, g.loop.now() + 2'000))
+        << g.failures();
+    EXPECT_EQ(g.amf.count("UEContextReleaseRequest"), 1u);
+    ASSERT_FALSE(g.named("ran.f1.lost").empty());
+    const auto req = g.named("ran.ue.release_request");
+    ASSERT_FALSE(req.empty());
+    EXPECT_EQ(field(req.back(), "cause"), "radio-connection-with-ue-lost");
+    EXPECT_FALSE(g.cucp.f1_ready());
+    EXPECT_TRUE(g.failures().empty()) << g.failures();
+}
+
+// P2 Q2 (TS 38.472 §7): non-UE-associated F1AP on stream 0; a UE's on the one stream its ID picks, never 0.
+TEST(Ran, EachUeKeepsItsOwnF1StreamAndStreamZeroIsForTheRest) {
+    Gnb g;
+    g.register_ue();
+    ASSERT_GE(g.du_f1.streams.size(), 4u);
+    EXPECT_EQ(g.du_f1.streams.front(), 0);   // F1 SETUP REQUEST
+    std::set<std::uint16_t> ue_streams(g.du_f1.streams.begin() + 1, g.du_f1.streams.end());
+    ASSERT_EQ(ue_streams.size(), 1u);
+    EXPECT_EQ(*ue_streams.begin(), ue_stream(4, 1));   // the first UE's gNB-DU UE F1AP ID is 1
+    EXPECT_NE(*ue_streams.begin(), 1);                 // what a single shared UE stream would give
+}
+
+// P2 Q2 (row ksim-p2.f1-reassociation): F1 back after a loss, the DU sets F1 up again, the cell comes back on
+// air, and the UE registers anew through it.
+TEST(Ran, AfterAnF1LossTheDuSetsF1UpAgainAndTheCellServesAgain) {
+    Gnb g;
+    g.register_ue();
+    g.f1.b().abort();   // the CU-CP's end goes (a CU-CP restart, as the DU sees it)
+    ASSERT_TRUE(g.loop.run_until([&] { return !g.du.cell_active(); }, g.loop.now() + 1'000));
+    g.f1.connect();
+    ASSERT_TRUE(g.loop.run_until([&] { return g.du.cell_active() && g.cucp.f1_ready(); }, g.loop.now() + 2'000));
+    EXPECT_EQ(g.named("ran.f1.setup").size(), 4u);   // the DU's and the CU-CP's, twice
+    EXPECT_TRUE(g.failures().empty()) << g.failures();
+}
+
+TEST(Ran, Mutant_single_ue_stream_PutsEveryUeOnStreamOne) {
+    if (!kMutationsBuild) {
+        GTEST_SKIP() << "mutant build only";
+    }
+    testing::MutantScope m("single_ue_stream");
+    Gnb g;
+    g.register_ue();
+    std::set<std::uint16_t> ue_streams(g.du_f1.streams.begin() + 1, g.du_f1.streams.end());
+    EXPECT_EQ(ue_streams, std::set<std::uint16_t>{1});
+}
+
+TEST(Ran, Mutant_f1_loss_silent_LeavesTheAmfWithTheUe) {
+    if (!kMutationsBuild) {
+        GTEST_SKIP() << "mutant build only";
+    }
+    testing::MutantScope m("f1_loss_silent");
+    Gnb g;
+    g.register_ue();
+    g.f1.a().abort();
+    g.loop.run_until([] { return false; }, g.loop.now() + 2'000);
+    EXPECT_EQ(g.amf.count("UEContextReleaseRequest"), 0u);
 }
 
 TEST(Ran, Mutant_kgnb_wrong_ul_count_FailsTheAsSecurityModeAndTheContextSetup) {

@@ -84,6 +84,7 @@ struct CuCpConfig {
 struct CuCpStats {
     std::uint64_t ngap_rx = 0;
     std::uint64_t ngap_errors = 0;       // ERROR INDICATIONs sent
+    std::uint64_t wrong_ppid = 0;        // P2 Q2: messages under another protocol's PPID, dropped
     std::uint64_t error_indications_rx = 0;
     std::uint64_t f1_errors = 0;
     std::uint64_t ics_ok = 0;
@@ -125,12 +126,15 @@ public:
     void on_ngap(ByteView msg);
 
 private:
+    /// P2 Q2: whether a message's PPID is the link's (TS 38.412, 38.472, 37.482 §7); counted and evented if not.
+    bool ppid_ok(const SctpMeta& m, std::uint32_t want, const char* link);
     enum class Phase : std::uint8_t { setup, connected, securing, capability, reconfiguring, active, releasing };
     static const char* phase_name(Phase p) noexcept;
 
     struct Ue {
         std::uint32_t cu_ue = 0;
         std::uint32_t du_ue = 0;
+        bool du_gone = false;            // P2 Q2: F1 was lost while the AMF knew the UE
         std::uint32_t ran_ue = 0;
         std::optional<std::uint64_t> amf_ue;
         std::uint16_t c_rnti = 0;
