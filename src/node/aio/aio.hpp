@@ -118,7 +118,8 @@ private:
     bool stopped_ = false;
 
     // On the shard.
-    std::unique_ptr<net::netd::Client> netd_;   // with topology netd: the CU-CP's namespace
+    std::unique_ptr<net::netd::Client> netd_;   // with topology netd: the nodes' and UEs' namespaces
+    std::unique_ptr<NetdUeNet> ue_net_;         // with netd ues: the UEs' TUN data plane
     std::unique_ptr<net::SctpClient> ng_;
     std::unique_ptr<TapAssoc> ng_tap_;
     std::unique_ptr<MemAssocPair> f1_;

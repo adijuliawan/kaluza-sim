@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 
+#include <map>
 #include <memory>
 #include <string>
 
@@ -49,8 +50,55 @@ proc::ran::DuConfig du_config() {
     return c;
 }
 
+/// The system's side of the TUN data plane, in memory (P1 N11): what the device
+/// asked for, and each TUN's kernel side for the test to drive.
+class FakeUeNet final : public node::IUeNet {
+public:
+    struct Tun final : IPacketPort {
+        OnPacket on;
+        std::vector<Bytes> written;   // what the device wrote: the downlink
+        void set_handler(OnPacket h) override { on = std::move(h); }
+        Result<void> write(ByteView p) override {
+            written.emplace_back(p.begin(), p.end());
+            return {};
+        }
+        std::uint64_t dropped() const noexcept override { return 0; }
+        void from_kernel(const Bytes& p) const { on(p); }   // the namespace's stack sends
+    };
+    Result<void> setup(const std::string& n) override {
+        setups.push_back(n);
+        return {};
+    }
+    Result<std::unique_ptr<IPacketPort>> open_tun(const std::string&, const node::UeTun& t) override {
+        auto port = std::make_unique<Tun>();
+        tuns[t.ifname] = port.get();
+        specs[t.ifname] = t;
+        return std::unique_ptr<IPacketPort>(std::move(port));
+    }
+    void close_tun(const std::string&, const node::UeTun& t) override {
+        tuns.erase(t.ifname);
+        closed.push_back(t.ifname);
+    }
+    Result<void> resolv(const std::string&, ip::Addr dns) override {
+        dnss.push_back(dns);
+        return {};
+    }
+    void teardown(const std::string& n) override { teardowns.push_back(n); }
+    Result<std::uint32_t> exec(const std::string&, const std::vector<std::string>& argv, std::vector<int>) override {
+        execs.push_back(argv);
+        return 77;
+    }
+    std::vector<std::string> setups;
+    std::map<std::string, Tun*> tuns;
+    std::map<std::string, node::UeTun> specs;
+    std::vector<std::string> closed;
+    std::vector<ip::Addr> dnss;
+    std::vector<std::string> teardowns;
+    std::vector<std::vector<std::string>> execs;
+};
+
 struct Net {
-    explicit Net(corestub::Profile p = {})
+    explicit Net(corestub::Profile p = {}, node::IUeNet* ue_net = nullptr)
         : amf(loop, home, kPlmn, std::move(p), ng.b(), upf_port.get(), {127, 0, 0, 9}) {
         home.add(kSupi, uicc::test::sb("465b5ce8b199b49faa5f0a2ee238a6bc"), uicc::test::sb("cd63cb71954a9f4e48a5994e37a02baf"));
         node::UeDeviceConfig uc;
@@ -60,9 +108,12 @@ struct Net {
         uc.nssai = {nas::ie::Snssai{1, std::nullopt, std::nullopt, std::nullopt}};
         uc.imeisv = "8600000000000101";
         uc.seed = 5;
+        if (ue_net != nullptr) {
+            uc.netns = "ksim-ue-1";
+        }
         ue = std::make_unique<node::UeDevice>(loop, events, uc, uicc::test::make_card(), [this](const air::Frame& f) {
             loop.start_timer(1, [this, f] { du.on_frame(f); });
-        }, node::UeTaps{});
+        }, node::UeTaps{}, ue_net);
     }
 
     void start() {
@@ -369,6 +420,90 @@ TEST(Session, Mutant_ignore_backoff_SendsTheRequestWhileTheTimerRuns) {
     EXPECT_TRUE(n.ue->ps_establish(req));
     n.loop.run_until([] { return false; }, n.loop.now() + 1'000);
     EXPECT_EQ(n.amf.smf().requests(), 2);   // the planted fault: the back-off was not honoured
+}
+
+// ---- the TUN data plane (P1 N11) ----------------------------------------------------------
+
+TEST(DataPlane, EachSessionGetsATunWithItsAddressMtuTableAndDns) {
+    FakeUeNet net;
+    {
+        Net n({}, &net);
+        n.register_ue();
+        EXPECT_EQ(net.setups, std::vector<std::string>{"ksim-ue-1"});   // from power on
+        n.establish("internet");
+        n.establish("ims");
+        ASSERT_EQ(net.tuns.size(), 2u);
+        const node::UeTun& a = net.specs.at("pdu1");
+        EXPECT_EQ(a.addr, (ip::Addr{10, 60, 0, 2}));
+        EXPECT_EQ(a.mtu, 1400);
+        EXPECT_EQ(a.table, 101);
+        EXPECT_TRUE(a.main_default);                         // the first session's
+        EXPECT_FALSE(net.specs.at("pdu2").main_default);
+        EXPECT_EQ(net.specs.at("pdu2").table, 102);
+        ASSERT_EQ(net.dnss.size(), 1u);                      // one resolv.conf: the first session's server
+        EXPECT_EQ(net.dnss[0], (ip::Addr{10, 60, 0, 1}));
+        EXPECT_EQ(n.named("ue.dataplane.up").size(), 2u);
+        const auto list = n.ue->ifaces();
+        ASSERT_EQ(list.size(), 2u);
+        EXPECT_EQ(list[0].ifname, "pdu1");
+        ASSERT_TRUE(n.ue->ps_release(2));
+        ASSERT_TRUE(n.loop.run_until([&] { return net.tuns.size() == 1; }, n.loop.now() + 5'000));
+        EXPECT_EQ(net.closed, std::vector<std::string>{"pdu2"});
+    }
+    EXPECT_EQ(net.teardowns, std::vector<std::string>{"ksim-ue-1"});   // the namespace goes with the device
+}
+
+TEST(DataPlane, APacketFromTheTunCrossesTheNetworkAndItsReplyComesBack) {
+    FakeUeNet net;
+    Net n({}, &net);
+    n.register_ue();
+    n.establish();
+    auto* tun = net.tuns.at("pdu1");
+    // The namespace's own ping: an echo request from the session's address.
+    tun->from_kernel(ip::ping({10, 60, 0, 2}, {10, 60, 0, 1}, 0x4242, 1, 56));
+    ASSERT_TRUE(n.loop.run_until([&] { return !tun->written.empty(); }, n.loop.now() + 2'000));
+    auto reply = ip::decode(tun->written.front());
+    ASSERT_TRUE(reply);
+    EXPECT_EQ(reply->src, (ip::Addr{10, 60, 0, 1}));
+    EXPECT_EQ(reply->dst, (ip::Addr{10, 60, 0, 2}));
+    auto echo = ip::decode_icmp(reply->payload);
+    ASSERT_TRUE(echo && *echo);
+    EXPECT_TRUE((*echo)->reply);
+    EXPECT_EQ((*echo)->id, 0x4242);
+    EXPECT_EQ(n.amf.upf()->stats().echo_replies, 1u);
+    EXPECT_EQ(n.ue->noise(), 0u);
+    // A DN ping reaches the namespace's stack (the TUN), not the device's own answer.
+    ASSERT_TRUE(n.amf.smf().ping_ue(kSupi, 1, 9));
+    ASSERT_TRUE(n.loop.run_until([&] { return tun->written.size() == 2; }, n.loop.now() + 2'000));
+    EXPECT_TRUE(n.named("ue.ping.answered").empty());
+    EXPECT_EQ(n.failures(), "");
+}
+
+TEST(DataPlane, WhatIsNotIpv4FromTheSessionAddressIsNoise) {
+    FakeUeNet net;
+    Net n({}, &net);
+    n.register_ue();
+    n.establish();
+    auto* tun = net.tuns.at("pdu1");
+    Bytes v6(40, 0);
+    v6[0] = 0x60;   // an IPv6 router solicitation's header, say
+    tun->from_kernel(v6);
+    tun->from_kernel(ip::ping({10, 99, 0, 9}, {10, 60, 0, 1}, 1, 1, 8));   // another source
+    n.loop.run_until([] { return false; }, n.loop.now() + 500);
+    EXPECT_EQ(n.ue->noise(), 2u);
+    EXPECT_EQ(n.named("ue.dataplane.noise").size(), 1u);   // the first one is an event
+    EXPECT_EQ(n.amf.upf()->stats().ul_packets, 0u);
+}
+
+TEST(DataPlane, InjectModeHasNoNamespaceAndExecIsRefused) {
+    Net n;
+    n.register_ue();
+    n.establish();
+    EXPECT_FALSE(n.ue->netns_mode());
+    EXPECT_TRUE(n.ue->ifaces().empty());
+    auto x = n.ue->exec({"true"}, {});
+    ASSERT_FALSE(x);
+    EXPECT_EQ(x.error().code, Errc::unsupported);
 }
 
 } // namespace

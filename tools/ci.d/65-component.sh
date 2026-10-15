@@ -23,7 +23,7 @@ command -v tshark >/dev/null || { echo "COMPONENT=SKIP (no tshark)"; exit 77; }
 
 T="$(mktemp -d)"
 trap 'rm -rf "$T"' EXIT
-BLOCK=001010000300001/4
+BLOCK=001010000300001/5
 "$B/ksim-sim/ksim-sim" range init --master "$T/keys/master.key" --kek "$T/keys/kek.key" >/dev/null || exit 1
 "$B/ksim-sim/ksim-sim" range derive --block "$BLOCK" --master "$T/keys/master.key" --kek "$T/keys/kek.key" \
     --out "$T/cards" > "$T/derive.out" || exit 1

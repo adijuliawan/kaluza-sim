@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: LicenseRef-kaluza-sim-private
 //
 // The rtnetlink requests ksim-netd sends (P1 N9; ADR 0009 point 3), written
-// from the kernel's UAPI (linux/rtnetlink.h, if_link.h, if_addr.h): an ipvlan
-// link created straight into a network namespace, an IPv4 address, a link
-// set up, a link deleted. Each builder's output is checked against the bytes
+// from the kernel's UAPI (linux/rtnetlink.h, if_link.h, if_addr.h,
+// fib_rules.h): an ipvlan link created straight into a network namespace, an
+// IPv4 address, a link set up, a link deleted; from P1 N10 for the UE's
+// namespaces a link's MTU, a default route through a link in a table, and a
+// rule sending a source address to a table. Each builder's output is checked against the bytes
 // iproute2 sends for the same request (tests/unit/net/netlink_test.cpp). Rtnl
 // is a NETLINK_ROUTE socket in the calling thread's network namespace that
 // sends one request and waits for its acknowledgement.
@@ -35,6 +37,15 @@ Bytes new_addr_v4(std::uint32_t seq, int ifindex, std::array<std::uint8_t, 4> ad
 Bytes set_link_up(std::uint32_t seq, int ifindex);
 /// RTM_DELLINK, NLM_F_REQUEST|ACK.
 Bytes del_link(std::uint32_t seq, int ifindex);
+/// RTM_NEWLINK, NLM_F_REQUEST|ACK: IFLA_MTU (`ip link set dev X mtu N`).
+Bytes set_mtu(std::uint32_t seq, int ifindex, std::uint32_t mtu);
+/// RTM_NEWROUTE, NLM_F_REQUEST|ACK|CREATE|EXCL: a default IPv4 route through
+/// `oif`, scope link, in `table` (1..255; 254 is main) (`ip route add default dev X table T`).
+Result<Bytes> new_default_route(std::uint32_t seq, int oif, std::uint32_t table);
+/// RTM_NEWRULE, NLM_F_REQUEST|ACK|CREATE|EXCL: from <addr>/32 to `table` (`ip rule add from A table T`).
+Result<Bytes> new_rule_from(std::uint32_t seq, std::array<std::uint8_t, 4> addr, std::uint32_t table);
+/// RTM_DELRULE, NLM_F_REQUEST|ACK: the same rule (`ip rule del from A table T`).
+Result<Bytes> del_rule_from(std::uint32_t seq, std::array<std::uint8_t, 4> addr, std::uint32_t table);
 
 /// The answer to request `seq` in `reply`: 0 for an ACK, a negative errno for
 /// an error, Errc::malformed when the reply is not a netlink error message for it.

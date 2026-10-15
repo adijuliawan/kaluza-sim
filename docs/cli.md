@@ -100,9 +100,9 @@ EVENT_SEQ=48211
 | | `cell-lock <pci>\|off` | Force camping or measurement on one cell (a test aid, not a 3GPP feature) | v1 |
 | | `rlf` | Inject radio link failure on the serving cell | v1 |
 | | `link loss <pct>` · `link delay <ms>` · `link clear` | Per-UE impairments on the KAIR link | v1 |
-| Data plane | `exec <cmd…>` | Run a command inside the UE's netns, e.g. `exec ping -c3 172.30.61.1`, `exec iperf3 -c …`, `exec curl …` | v1 |
+| Data plane | `exec [--] <cmd…>` | Run a command inside the UE's netns as the user, e.g. `exec ping -c3 172.30.61.1`, `exec iperf3 -c …`, `exec curl …`. The words go as they are; the command's output is printed, then `EXIT_CODE=` and `TIMED_OUT=`; a non-zero exit is exit 1, a run past `--timeout` exit 3 (the command killed). Needs the UE's namespace (ksim-netd): in inject mode exit 5 | v1 |
 | | `ping <dst> [--psi N] [-c N] [--interval MS] [--size N]` | Convenience wrapper; prints `SENT=`, `RECEIVED=`, `LOSS_PCT=`, `RTT_AVG_MS=`; no reply at all exits 1. Until the TUN data plane (P1 N11) the device builds the echo requests itself (inject mode) | v1 |
-| | `ifaces` | TUN devices, addresses, MTU, DNS, routes | v1 |
+| | `ifaces` | TUN devices, addresses, MTU, DNS, packet counts, `NOISE=`, and the kernel's own view of the namespace (`KERNEL.<if>.IPV4=`, `KERNEL_IPV6=`); `MODE=netns\|inject` | v1 |
 | Events | `events [--follow] [--filter nas.*] [--since <seq>]` | NDJSON event stream for this UE | v1 |
 | | `wait <event> [--timeout 30s] [--where key=val] [--since <seq>\|--new]` | Block until an event arrives, e.g. `wait nas.reg.accept`, `wait rrc.ho.complete`. It is a long poll over the run's event sequence: by default it also matches events already recorded (`--since 0`, like grepping a log); `--new` matches only events after the call. A procedure verb given `--wait` registers its waiter before it starts, so it cannot miss its own event. On success it prints the event's evidence as KEY=value lines: registration or PDU session state, the assigned IP, the TEID. That is the evidence the log-grep gate rows need ([`verification.md`](verification.md) §6) | v1 |
 | Later | `inactive-status` (v1.x) · `loc` (LPP, Ph2) · `ims register\|call\|hangup` (Ph2) | — | — |

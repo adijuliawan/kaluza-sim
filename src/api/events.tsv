@@ -94,3 +94,8 @@ ran.gtpu.error_indication	29.281 7.3.1	a GTP-U ERROR INDICATION sent or taken; d
 ran.session.setup	38.413 8.2.1.2	PDU SESSION RESOURCE SETUP done for a session (E1, F1 and the UE's DRB); ran_ue, psi, drb, integrity
 ran.session.failure	38.413 8.2.1.2	sessions the gNB could not set up (answered as failed); ran_ue, cause
 ran.session.release	38.413 8.2.2.2	a session's resources released at the CU-CP after the UE's reconfiguration; ran_ue, psi
+ue.netns.up	sim	the UE's namespace is made (ksim-netd: IPv6 off and ping_group_range set before any link is up, lo up); netns
+ue.dataplane.up	sim	a PDU session's TUN is up in the UE's namespace; psi, ifname, ip, mtu, table, netns
+ue.dataplane.down	sim	a PDU session's TUN went with the session; psi, ifname
+ue.dataplane.error	sim	the UE's namespace or a session's TUN could not be made; psi, what
+ue.dataplane.noise	sim	the first uplink packet from a TUN that is not IPv4 from the session's address (dropped and counted; ifaces NOISE has the count); psi, version

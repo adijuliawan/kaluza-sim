@@ -156,14 +156,19 @@ Result<void> AllInOne::build(std::string& why) {
     opt.out_streams = topo_.ng_streams;
     net::SocketSource source;
     if (topo_.netd.enabled) {
-        // The CU-CP's namespace with its address (ADR 0009 point 4); a namespace
-        // left by a run that died is ours, so it is replaced.
         auto c = net::netd::Client::connect(topo_.netd.socket);
         if (!c) {
             why = "ksim-netd: " + std::string(c.error().what) + " at " + topo_.netd.socket;
             return c.error();
         }
         netd_ = std::make_unique<net::netd::Client>(std::move(*c));
+        if (topo_.netd.ues) {
+            ue_net_ = std::make_unique<NetdUeNet>(*netd_, shard_->reactor());
+        }
+    }
+    if (topo_.netd.enabled && topo_.netd.nodes) {
+        // The CU-CP's namespace with its address (ADR 0009 point 4); a namespace
+        // left by a run that died is ours, so it is replaced.
         std::array<std::uint8_t, 4> addr{};
         std::copy(topo_.ng_bind.addr.begin(), topo_.ng_bind.addr.begin() + 4, addr.begin());
         auto up = netd_->setup_node(topo_.netd.netns, topo_.netd.parent, addr, topo_.netd.prefix);
@@ -183,7 +188,7 @@ Result<void> AllInOne::build(std::string& why) {
 
     // N3 (P1 N10): UDP 2152 on the CU-UP's address; with netd, from its own namespace.
     std::unique_ptr<net::UdpSocket> n3;
-    if (topo_.netd.enabled) {
+    if (topo_.netd.enabled && topo_.netd.nodes) {
         auto up = netd_->setup_node(topo_.netd.cuup_netns, topo_.netd.parent, v4_of(topo_.n3_bind), topo_.netd.prefix);
         if (!up && netd_->last_error() == "netd: the namespace exists") {
             (void)netd_->teardown(topo_.netd.cuup_netns);
@@ -296,13 +301,17 @@ Result<void> AllInOne::build(std::string& why) {
         uc.imeisv = c.g->imeisv_tac + c.imsi.substr(9) + "01";
         uc.allow_null_integrity = topo_.allow_null;
         uc.seed = topo_.seed;
+        if (ue_net_) {
+            uc.netns = "ksim-ue-" + std::to_string(i + 1);
+        }
         UeTaps taps;
         taps.rrc = [cap](std::string_view ch, ByteView pdu, const std::string& supi) { cap->rrc(ch, pdu, supi); };
         if (topo_.plain_nas) {
             taps.nas = [cap](bool ul, ByteView plain, const std::string& supi) { cap->nas(ul, plain, supi); };
         }
         ues_.push_back(std::make_unique<UeDevice>(*shard_, events_, std::move(uc), std::move(c.card),
-                                                  [this, i](const air::Frame& f) { ue_to_air(i, f); }, taps));
+                                                  [this, i](const air::Frame& f) { ue_to_air(i, f); }, taps,
+                                                  ue_net_.get()));
         (*dgram)->set_handler([this, i](ByteView payload, const Endpoint&) {
             auto f = air::decode(payload);
             if (!f) {
@@ -366,9 +375,12 @@ void AllInOne::teardown() {
     ng_.reset();
     f1_tap_.reset();
     f1_.reset();
+    ue_net_.reset();   // after the UEs: each took its namespace down
     if (netd_) {
-        (void)netd_->teardown(topo_.netd.cuup_netns);
-        (void)netd_->teardown(topo_.netd.netns);
+        if (topo_.netd.nodes) {
+            (void)netd_->teardown(topo_.netd.cuup_netns);
+            (void)netd_->teardown(topo_.netd.netns);
+        }
         netd_.reset();
     }
 }

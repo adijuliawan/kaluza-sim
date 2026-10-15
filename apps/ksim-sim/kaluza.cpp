@@ -111,7 +111,11 @@ std::optional<std::string> token(const KaluzaApi& api) {
         std::cerr << "ksim-sim: --token-url is https://host[:port]/path\n";
         return std::nullopt;
     }
-    auto secret = read_secret_file(api.cred_dir + "/client-secret");
+    if (api.secret_file.empty() || api.secret_file.find('/') != std::string::npos) {
+        std::cerr << "ksim-sim: --secret-file is a file name inside --cred-dir\n";
+        return std::nullopt;
+    }
+    auto secret = read_secret_file(api.cred_dir + "/" + api.secret_file);
     if (!secret) {
         std::cerr << "ksim-sim: the client secret is missing or readable by others\n";
         return std::nullopt;
@@ -171,9 +175,6 @@ int kaluza_provision(const std::string& first, unsigned count, const std::string
     std::cout << "BATCH_SALT=" << to_hex(*salt) << "\n";
     auto c = client(*u, api, true);
     httplib::Headers h{{"Authorization", "Bearer " + *tok}};
-    if (!replace) {
-        h.emplace("If-None-Match", "*");
-    }
     int failed = 0;
     for (unsigned i = 0; i < count; ++i) {
         const std::string imsi = imsi_at(first, i);
@@ -185,8 +186,28 @@ int kaluza_provision(const std::string& first, unsigned count, const std::string
         std::string body = bundle(imsi, sub->msisdn, kh, oh, profile_for(imsi)).dump();
         wipe(kh);
         wipe(oh);
-        auto res = c->Put(u->path + "/provisioning/v1/subscribers/imsi-" + imsi, h, body, "application/json");
+        const std::string path = u->path + "/provisioning/v1/subscribers/imsi-" + imsi;
+        // A create is If-None-Match: *; a replace needs the stored bundle's ETag (If-Match).
+        httplib::Headers put = h;
+        put.emplace("If-None-Match", "*");
+        if (replace) {
+            auto got = c->Get(path, h);
+            const int gs = got ? got->status : 0;
+            if (gs == 200 && got->has_header("ETag")) {
+                put = h;
+                put.emplace("If-Match", got->get_header_value("ETag"));
+            } else if (gs != 404) {
+                std::cout << "UE_ID=imsi-" << imsi << " STATUS=" << gs << " STEP=read-for-replace\n";
+                ++failed;
+                wipe(body);
+                continue;
+            }
+        }
+        auto res = c->Put(path, put, body, "application/json");
         wipe(body);
+        for (auto& [name, v] : put) {
+            wipe(v);
+        }
         const int status = res ? res->status : 0;
         failed += status == 200 || status == 201 || status == 204 ? 0 : 1;
         std::cout << "UE_ID=imsi-" << imsi << " STATUS=" << status << " PROFILE=" << profile_for(imsi).name

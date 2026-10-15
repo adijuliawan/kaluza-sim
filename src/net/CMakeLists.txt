@@ -8,6 +8,7 @@ add_library(ksim_net STATIC
     sockaddr.cpp
     sctp.cpp
     udp.cpp
+    tun.cpp
     tcp.cpp
     netlink.cpp
     netns.cpp

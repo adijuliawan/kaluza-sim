@@ -6,6 +6,7 @@
 #include <linux/if.h>
 #include <linux/if_addr.h>
 #include <linux/if_link.h>
+#include <linux/fib_rules.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <sys/socket.h>
@@ -125,6 +126,58 @@ Bytes del_link(std::uint32_t seq, int ifindex) {
     Msg m(RTM_DELLINK, kChange, seq);
     ifinfo(m, ifindex, 0, 0);
     return m.done();
+}
+
+Bytes set_mtu(std::uint32_t seq, int ifindex, std::uint32_t mtu) {
+    Msg m(RTM_NEWLINK, kChange, seq);
+    ifinfo(m, ifindex, 0, 0);
+    m.attr32(IFLA_MTU, mtu);
+    return m.done();
+}
+
+Result<Bytes> new_default_route(std::uint32_t seq, int oif, std::uint32_t table) {
+    if (oif <= 0 || table == 0 || table > 255) {
+        return make_error(Errc::invalid_argument, table, "netlink: a route needs a link and a table 1..255");
+    }
+    Msg m(RTM_NEWROUTE, kCreate, seq);
+    rtmsg r{};
+    r.rtm_family = AF_INET;
+    r.rtm_table = static_cast<std::uint8_t>(table);
+    r.rtm_protocol = RTPROT_BOOT;
+    r.rtm_scope = RT_SCOPE_LINK;   // no gateway: the destination is on the link
+    r.rtm_type = RTN_UNICAST;
+    m.raw(&r, sizeof(r));
+    m.attr32(RTA_OIF, static_cast<std::uint32_t>(oif));
+    return m.done();
+}
+
+namespace {
+
+Result<Bytes> rule_from(std::uint16_t type, std::uint16_t flags, std::uint8_t action, std::uint32_t seq,
+                        std::array<std::uint8_t, 4> addr, std::uint32_t table) {
+    if (table == 0 || table > 255) {
+        return make_error(Errc::invalid_argument, table, "netlink: a rule's table is 1..255");
+    }
+    Msg m(type, flags, seq);
+    fib_rule_hdr h{};
+    h.family = AF_INET;
+    h.src_len = 32;
+    h.table = static_cast<std::uint8_t>(table);
+    h.action = action;
+    m.raw(&h, sizeof(h));
+    m.attr(FRA_SRC, addr.data(), 4);
+    return m.done();
+}
+
+} // namespace
+
+Result<Bytes> new_rule_from(std::uint32_t seq, std::array<std::uint8_t, 4> addr, std::uint32_t table) {
+    return rule_from(RTM_NEWRULE, kCreate, FR_ACT_TO_TBL, seq, addr, table);
+}
+
+Result<Bytes> del_rule_from(std::uint32_t seq, std::array<std::uint8_t, 4> addr, std::uint32_t table) {
+    // iproute2 leaves the action unset on a delete; the kernel matches on the rest.
+    return rule_from(RTM_DELRULE, kChange, FR_ACT_UNSPEC, seq, addr, table);
 }
 
 Result<int> ack_of(ByteView reply, std::uint32_t seq) {

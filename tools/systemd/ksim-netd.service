@@ -19,9 +19,11 @@ Restart=on-failure
 RestartSec=2
 # No ProtectSystem, ProtectHome or PrivateTmp: each would give the service a
 # mount namespace of its own, and its /run/netns mounts would not show on the
-# host (ip netns, the gc check). The capability set is the limit instead.
+# host (ip netns, the gc check). The capability set is the limit instead:
+# NET_ADMIN and SYS_ADMIN for namespaces, links, TUNs and mounts; SETUID and
+# SETGID so exec (P1 N11) can drop to the asking user, which it always does.
 NoNewPrivileges=yes
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_SETUID CAP_SETGID
 AmbientCapabilities=
 
 [Install]

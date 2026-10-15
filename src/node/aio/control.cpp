@@ -7,7 +7,16 @@
 
 #include <fmt/format.h>
 
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <algorithm>
+#include <csignal>
+#include <regex>
+#include <sstream>
 #include <cctype>
 #include <exception>
 #include <optional>
@@ -86,6 +95,134 @@ std::optional<nas::ie::Snssai> snssai_arg(const Request& req, std::string& bad) 
         return std::nullopt;
     }
     return s;
+}
+
+/// A command run inside a UE's namespace (P1 N11): its exit, output and errors.
+struct ExecOut {
+    Exit exit = Exit::ok;   // of the run itself: unknown UE, inject mode, netd refused, …
+    std::string cause;
+    std::string subject;
+    int status = -1;        // the command's wait status
+    bool timed_out = false;
+    std::string out;
+    std::string err;
+    int code() const noexcept { return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0); }
+};
+
+constexpr std::size_t kExecOutputCap = std::size_t{256} * 1024;
+
+ExecOut run_exec(AllInOne& aio, const std::string& sel, const std::vector<std::string>& argv, std::chrono::milliseconds timeout) {
+    ExecOut r;
+    int in[2] = {-1, -1};
+    int out[2] = {-1, -1};
+    int err[2] = {-1, -1};
+    int st[2] = {-1, -1};
+    if (::pipe2(in, O_CLOEXEC) != 0 || ::pipe2(out, O_CLOEXEC) != 0 || ::pipe2(err, O_CLOEXEC) != 0 ||
+        ::pipe2(st, O_CLOEXEC) != 0) {
+        for (int f : {in[0], in[1], out[0], out[1], err[0], err[1], st[0], st[1]}) {
+            if (f >= 0) {
+                ::close(f);
+            }
+        }
+        r.exit = Exit::internal;
+        r.cause = "pipes";
+        return r;
+    }
+    ::close(in[1]);   // the command reads end-of-file at once
+    struct Started {
+        Exit exit = Exit::ok;
+        std::string cause;
+        std::string subject;
+        std::uint32_t pid = 0;
+    };
+    const std::vector<int> pass{in[0], out[1], err[1], st[1]};
+    auto started = aio.call<Started>([&aio, sel, argv, pass]() -> Started {
+        UeDevice* ue = aio.ue(sel);
+        if (ue == nullptr) {
+            return {Exit::unknown, "no such UE", "", 0};
+        }
+        if (!ue->netns_mode()) {
+            return {Exit::capability, "the UE runs in inject mode: exec needs ksim-netd (topology netd: ues)", ue->subject(), 0};
+        }
+        auto pid = ue->exec(argv, pass);
+        if (!pid) {
+            return {Exit::wrong_state, pid.error().what, ue->subject(), 0};
+        }
+        return {Exit::ok, "", ue->subject(), *pid};
+    });
+    for (int f : pass) {
+        ::close(f);   // netd holds its own copies
+    }
+    if (!started || started->exit != Exit::ok) {
+        for (int f : {out[0], err[0], st[0]}) {
+            ::close(f);
+        }
+        r.exit = started ? started->exit : Exit::abort;
+        r.cause = started ? started->cause : "the node did not answer in time";
+        r.subject = started ? started->subject : "";
+        return r;
+    }
+    r.subject = started->subject;
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    pollfd fds[2] = {{out[0], POLLIN, 0}, {err[0], POLLIN, 0}};
+    int open_fds = 2;
+    std::array<char, 4096> buf{};
+    while (open_fds > 0) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+        if (left.count() <= 0) {
+            r.timed_out = true;
+            ::kill(-static_cast<pid_t>(started->pid), SIGKILL);   // the helper leads the command's process group
+            break;
+        }
+        if (::poll(fds, 2, static_cast<int>(std::min<long long>(left.count(), 1000))) < 0 && errno != EINTR) {
+            break;
+        }
+        for (int i = 0; i < 2; ++i) {
+            if (fds[i].fd < 0 || (fds[i].revents & (POLLIN | POLLHUP | POLLERR)) == 0) {
+                continue;
+            }
+            const ssize_t n = ::read(fds[i].fd, buf.data(), buf.size());
+            if (n <= 0) {
+                fds[i].fd = -1;
+                --open_fds;
+                continue;
+            }
+            std::string& to = i == 0 ? r.out : r.err;
+            if (to.size() < kExecOutputCap) {
+                to.append(buf.data(), static_cast<std::size_t>(n));
+            }
+        }
+    }
+    pollfd sp{st[0], POLLIN, 0};
+    if (::poll(&sp, 1, r.timed_out ? 1000 : 5000) > 0) {
+        int status = -1;
+        if (::read(st[0], &status, sizeof(status)) == static_cast<ssize_t>(sizeof(status))) {
+            r.status = status;
+        }
+    }
+    for (int f : {out[0], err[0], st[0]}) {
+        ::close(f);
+    }
+    return r;
+}
+
+/// iputils ping's summary: "3 packets transmitted, 3 received, …" and "rtt min/avg/max/mdev = a/b/c/d ms".
+void add_ping_summary(Reply& r, const std::string& out) {
+    std::smatch m;
+    static const std::regex counts(R"((\d+) packets transmitted, (\d+) (?:packets )?received)");
+    static const std::regex rtt(R"(= ([0-9.]+)/([0-9.]+)/([0-9.]+)/[0-9.]+ ms)");
+    if (std::regex_search(out, m, counts)) {
+        const long sent = std::stol(m[1]);
+        const long got = std::stol(m[2]);
+        r.set("SENT", static_cast<std::int64_t>(sent));
+        r.set("RECEIVED", static_cast<std::int64_t>(got));
+        r.set("LOSS_PCT", static_cast<std::int64_t>(sent == 0 ? 100 : (sent - got) * 100 / sent));
+    }
+    if (std::regex_search(out, m, rtt)) {
+        r.set("RTT_MIN_MS", m[1].str());
+        r.set("RTT_AVG_MS", m[2].str());
+        r.set("RTT_MAX_MS", m[3].str());
+    }
 }
 
 void add_pairs(Reply& r, const std::vector<std::pair<std::string, std::string>>& kv) {
@@ -178,7 +315,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         r.set("ASN1C", build::kAsn1cPin);
         return r;
     });
-    server.get("/v1/capabilities", [](const Request&) {
+    server.get("/v1/capabilities", [&t](const Request&) {
         // What P1 N8 serves; the rest of cli.md says 0 until its milestone.
         Reply r;
         r.set("CAP.NAS_MM", "1");
@@ -187,7 +324,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         r.set("CAP.PING", "inject");
         r.set("CAP.SMS_NAS", "0");
         r.set("CAP.SUCI", "null");
-        r.set("CAP.NETNS", "0");
+        r.set("CAP.NETNS", t.netd.enabled && t.netd.ues ? "1" : "0");   // the TUN data plane (P1 N11)
         r.set("CAP.FAULTS", "0");
         return r;
     });
@@ -388,12 +525,153 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         p.count = static_cast<int>(std::clamp<std::uint64_t>(number(req.arg("count"), 3), 1, 1000));
         p.interval = static_cast<Millis>(std::clamp<std::uint64_t>(number(req.arg("interval_ms"), 1000), 10, 60'000));
         p.size = static_cast<std::size_t>(std::min<std::uint64_t>(number(req.arg("size"), 56), 8952));
+        // With the TUN data plane the namespace's own ping goes (iputils, as the user).
+        const std::string sel = req.params.at("sel");
+        auto mode = aio.call<std::pair<bool, std::string>>([&aio, sel, psi = p.psi]() -> std::pair<bool, std::string> {
+            UeDevice* ue = aio.ue(sel);
+            if (ue == nullptr || !ue->netns_mode()) {
+                return {false, ""};
+            }
+            for (const auto& i : ue->ifaces()) {
+                if (psi == 0 || i.psi == psi) {
+                    return {true, i.ifname};
+                }
+            }
+            return {true, ""};
+        });
+        if (mode && mode->first) {
+            if (mode->second.empty()) {
+                return Reply::fail(Exit::wrong_state, "no PDU session interface to ping from");
+            }
+            std::vector<std::string> argv{"ping", "-c", std::to_string(p.count), "-i",
+                                          fmt::format("{:.3f}", static_cast<double>(p.interval) / 1000.0), "-s",
+                                          std::to_string(p.size), "-W", "2", "-I", mode->second};
+            if (req.arg("df") == "1") {
+                argv.insert(argv.end(), {"-M", "do"});   // the MTU probe: no fragmentation
+            }
+            argv.push_back(ipv4_text(*dst));
+            const auto budget = std::chrono::milliseconds(static_cast<long long>(p.count) * p.interval + 5'000);
+            ExecOut x = run_exec(aio, sel, argv, budget);
+            if (x.exit != Exit::ok) {
+                return Reply::fail(x.exit, x.cause);
+            }
+            Reply r;
+            r.set("UE", x.subject.substr(3));
+            r.set("MODE", "netns");
+            r.set("IFACE", mode->second);
+            add_ping_summary(r, x.out);
+            r.set("EXIT_CODE", static_cast<std::int64_t>(x.code()));
+            if (!r.kv.contains("RECEIVED") || r.kv.value("RECEIVED", std::int64_t{0}) == 0) {
+                r.exit = Exit::failed;
+                r.set("CAUSE", x.timed_out ? "timeout" : "no echo reply");
+            }
+            return r;
+        }
         Reply r = run_ue_command(aio, req,
                                  UeCommand{[p](UeDevice& u) { return u.ping(p); }, {"ue.ping.done"}, {}, {}, "ping"});
+        r.set("MODE", "inject");
         if (r.exit == Exit::ok && r.kv.value("RECEIVED", std::string("0")) == "0" && r.kv.contains("SENT")) {
             r.exit = Exit::failed;   // cli.md §2: no reply at all is a failed ping
             r.set("CAUSE", "no echo reply");
         }
+        return r;
+    });
+
+    // ---- the TUN data plane (P1 N11) ----
+    server.post("/v1/ue/:sel/exec", [&aio](const Request& req) {
+        std::vector<std::string> argv;
+        if (req.body.is_object() && req.body.contains("argv") && req.body["argv"].is_array()) {
+            for (const auto& a : req.body["argv"]) {
+                if (!a.is_string()) {
+                    return Reply::fail(Exit::usage, "exec takes words");
+                }
+                argv.push_back(a.get<std::string>());
+            }
+        }
+        if (argv.empty() || argv.size() > 16) {
+            return Reply::fail(Exit::usage, "exec <command> [args…] (16 words at most)");
+        }
+        const auto timeout = std::min(std::chrono::milliseconds(number(req.arg("timeout_ms"), 30'000)), kMaxWait);
+        ExecOut x = run_exec(aio, req.params.at("sel"), argv, timeout);
+        if (x.exit != Exit::ok) {
+            Reply r = Reply::fail(x.exit, x.cause);
+            if (!x.subject.empty()) {
+                r.set("UE", x.subject.substr(3));
+            }
+            return r;
+        }
+        Reply r;
+        r.set("UE", x.subject.substr(3));
+        r.set("EXIT_CODE", static_cast<std::int64_t>(x.code()));
+        r.set("TIMED_OUT", x.timed_out ? "1" : "0");
+        r.set("STDOUT", x.out);
+        r.set("STDERR", x.err);
+        if (x.timed_out) {
+            r.exit = Exit::timeout;
+        } else if (x.code() != 0) {
+            r.exit = Exit::failed;
+        }
+        return r;
+    });
+    server.get("/v1/ue/:sel/ifaces", [&aio](const Request& req) {
+        const std::string sel = req.params.at("sel");
+        auto s = aio.call<Reply>([&aio, sel] {
+            UeDevice* ue = aio.ue(sel);
+            if (ue == nullptr) {
+                return Reply::fail(Exit::unknown, "no such UE");
+            }
+            Reply r;
+            r.set("UE", ue->subject().substr(3));
+            r.set("MODE", ue->netns_mode() ? "netns" : "inject");
+            if (ue->netns_mode()) {
+                r.set("NETNS", ue->netns_up() ? ue->config().netns : "");
+            }
+            const auto list = ue->ifaces();
+            r.set("IFACES", static_cast<std::int64_t>(list.size()));
+            for (const auto& i : list) {
+                const std::string k = "IF." + i.ifname;
+                r.set(k + ".PSI", static_cast<std::int64_t>(i.psi));
+                r.set(k + ".IP", ipv4_text(i.addr));
+                r.set(k + ".MTU", static_cast<std::int64_t>(i.mtu));
+                r.set(k + ".DNS", i.dns ? ipv4_text(*i.dns) : "");
+                r.set(k + ".UL_PACKETS", static_cast<std::int64_t>(i.ul));
+                r.set(k + ".DL_PACKETS", static_cast<std::int64_t>(i.dl));
+            }
+            r.set("NOISE", static_cast<std::int64_t>(ue->noise()));
+            return r;
+        });
+        if (!s) {
+            return unsound();
+        }
+        Reply r = *s;
+        if (r.exit != Exit::ok || r.kv.value("MODE", std::string()) != "netns" || r.kv.value("NETNS", std::string()).empty()) {
+            return r;
+        }
+        // The kernel's own view of the namespace: every address on every link.
+        ExecOut x = run_exec(aio, sel, {"ip", "-o", "addr", "show"}, std::chrono::seconds(10));
+        if (x.exit != Exit::ok || x.code() != 0) {
+            r.set("KERNEL", "unavailable");
+            return r;
+        }
+        std::int64_t v4 = 0;
+        std::int64_t v6 = 0;
+        std::istringstream lines(x.out);
+        std::string line;
+        static const std::regex addr(R"(^\d+:\s+(\S+)\s+(inet6?)\s+(\S+))");
+        while (std::getline(lines, line)) {
+            std::smatch m;
+            if (!std::regex_search(line, m, addr) || m[1] == "lo") {
+                continue;
+            }
+            if (m[2] == "inet") {
+                ++v4;
+                r.set("KERNEL." + m[1].str() + ".IPV4", m[3].str());
+            } else {
+                ++v6;
+            }
+        }
+        r.set("KERNEL_IPV4", v4);
+        r.set("KERNEL_IPV6", v6);   // the UE's tunnels must hold none (L13)
         return r;
     });
 

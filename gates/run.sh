@@ -19,6 +19,8 @@
 #                 topology's secrets and ~/.kaluza-sim/secrets/range-master.key);
 #                 CI passes throwaway ones
 #   KSIM_LAB=1    pass --lab (kaluza-uesim only; the guard enforces it)
+#   KSIM_TOPOLOGY_FILE
+#                 a topology instead of the core's (the privileged netns hook writes one)
 
 set -u
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -63,7 +65,7 @@ extra="--plain-nas"
 [ -n "${KSIM_KEK:-}" ] && extra="$extra --kek $KSIM_KEK"
 [ "${KSIM_LAB:-0}" = 1 ] && extra="$extra --lab"
 # shellcheck disable=SC2086
-"$KSIM" run -c "$ROOT/$KSIM_TOPOLOGY" --run-dir "$RUN" $extra > "$KSIM_RUNS/$core-ksim.out" 2>&1 &
+"$KSIM" run -c "${KSIM_TOPOLOGY_FILE:-$ROOT/$KSIM_TOPOLOGY}" --run-dir "$RUN" $extra > "$KSIM_RUNS/$core-ksim.out" 2>&1 &
 ksim_pid=$!
 i=0
 until grep -q '^CTL=' "$KSIM_RUNS/$core-ksim.out" 2>/dev/null; do

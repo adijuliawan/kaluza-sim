@@ -151,11 +151,13 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         }
         if (y.has("netd")) {
             const Yaml n = y.at("netd");
-            n.only({"socket", "netns", "cuup_netns", "parent", "prefix"});
+            n.only({"socket", "netns", "cuup_netns", "parent", "prefix", "nodes", "ues"});
             t.netd.enabled = true;
             t.netd.socket = n.get<std::string>("socket", t.netd.socket);
             t.netd.netns = n.get<std::string>("netns", t.netd.netns);
             t.netd.cuup_netns = n.get<std::string>("cuup_netns", t.netd.cuup_netns);
+            t.netd.nodes = n.get<bool>("nodes", true);
+            t.netd.ues = n.get<bool>("ues", true);
             t.netd.parent = n.get<std::string>("parent", "");
             t.netd.prefix = n.get<std::uint8_t>("prefix", 24);
             if (t.netd.netns.rfind("ksim-", 0) != 0 || t.netd.cuup_netns.rfind("ksim-", 0) != 0 ||

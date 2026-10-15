@@ -9,8 +9,12 @@
 // session commands (establish, release, list) and the inject-mode ping: ICMP
 // echo requests built by the device and carried on the session's DRB, the
 // replies matched and counted, and an echo request to the UE's address
-// answered (the TUN data plane is N11). Everything runs on the device's
-// executor; the node posts commands to it.
+// answered. N11 adds the TUN data plane: given an IUeNet, the device has a
+// namespace of its own from power on, a TUN per active session (uplink packets
+// from it checked for the session's address, others counted as noise and
+// dropped; downlink packets written to it), the session's DNS server as the
+// namespace's resolv.conf, and commands run inside it. Everything runs on the
+// device's executor; the node posts commands to it.
 
 #pragma once
 
@@ -26,6 +30,7 @@
 
 #include "codec/air/kair.hpp"
 #include "codec/ip/ipv4.hpp"
+#include "node/ue/dataplane.hpp"
 #include "codec/nas/ie/ie.hpp"
 #include "platform/event.hpp"
 #include "platform/executor.hpp"
@@ -48,6 +53,18 @@ struct UeDeviceConfig {
     std::string imeisv;                       // 16 digits
     bool allow_null_integrity = false;        // D1: the bisect switch only
     std::uint64_t seed = 0;
+    std::string netns;                        // with an IUeNet: "ksim-ue-<index>"
+};
+
+/// A session's interface as `ifaces` shows it.
+struct UeIface {
+    std::string ifname;
+    std::uint8_t psi = 0;
+    ip::Addr addr{};
+    std::uint16_t mtu = 0;
+    std::optional<ip::Addr> dns;
+    std::uint64_t ul = 0;
+    std::uint64_t dl = 0;
 };
 
 /// An inject-mode ping (cli.md §3 ping): `count` echo requests `interval` apart,
@@ -69,8 +86,9 @@ struct UeTaps {
 
 class UeDevice {
 public:
+    /// `net`: the system's side of the TUN data plane (none: inject mode).
     UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::os::Card> card,
-             std::function<void(air::Frame)> to_air, const UeTaps& taps);
+             std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net = nullptr);
     ~UeDevice();
     UeDevice(const UeDevice&) = delete;
     UeDevice& operator=(const UeDevice&) = delete;
@@ -86,6 +104,14 @@ public:
     Result<void> ps_release(std::uint8_t psi);
     Result<void> ping(const PingRequest& p);
     std::vector<proc::ue::SessionInfo> sessions() const { return sm_->sessions(); }
+    /// The TUN data plane: whether the UE has a namespace, its interfaces, the
+    /// uplink packets dropped as noise (not IPv4 from the session's address).
+    bool netns_mode() const noexcept { return net_ != nullptr; }
+    bool netns_up() const noexcept { return netns_up_; }
+    std::vector<UeIface> ifaces() const;
+    std::uint64_t noise() const noexcept { return noise_; }
+    /// Starts argv inside the UE's namespace (see IUeNet::exec). Errc::unsupported in inject mode.
+    Result<std::uint32_t> exec(const std::vector<std::string>& argv, std::vector<int> fds);
 
     const UeDeviceConfig& config() const noexcept { return cfg_; }
     std::string subject() const { return "ue:imsi-" + cfg_.supi; }
@@ -108,8 +134,20 @@ private:
         std::optional<TimerId> timer;
     };
 
+    struct Tun {
+        UeTun spec;
+        std::unique_ptr<IPacketPort> port;
+        std::optional<ip::Addr> dns;
+        std::uint64_t ul = 0;
+        std::uint64_t dl = 0;
+    };
+
     void poll_registration(int left);
     void on_dl_ip(std::uint8_t psi, Bytes packet);
+    void on_ul_ip(std::uint8_t psi, ByteView packet);
+    void session_up(const proc::ue::SessionInfo& s);
+    void session_down(std::uint8_t psi);
+    Result<void> ensure_netns();
     void ping_next();
     void ping_done(const char* why);
 
@@ -126,6 +164,10 @@ private:
     std::uint16_t ping_id_ = 0;
     std::uint64_t dl_packets_ = 0;
     std::uint64_t ul_packets_ = 0;
+    IUeNet* net_ = nullptr;
+    bool netns_up_ = false;
+    std::map<std::uint8_t, Tun> tuns_;   // by PSI
+    std::uint64_t noise_ = 0;
     bool powered_ = false;
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };

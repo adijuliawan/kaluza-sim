@@ -403,6 +403,7 @@ static int run_main(int argc, char** argv) {
         c->add_option("--udr-url", api.udr_url, "kaluza: the UDR provisioning listener (https://host:port)");
         c->add_option("--resolve", resolve, "kaluza: host=address, as curl --resolve (repeatable)");
         c->add_option("--cred-dir", api.cred_dir, "kaluza: the provisioning credentials' directory");
+        c->add_option("--secret-file", api.secret_file, "kaluza: the client secret's file name in --cred-dir");
         c->add_flag("--token-mtls", api.token_mtls, "kaluza: the client certificate on the token request too");
     }
     prov_cmd->add_option("--master", master, "the range master file")->required();

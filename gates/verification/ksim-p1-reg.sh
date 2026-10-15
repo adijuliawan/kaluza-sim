@@ -38,7 +38,9 @@ row amf-ueransim.012 '^ea=[0-9] ia=[1-3]$' \
     "ea=$(printf '%s\n' "$smc" | kv EA) ia=$(printf '%s\n' "$smc" | kv IA)"
 
 # The REGISTRATION REQUEST's SUCI in the Uu capture: scheme 0 and the MSIN.
-suci=$(tshark_fields "$RUN/uu.pcapng" 'nas-5gs.mm.message_type == 0x41' \
+# Frames are this UE's by their comment (the run's other gates use other UEs).
+mine="frame.comment contains \"$supi\""
+suci=$(tshark_fields "$RUN/uu.pcapng" "nas-5gs.mm.message_type == 0x41 && $mine" \
     nas-5gs.mm.suci.scheme_id nas-5gs.mm.suci.msin | head -n 1 | tr '\t' ' ')
 row ksim-p1.reg-null-suci "^0 $msin\$" "$suci"
 
@@ -52,8 +54,8 @@ row ksim-p1.as-smc-nia2 '^alg=nia2/nea2 integrity_failures=none$' \
 # dissects the IE with its EPS routine) against the identity type of the
 # SECURITY MODE COMPLETE's first identity, its IMEISV IE (5); a REGISTRATION
 # REQUEST in the NAS message container brings a second one.
-asked=$(tshark_fields "$RUN/uu.pcapng" 'nas-5gs.mm.message_type == 0x5d' nas-eps.emm.imeisv_req | head -n 1 | cut -d, -f1)
-sent=$(tshark_fields "$RUN/uu.pcapng" 'nas-5gs.mm.message_type == 0x5e' nas-5gs.mm.type_id | head -n 1 | cut -d, -f1)
+asked=$(tshark_fields "$RUN/uu.pcapng" "nas-5gs.mm.message_type == 0x5d && $mine" nas-eps.emm.imeisv_req | head -n 1 | cut -d, -f1)
+sent=$(tshark_fields "$RUN/uu.pcapng" "nas-5gs.mm.message_type == 0x5e && $mine" nas-5gs.mm.type_id | head -n 1 | cut -d, -f1)
 case "$asked" in 1) want='^asked=1 sent=5$' ;; *) want='^asked=0 sent=$' ;; esac
 row ksim-p1.imeisv "$want" "asked=${asked:-0} sent=$sent"
 

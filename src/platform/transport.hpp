@@ -99,6 +99,19 @@ public:
     virtual std::uint64_t dropped() const noexcept = 0;
 };
 
+/// A packet port (P1 N11): a UE session's TUN device, or an in-memory one in
+/// tests. One IP packet per call each way.
+class IPacketPort {
+public:
+    using OnPacket = std::function<void(ByteView packet)>;
+
+    virtual ~IPacketPort() = default;
+    virtual void set_handler(OnPacket on_packet) = 0;
+    /// Best effort: a packet the device cannot take is dropped and counted.
+    virtual Result<void> write(ByteView packet) = 0;
+    virtual std::uint64_t dropped() const noexcept = 0;
+};
+
 class IStream {
 public:
     using OnData = std::function<void(ByteView data)>;

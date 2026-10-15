@@ -21,6 +21,13 @@ Each UE gets a netns `ksim-ue-<n>`. It is created by `ksim-netd`, the privileged
 - **Host-noise visibility:** a counter and event for RS, MLD and ND, so a gate can name why a UE left CM-IDLE.
 - **Applications** run inside the UE: `ksim-ctl ue <n> exec ping|iperf3|curl …` ([`cli.md`](cli.md)).
 
+**As built in P1 N11** (rows KS-PLAT-B25, B26; not yet run on a real kernel, row KS-PLAT-G7):
+- `ksim-netd` does the system's part: `setup_ue` (IPv6 off in `all` and `default` and `ping_group_range` open, written before any link is up, then lo), `tun` (the device opened inside the namespace, MTU, address /32, up, a default route in table 100 + PSI and `ip rule from <addr>`, the first session also the main default route), `tun_down`, `resolv`, and `exec` as the asking user. ksim takes the TUN's descriptor and reads it on its reactor; it never joins a namespace. The farm uses netd's requests instead of a socket per namespace.
+- The default route and the resolv.conf go to the first session, not yet the persona's preferred DNN (personas are N15).
+- IPv6 sessions are v1.x, so P1's namespaces have IPv6 off in all cases. The noise counter counts any uplink packet that is not IPv4 from the session's address; with IPv6 off before link-up it stays 0.
+- A run without netd has no namespaces: its UEs run in inject mode (N10), where ksim builds the echo requests itself; `exec` is refused there.
+- The topology says what netd makes: `netd: {nodes: true|false, ues: true|false}` (the privileged CI hook runs the UEs in namespaces and the nodes on loopback beside the stub).
+
 ## 2. The v1 path (user space, fidelity)
 
 **Uplink:**

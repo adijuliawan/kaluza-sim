@@ -37,6 +37,31 @@ TEST(Netlink, AddressUpAndDeleteAreWhatIproute2Sends) {
     EXPECT_EQ(to_hex(del_link(kSeq, 1)), "2000000011000500d506d06a0000000000000000010000000000000000000000");
 }
 
+// P1 N10, the UE's namespaces; the same method, sequence number 0x6ad02004:
+//   ip link set dev lo mtu 1400
+//   ip route add default dev lo table 101       ip route add default dev lo
+//   ip rule add from 10.45.0.2 table 101        ip rule del from 10.45.0.2 table 101
+constexpr std::uint32_t kSeq2 = 0x6ad02004;
+
+TEST(Netlink, MtuRoutesAndRulesAreWhatIproute2Sends) {
+    EXPECT_EQ(to_hex(set_mtu(kSeq2, 1, 1400)), "28000000100005000420d06a00000000000000000100000000000000000000000800040078050000");
+    auto r = new_default_route(kSeq2, 1, 101);
+    ASSERT_TRUE(r);
+    EXPECT_EQ(to_hex(*r), "24000000180005060420d06a00000000020000006503fd01000000000800040001000000");
+    auto main = new_default_route(kSeq2, 1, 254);
+    ASSERT_TRUE(main);
+    EXPECT_EQ(to_hex(*main), "24000000180005060420d06a0000000002000000fe03fd01000000000800040001000000");
+    auto add = new_rule_from(kSeq2, {10, 45, 0, 2}, 101);
+    ASSERT_TRUE(add);
+    EXPECT_EQ(to_hex(*add), "24000000200005060420d06a00000000020020006500000100000000080002000a2d0002");
+    auto del = del_rule_from(kSeq2, {10, 45, 0, 2}, 101);
+    ASSERT_TRUE(del);
+    EXPECT_EQ(to_hex(*del), "24000000210005000420d06a00000000020020006500000000000000080002000a2d0002");
+    EXPECT_FALSE(new_default_route(kSeq2, 0, 101));     // no link
+    EXPECT_FALSE(new_default_route(kSeq2, 1, 256));     // a table beyond the header's octet
+    EXPECT_FALSE(new_rule_from(kSeq2, {10, 45, 0, 2}, 0));
+}
+
 TEST(Netlink, BadIpvlanSpecsAreRefused) {
     EXPECT_FALSE(new_ipvlan(1, Ipvlan{"", 1, 4}));
     EXPECT_FALSE(new_ipvlan(1, Ipvlan{"a-name-too-long-for-ifnamsiz", 1, 4}));

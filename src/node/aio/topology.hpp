@@ -21,9 +21,11 @@
 //   secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek}
 //   peer: {name: stub}                      # free-form pins for the manifest
 //   security: {allow_null: false}            # D1: the bisect switch only
-//   netd: {socket: /run/ksim/netd.sock, netns: ksim-cucp, cuup_netns: ksim-cuup, parent: ens19, prefix: 24}
-//                                            # lab only: NG-C from the CU-CP's own namespace,
-//                                            # N3 from the CU-UP's
+//   netd: {socket: /run/ksim/netd.sock, netns: ksim-cucp, cuup_netns: ksim-cuup, parent: ens19, prefix: 24,
+//          nodes: true, ues: true}
+//                                            # with ksim-netd: NG-C from the CU-CP's own namespace,
+//                                            # N3 from the CU-UP's (nodes); each UE in a namespace
+//                                            # ksim-ue-<index> with a TUN per session (ues, P1 N11)
 
 #pragma once
 
@@ -60,6 +62,8 @@ struct NetdConfig {
     std::string socket = "/run/ksim/netd.sock";
     std::string netns = "ksim-cucp";
     std::string cuup_netns = "ksim-cuup";   // N3's namespace, with n3_bind on its ipvlan
+    bool nodes = true;                      // the CU-CP's and CU-UP's namespaces
+    bool ues = true;                        // the UEs' namespaces and TUNs
     std::string parent;
     std::uint8_t prefix = 24;
 };

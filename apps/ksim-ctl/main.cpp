@@ -12,7 +12,9 @@
 //     ue <sel> ps-list
 //     ue <sel> ps-establish ipv4 [--dnn D] [--sst S [--sd SD]] [--psi N] [--wait DUR]
 //     ue <sel> ps-release <psi>|--all [--wait DUR]
-//     ue <sel> ping <IPv4> [--psi N] [-c N] [--interval MS] [--size N]
+//     ue <sel> ping <IPv4> [--psi N] [-c N] [--interval MS] [--size N] [--df]
+//     ue <sel> ifaces
+//     ue <sel> exec [--] <command> [args…]     (inside the UE's namespace; the command's words verbatim)
 //     ue <sel> wait <event>[,<event>…] [--fail <event>,…] [--where k=v]… [--since N | --new] [--timeout DUR]
 //     ue <sel> events [--since N] [--follow] [--filter PREFIX]
 //     wait <event> … (any subject)      events …
@@ -304,6 +306,9 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
     if (cmd == "ps-list") {
         return call(c, "GET", base + "/ps");
     }
+    if (cmd == "ifaces") {
+        return call(c, "GET", base + "/ifaces");
+    }
     if (cmd == "ps-establish") {
         auto w = wait_flag(f, err);
         if (!w) {
@@ -367,7 +372,7 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
         const long interval = std::strtol(f.get("interval", "1000").c_str(), nullptr, 10);
         body["count"] = std::to_string(count);
         body["interval_ms"] = std::to_string(interval);
-        for (const char* k : {"psi", "size"}) {
+        for (const char* k : {"psi", "size", "df"}) {
             if (f.has(k)) {
                 body[k] = f.get(k);
             }
@@ -380,10 +385,41 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
     return Reply::fail(Exit::capability, "ue " + cmd + " is not in ksim-ctl v0");
 }
 
+/// ue <sel> exec [--] <words…>: the words go as they are; the command's output
+/// is printed raw (stdout, stderr), then EXIT_CODE and TIMED_OUT.
+int exec_command(const Ctx& c, const std::string& ue, std::vector<std::string> words) {
+    if (!words.empty() && words.front() == "--") {
+        words.erase(words.begin());
+    }
+    if (words.empty()) {
+        Reply r = Reply::fail(Exit::usage, "exec <command> [args…]");
+        print(c, r);
+        return static_cast<int>(r.exit);
+    }
+    json body = json::object();
+    body["argv"] = words;
+    const long budget = std::max(1000L, c.timeout_ms - 1000);
+    body["timeout_ms"] = std::to_string(budget);
+    Reply r = call(c, "POST", "/v1/ue/" + encode(ue) + "/exec", body, 2000);
+    if (c.json) {
+        print(c, r);
+        return static_cast<int>(r.exit);
+    }
+    std::cout << r.kv.value("STDOUT", std::string());
+    std::cerr << r.kv.value("STDERR", std::string());
+    r.kv.erase("STDOUT");
+    r.kv.erase("STDERR");
+    print(c, r);
+    return static_cast<int>(r.exit);
+}
+
 int run(const Ctx& c, const std::vector<std::string>& args) {
     if (args.empty()) {
         std::cerr << "usage: ksim-ctl [--run D] [--json] <command> (see cli.md)\n";
         return static_cast<int>(Exit::usage);
+    }
+    if (args.size() >= 3 && args[0] == "ue" && args[2] == "exec") {
+        return exec_command(c, args[1], std::vector<std::string>(args.begin() + 3, args.end()));
     }
     const std::string& verb = args[0];
     const Flags f = parse_flags(args, 1);

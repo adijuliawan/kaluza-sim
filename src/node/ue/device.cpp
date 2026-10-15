@@ -22,9 +22,9 @@ std::string guti_text(const nas::ie::MobileIdentity& g) {
 }
 
 UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::os::Card> card,
-                   std::function<void(air::Frame)> to_air, const UeTaps& taps)
+                   std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net)
     : ex_(ex), cfg_(std::move(cfg)), card_(std::move(card)), transport_(ex, card_.get()), terminal_(transport_),
-      events_(events) {
+      events_(events), net_(cfg_.netns.empty() ? nullptr : net) {
     const std::string subject = "ue:imsi-" + cfg_.supi;
     proc::ue::RrcConfig rc;
     rc.id = subject;
@@ -55,10 +55,12 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     proc::ue::SmConfig sc;
     sc.id = subject;
     proc::ue::SmUpper su;
+    su.up = [this](const proc::ue::SessionInfo& s) { session_up(s); };
     su.down = [this](std::uint8_t psi) {
         if (ping_ && ping_->psi == psi) {
             ping_done("session released");
         }
+        session_down(psi);
     };
     sm_ = std::make_unique<proc::ue::Sm>(ex_, events, sc, [this](const proc::ue::SmUplink& u) { return mm_->send_sm(u); }, su);
 }
@@ -68,6 +70,127 @@ UeDevice::~UeDevice() {
     if (ping_ && ping_->timer) {
         ex_.stop_timer(*ping_->timer);
     }
+    for (auto& [psi, t] : tuns_) {
+        t.port.reset();
+        if (net_ != nullptr) {
+            net_->close_tun(cfg_.netns, t.spec);
+        }
+    }
+    tuns_.clear();
+    if (net_ != nullptr && netns_up_) {
+        net_->teardown(cfg_.netns);
+    }
+}
+
+// ---- the TUN data plane (P1 N11) ---------------------------------------------------------------
+
+Result<void> UeDevice::ensure_netns() {
+    if (net_ == nullptr) {
+        return make_error(Errc::unsupported, 0, "the UE runs in inject mode (no ksim-netd in this run)");
+    }
+    if (netns_up_) {
+        return {};
+    }
+    auto r = net_->setup(cfg_.netns);
+    if (!r) {
+        events_.emit("ue.dataplane.error", subject(), {{"what", std::string("namespace: ") + r.error().what}});
+        return r;
+    }
+    netns_up_ = true;
+    events_.emit("ue.netns.up", subject(), {{"netns", cfg_.netns}});
+    return {};
+}
+
+void UeDevice::session_up(const proc::ue::SessionInfo& s) {
+    if (net_ == nullptr || !s.ipv4 || tuns_.count(s.psi) != 0) {
+        return;
+    }
+    if (!ensure_netns()) {
+        return;
+    }
+    Tun t;
+    t.spec.ifname = "pdu" + std::to_string(s.psi);
+    t.spec.addr = *s.ipv4;
+    t.spec.mtu = s.mtu.value_or(1500);
+    t.spec.table = static_cast<std::uint8_t>(100 + s.psi);
+    t.spec.main_default = tuns_.empty();   // the first session takes the namespace's default route
+    auto port = net_->open_tun(cfg_.netns, t.spec);
+    if (!port) {
+        events_.emit("ue.dataplane.error", subject(), {{"psi", std::to_string(s.psi)}, {"what", port.error().what}});
+        return;
+    }
+    t.port = std::move(*port);
+    const std::uint8_t psi = s.psi;
+    t.port->set_handler([this, alive = alive_, psi](ByteView packet) {
+        if (*alive) {
+            on_ul_ip(psi, packet);
+        }
+    });
+    if (s.dns) {
+        // One resolv.conf per namespace: the first session's server, as a phone uses its default APN's.
+        if (tuns_.empty()) {
+            (void)net_->resolv(cfg_.netns, *s.dns);
+        }
+        t.dns = s.dns;
+    }
+    const std::string ip = fmt::format("{}.{}.{}.{}", t.spec.addr[0], t.spec.addr[1], t.spec.addr[2], t.spec.addr[3]);
+    events_.emit("ue.dataplane.up", subject(),
+                 {{"psi", std::to_string(psi)},
+                  {"ifname", t.spec.ifname},
+                  {"ip", ip},
+                  {"mtu", std::to_string(t.spec.mtu)},
+                  {"table", std::to_string(t.spec.table)},
+                  {"netns", cfg_.netns}});
+    tuns_.emplace(psi, std::move(t));
+}
+
+void UeDevice::session_down(std::uint8_t psi) {
+    auto it = tuns_.find(psi);
+    if (it == tuns_.end()) {
+        return;
+    }
+    it->second.port.reset();   // the device goes with the descriptor
+    net_->close_tun(cfg_.netns, it->second.spec);
+    events_.emit("ue.dataplane.down", subject(), {{"psi", std::to_string(psi)}, {"ifname", it->second.spec.ifname}});
+    tuns_.erase(it);
+}
+
+void UeDevice::on_ul_ip(std::uint8_t psi, ByteView packet) {
+    auto t = tuns_.find(psi);
+    const proc::ue::SessionInfo* s = sm_->session(psi);
+    if (t == tuns_.end() || s == nullptr) {
+        return;
+    }
+    // Only IPv4 from the session's own address goes: anything else the kernel
+    // sends on the device (IPv6, another source) is noise, counted and dropped.
+    if (packet.size() < 20 || (packet[0] >> 4) != 4 ||
+        !std::equal(t->second.spec.addr.begin(), t->second.spec.addr.end(), packet.begin() + 12)) {
+        if (noise_++ == 0) {
+            events_.emit("ue.dataplane.noise", subject(),
+                         {{"psi", std::to_string(psi)}, {"version", std::to_string(packet.empty() ? 0 : packet[0] >> 4)}});
+        }
+        return;
+    }
+    if (rrc_->send_data(psi, s->default_qfi, Bytes(packet.begin(), packet.end()))) {
+        ++ul_packets_;
+        ++t->second.ul;
+    }
+}
+
+std::vector<UeIface> UeDevice::ifaces() const {
+    std::vector<UeIface> out;
+    out.reserve(tuns_.size());
+    for (const auto& [psi, t] : tuns_) {
+        out.push_back(UeIface{t.spec.ifname, psi, t.spec.addr, t.spec.mtu, t.dns, t.ul, t.dl});
+    }
+    return out;
+}
+
+Result<std::uint32_t> UeDevice::exec(const std::vector<std::string>& argv, std::vector<int> fds) {
+    if (auto r = ensure_netns(); !r) {
+        return r.error();
+    }
+    return net_->exec(cfg_.netns, argv, std::move(fds));
 }
 
 void UeDevice::on_frame(const air::Frame& f) { rrc_->on_frame(f); }
@@ -75,6 +198,11 @@ void UeDevice::on_frame(const air::Frame& f) { rrc_->on_frame(f); }
 Result<void> UeDevice::power_on() {
     if (powered_) {
         return make_error(Errc::invalid_argument, 0, "the UE is already on");
+    }
+    if (net_ != nullptr) {
+        if (auto r = ensure_netns(); !r) {
+            return r;
+        }
     }
     powered_ = true;
     mm_->power_on();
@@ -224,6 +352,23 @@ void UeDevice::ping_done(const char* why) {
 
 void UeDevice::on_dl_ip(std::uint8_t psi, Bytes packet) {
     ++dl_packets_;
+    if (auto t = tuns_.find(psi); t != tuns_.end()) {
+        // The TUN data plane: the namespace's stack answers and receives;
+        // only a reply to ksim's own inject ping is kept back.
+        bool ours = false;
+        if (ping_ && ping_->psi == psi) {
+            auto p = ip::decode(packet);
+            if (p && p->protocol == ip::kIcmp) {
+                auto e = ip::decode_icmp(p->payload);
+                ours = e && *e && (*e)->reply && (*e)->id == ping_->id;
+            }
+        }
+        if (!ours) {
+            ++t->second.dl;
+            (void)t->second.port->write(packet);
+            return;
+        }
+    }
     auto p = ip::decode(packet);
     if (!p || p->protocol != ip::kIcmp) {
         return;
@@ -302,6 +447,10 @@ std::vector<std::pair<std::string, std::string>> UeDevice::status() const {
         out.emplace_back("T3512_S", std::to_string(*t / 1000));
     }
     out.emplace_back("PDU_SESSIONS", std::to_string(sm_->sessions().size()));
+    out.emplace_back("DATA_PLANE", net_ != nullptr ? "netns" : "inject");
+    if (net_ != nullptr) {
+        out.emplace_back("NETNS", netns_up_ ? cfg_.netns : "");
+    }
     out.emplace_back("UL_PACKETS", std::to_string(ul_packets_));
     out.emplace_back("DL_PACKETS", std::to_string(dl_packets_));
     return out;
