@@ -552,6 +552,24 @@ def build_local_l3() -> tuple[list[dict], list[dict], Counter]:
     return nas_rows, sms_rows, skipped
 
 
+def open5gs_nas() -> list[dict]:
+    """P1 N19: downlink NAS the Open5GS fork encoded in kaluza-sim's control runs
+    (tests/vectors/sources/open5gs-nas.tsv, written by tools/open5gs_vectors.py)."""
+    src = ROOT / "tests" / "vectors" / "sources" / "open5gs-nas.tsv"
+    if not src.is_file():
+        return []
+    lines = [ln for ln in src.open() if not ln.startswith("#") and ln.strip()]
+    out = []
+    for r in csv.DictReader(lines, delimiter="\t"):
+        out.append({"id": r["id"], "proto": "nas", "pdu": r["pdu"], "octets": r["octets"], "sha256": r["sha256"],
+                    "producer": f"Open5GS fork 741c29d8d, its AMF or SMF ({r['run']})", "direction": r["direction"],
+                    "same_compiler": "no", "source": f"kaluza-sim:{r['run']}/uu.pcapng (sha256 {r['capture_sha256'][:16]})",
+                    "locator": r["locator"],
+                    "licence": "protocol data captured from an Open5GS run (the fork is AGPL-3.0; none of its code is copied)",
+                    "hex": r["hex"]})
+    return out
+
+
 def render(rows: list[dict], fields: list[str], header: str) -> str:
     buf = io.StringIO()
     buf.write(header + "\n")
@@ -574,6 +592,7 @@ def main() -> None:
     if "ngap" in by_proto:
         by_proto["nas"], nas_excluded = nas_from_ngap(by_proto["ngap"])
         excluded += nas_excluded
+        by_proto["nas"] += open5gs_nas()
         files[ROOT / "tests" / "vectors" / "nas" / "index.tsv"] = render(
             by_proto["nas"], FIELDS, "# NAS-PDUs carried in the NGAP corpus (tools/corpus_ingest.py); the producer "
                                      "is the NGAP vector's. Do not edit.")
