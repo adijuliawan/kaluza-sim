@@ -134,12 +134,13 @@ TEST(Mm, Clause5_4_1_3_3_ARetransmittedChallengeIsAnsweredFromTheStoredResStar) 
     r.ue.register_initial();
     ASSERT_TRUE(r.run_until([&] { return r.named("nas.auth.response").size() == 1; }, 5'000));
     const std::uint64_t apdus = r.terminal.apdus();
+    ASSERT_TRUE(r.run_until([&] { return r.named("nas.auth.response").size() == 2; }, 30'000));
+    EXPECT_EQ(r.terminal.apdus(), apdus);   // the USIM was not asked again (N12 writes EF.5GS3GPPLOCI later, at the accept)
     ASSERT_TRUE(r.run_until([&] { return r.ue.state() == MmState::registered_normal_service; }, 30'000));
     EXPECT_EQ(r.failures(), "");
     const auto responses = r.named("nas.auth.response");
     ASSERT_EQ(responses.size(), 2u);
     EXPECT_EQ(field(responses[1], "stored"), "1");
-    EXPECT_EQ(r.terminal.apdus(), apdus);   // the USIM was not asked again
     EXPECT_EQ(r.amf.challenges(), 1);
 }
 

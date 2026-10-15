@@ -18,8 +18,10 @@
 //     ue <sel> wait <event>[,<event>…] [--fail <event>,…] [--where k=v]… [--since N | --new] [--timeout DUR]
 //     ue <sel> events [--since N] [--follow] [--filter PREFIX]
 //     wait <event> … (any subject)      events …
-//     gnb <name> ue-list | amf-list
-//     stub [release --ue SUPI --psi N [--cause C] | ping-ue --ue SUPI --psi N [--seq N]]   (--socket <stub ctl>)
+//     gnb <name> ue-list | amf-list | ue-release <ue sel> [--cause C] | restart
+//     ue <sel> service-request [--wait DUR]
+//     stub [release --ue SUPI --psi N [--cause C] | ping-ue --ue SUPI --psi N [--seq N]
+//           | deregister --ue SUPI [--rereg] | restart | t3512 --seconds N]   (--socket <stub ctl>)
 //
 // <sel> is imsi-…, a farm index, group:<name> or all; a group prints one block
 // per UE, separated by a blank line. Output is KEY=value lines (--json: one
@@ -138,7 +140,7 @@ struct Flags {
 Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
     static const std::vector<std::string> valued{"wait", "timeout", "where", "since", "fail", "filter", "cause",
                                                  "dnn", "sst", "sd", "psi", "count", "interval", "size", "type", "ue",
-                                                 "seq"};
+                                                 "seq", "seconds"};
     Flags f;
     for (std::size_t i = from; i < args.size(); ++i) {
         const std::string& a = args[i];
@@ -306,6 +308,15 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
     if (cmd == "ps-list") {
         return call(c, "GET", base + "/ps");
     }
+    if (cmd == "service-request") {
+        auto w = wait_flag(f, err);
+        if (!w) {
+            return err;
+        }
+        json body = json::object();
+        body["wait_ms"] = std::to_string(*w);
+        return call(c, "POST", base + "/service-request", body, *w);
+    }
     if (cmd == "ifaces") {
         return call(c, "GET", base + "/ifaces");
     }
@@ -430,12 +441,16 @@ int run(const Ctx& c, const std::vector<std::string>& args) {
         r = call(c, "GET", "/v1/faults");
     } else if (verb == "stub") {
         // ksim-corestub (--socket): its report, or a network-side trigger for the gates.
-        if (!f.words.empty() && (f.words[0] == "release" || f.words[0] == "ping-ue")) {
+        if (!f.words.empty() && (f.words[0] == "release" || f.words[0] == "ping-ue" || f.words[0] == "deregister" ||
+                                 f.words[0] == "restart" || f.words[0] == "t3512")) {
             json body = json::object();
-            for (const char* k : {"ue", "psi", "cause", "seq"}) {
+            for (const char* k : {"ue", "psi", "cause", "seq", "seconds"}) {
                 if (f.has(k)) {
                     body[k] = f.get(k);
                 }
+            }
+            if (f.has("rereg")) {
+                body["rereg"] = "1";
             }
             r = call(c, "POST", "/v1/stub/" + f.words[0], body);
         } else {
@@ -452,10 +467,19 @@ int run(const Ctx& c, const std::vector<std::string>& args) {
     } else if (verb == "events") {
         return events(c, f, "");
     } else if (verb == "gnb" || verb == "cucp") {
-        if (f.words.size() < 2 || (f.words[1] != "ue-list" && f.words[1] != "amf-list")) {
-            r = Reply::fail(Exit::usage, "gnb <name> ue-list|amf-list");
-        } else {
+        if (f.words.size() >= 2 && (f.words[1] == "ue-list" || f.words[1] == "amf-list")) {
             r = call(c, "GET", "/v1/gnb/" + encode(f.words[0]) + "/" + f.words[1]);
+        } else if (f.words.size() >= 3 && f.words[1] == "ue-release") {
+            json body = json::object();
+            body["ue"] = f.words[2];
+            if (f.has("cause")) {
+                body["cause"] = f.get("cause");
+            }
+            r = call(c, "POST", "/v1/gnb/" + encode(f.words[0]) + "/ue-release", body);
+        } else if (f.words.size() >= 2 && f.words[1] == "restart") {
+            r = call(c, "POST", "/v1/gnb/" + encode(f.words[0]) + "/restart");
+        } else {
+            r = Reply::fail(Exit::usage, "gnb <name> ue-list|amf-list|ue-release <ue>|restart");
         }
     } else if (verb == "ue") {
         if (f.words.empty()) {

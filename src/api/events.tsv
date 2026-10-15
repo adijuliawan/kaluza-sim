@@ -6,11 +6,11 @@
 # ksim-ctl wait read these names, so they are a contract; tools/guards/check_events.py keeps this
 # file and the code in step. Fields are named in the description.
 name	clause	description
-nas.mm.power_on	24.501 5.2.2.2.1	the UE powered its card and read the subscription; usim=valid|invalid, supi
+nas.mm.power_on	24.501 5.2.2.2.1	the UE powered its card and read the subscription; usim=valid|invalid, supi, guti (from EF.5GS3GPPLOCI), context=stored|none (EF.5GS3GPPNSC)
 nas.mm.state	24.501 5.1.3.2.1	a 5GMM state change; from, to (the spec's names), clause (from the entity's transition table), why
 nas.mm.status	24.501 7	a 5GMM STATUS sent or received; direction=ul|dl, cause
 nas.timer.expiry	24.501 10.2	a UE NAS timer ran out; timer (T3510, T3511, T3502, T3516, T3520, T3521)
-nas.reg.request	24.501 5.5.1.2.2	a REGISTRATION REQUEST sent; type, identity=suci|5g-guti, attempt (the attempt counter plus one)
+nas.reg.request	24.501 5.5.1.2.2	a REGISTRATION REQUEST sent; type=initial|mobility|periodic, identity=suci|5g-guti, attempt (the attempt counter plus one), protected=integrity|plain (4.4.6)
 nas.reg.accept	24.501 5.5.1.2.4	a REGISTRATION ACCEPT taken; guti, tai_count, t3512_s, allowed_nssai (SSTs), sms_allowed
 nas.reg.complete	24.501 5.5.1.2.4	a REGISTRATION COMPLETE sent for the 5G-GUTI the accept assigned
 nas.reg.reject	24.501 5.5.1.2.5	a REGISTRATION REJECT taken; cause
@@ -99,3 +99,22 @@ ue.dataplane.up	sim	a PDU session's TUN is up in the UE's namespace; psi, ifname
 ue.dataplane.down	sim	a PDU session's TUN went with the session; psi, ifname
 ue.dataplane.error	sim	the UE's namespace or a session's TUN could not be made; psi, what
 ue.dataplane.noise	sim	the first uplink packet from a TUN that is not IPv4 from the session's address (dropped and counted; ifaces NOISE has the count); psi, version
+nas.reg.blocked	24.501 5.5.1.2.7	a registration the UE may not start: why=T3346|forbidden PLMN|forbidden TA
+nas.mm.t3346	24.501 5.3.9	T3346 started from a reject with cause #22 and a back-off value; seconds
+nas.mm.cm_idle	24.501 5.3.1.1	the N1 NAS signalling connection released: 5GMM-IDLE; state
+nas.mm.t3512	24.501 5.3.7	T3512 started as the UE entered 5GMM-IDLE; seconds
+nas.mm.power_off	24.501 5.5.2.2.1	the UE switched off without signalling; mode=abrupt
+nas.mm.paged	24.501 5.6.2.2.1	a paging for this UE reached 5GMM; state
+nas.mm.config_update	24.501 5.4.4.3	a CONFIGURATION UPDATE COMMAND taken; guti (when a new one came), ack, registration_requested
+nas.mm.identity	24.501 5.4.3.3	an IDENTITY RESPONSE sent; type (the identity type asked for)
+nas.mm.usim_error	31.102 5.1.1	a write to the USIM the card refused; fid, what
+nas.sr.request	24.501 5.6.1.2	a SERVICE REQUEST sent; type (service type value), uplink (the uplink data status bitmap), s_tmsi
+nas.sr.accept	24.501 5.6.1.4	a SERVICE ACCEPT taken; type, uplink, pending_uplink, pdu_session_status (the network's bitmap)
+nas.sr.reject	24.501 5.6.1.5	a SERVICE REJECT taken; cause
+nas.sr.abort	24.501 5.6.1.7	a service request ended without an accept; why=T3517|released
+nas.sr.blocked	24.501 5.6.1.7	a service request the UE may not start; why=T3346
+nas.dereg.network	24.501 5.5.2.3.2	a network-initiated DEREGISTRATION REQUEST taken and accepted; reregistration, cause
+rrc.power	sim	the UE's radio switched on or off; on=1|0
+ran.du.rlf	38.473 8.3.2	the DU stopped hearing a UE (radio link supervision, ledger A-12): it asks the CU for the release; du_ue, rnti
+ran.gnb.restart	sim	ksim-ctl gnb restart: the DU, CU-CP and CU-UP stopped and started again, the cell off the air meanwhile; off_air_ms
+ue.power	sim	the UE device switched on or off; state=on|off, mode

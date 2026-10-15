@@ -146,15 +146,10 @@ Result<void> AllInOne::build(std::string& why) {
         }
     }
 
-    // The gNB: F1 over memlink, NG-C over SCTP, both captured.
-    const MemLinkConfig link{1, 0, topo_.seed};
-    f1_ = std::make_unique<MemAssocPair>(*shard_, Endpoint::v4(10, 255, 0, 2, 0), *shard_,
-                                         Endpoint::v4(10, 255, 0, 1, 38472), 2, link);
+    // The system's side, made once: netd's namespaces, the N3 socket, the air.
     Capture* cap = capture_.get();
-    f1_tap_ = std::make_unique<TapAssoc>(f1_->b(), [cap](bool tx, ByteView m) { cap->f1ap(tx, m); });
-    net::SctpOptions opt;
-    opt.out_streams = topo_.ng_streams;
-    net::SocketSource source;
+    link_ = MemLinkConfig{1, 0, topo_.seed};
+    const MemLinkConfig link = link_;
     if (topo_.netd.enabled) {
         auto c = net::netd::Client::connect(topo_.netd.socket);
         if (!c) {
@@ -180,12 +175,7 @@ Result<void> AllInOne::build(std::string& why) {
             why = "ksim-netd: " + netd_->last_error();
             return up.error();
         }
-        source = [this](int family) { return netd_->socket(topo_.netd.netns, net::netd::SockKind::sctp, family); };
     }
-    ng_ = std::make_unique<net::SctpClient>(shard_->reactor(), *shard_, std::vector<Endpoint>{topo_.ng_bind},
-                                            std::vector<Endpoint>{topo_.amf}, opt, net::SctpBackoff{}, std::move(source));
-    ng_tap_ = std::make_unique<TapAssoc>(*ng_, [cap](bool tx, ByteView m) { cap->ngap(tx, m); });
-
     // N3 (P1 N10): UDP 2152 on the CU-UP's address; with netd, from its own namespace.
     std::unique_ptr<net::UdpSocket> n3;
     if (topo_.netd.enabled && topo_.netd.nodes) {
@@ -217,44 +207,9 @@ Result<void> AllInOne::build(std::string& why) {
         }
         n3 = std::move(*s);
     }
-    auto gtpu_tap = [cap](const Endpoint& from, const Endpoint& to, ByteView p) { cap->gtpu(from, to, p); };
-    n3_ = std::make_unique<TapDatagram>(std::move(n3), gtpu_tap);
-    e1_ = std::make_unique<MemAssocPair>(*shard_, Endpoint::v4(10, 255, 0, 3, 0), *shard_,
-                                         Endpoint::v4(10, 255, 0, 1, 38462), 2, link);
-    e1_tap_ = std::make_unique<TapAssoc>(e1_->b(), [cap](bool tx, ByteView m) { cap->e1ap(tx, m); });
-    f1u_net_ = std::make_unique<MemNet>(link);
-    auto cuup_f1u = f1u_net_->bind(*shard_, kCuUpF1u);
-    auto du_f1u = f1u_net_->bind(*shard_, kDuF1u);
-    if (!cuup_f1u || !du_f1u) {
-        return make_error(Errc::internal, 0, "F1-U ports");
-    }
-    cuup_f1u_ = std::make_unique<TapDatagram>(std::move(*cuup_f1u), gtpu_tap);   // each F1-U datagram once
-    du_f1u_ = std::move(*du_f1u);
-
-    proc::ran::CuCpConfig cc;
-    cc.id = "gnb:" + topo_.gnb_name;
-    cc.name = topo_.gnb_name;
-    cc.plmn = {topo_.mcc, topo_.mnc};
-    cc.gnb_id = topo_.gnb_id;
-    cc.gnb_id_bits = topo_.gnb_id_bits;
-    cc.allow_null = topo_.allow_null;
-    cc.slices.clear();
-    for (const auto& s : slices) {
-        cc.slices.push_back(ngap::Snssai{s.sst, s.sd});
-    }
-    cucp_ = std::make_unique<proc::ran::CuCp>(*shard_, events_, cc, *ng_tap_, *f1_tap_, e1_tap_.get());
-    proc::ran::CuUpConfig upc;
-    upc.id = "gnb:" + topo_.gnb_name + "-cuup";
-    upc.name = topo_.gnb_name + "-cuup";
-    upc.plmn = e1ap::plmn_id(topo_.mcc, topo_.mnc);
-    upc.slices.clear();
-    for (const auto& s : slices) {
-        upc.slices.push_back(e1ap::Snssai{s.sst, s.sd});
-    }
-    upc.n3_addr = v4_of(topo_.n3_bind);
-    upc.f1u_addr = v4_of(kCuUpF1u);
-    cuup_ = std::make_unique<proc::ran::CuUp>(*shard_, events_, upc, e1_->a(), *n3_, *cuup_f1u_);
-
+    n3_ = std::make_unique<TapDatagram>(std::move(n3), [cap](const Endpoint& from, const Endpoint& to, ByteView p) {
+        cap->gtpu(from, to, p);
+    });
     air_ = std::make_unique<MemNet>(link);
     auto du_air = air_->bind(*shard_, kDuAir);
     if (!du_air) {
@@ -268,20 +223,14 @@ Result<void> AllInOne::build(std::string& why) {
             return;
         }
         ++stats_.kair_frames;
-        du_->on_frame(*f);
+        if (du_ && shard_->now() >= air_off_until_) {
+            du_->on_frame(*f);
+        }
     });
-    proc::ran::DuConfig dc;
-    dc.id = "gnb:" + topo_.gnb_name + "-du";
-    dc.du_id = topo_.du_id;
-    dc.name = topo_.gnb_name + "-du";
-    dc.plmn = {topo_.mcc, topo_.mnc};
-    dc.nci = (std::uint64_t{topo_.gnb_id} << (36U - topo_.gnb_id_bits)) | 1U;
-    dc.pci = topo_.pci;
-    dc.tac = topo_.tac;
-    dc.arfcn = topo_.arfcn;
-    dc.f1u_addr = v4_of(kDuF1u);
-    du_ = std::make_unique<proc::ran::Du>(*shard_, events_, dc, f1_->a(), [this](const air::Frame& f) { du_to_air(f); },
-                                          du_f1u_.get());
+    slices_ = slices;
+    if (auto r = build_gnb(why); !r) {
+        return r;
+    }
 
     // The UE farm: farm index i + 1, radio ID i + 1.
     for (std::size_t i = 0; i < cards.size(); ++i) {
@@ -326,13 +275,126 @@ Result<void> AllInOne::build(std::string& why) {
         groups_.push_back(c.group);
     }
 
+    connect_gnb();
+    return {};
+}
+
+Result<void> AllInOne::build_gnb(std::string& why) {
+    // The gNB's nodes and their links: F1 and E1 over memlink, F1-U over memlink
+    // datagrams, NG-C over SCTP (from the CU-CP's namespace with netd), all captured.
+    Capture* cap = capture_.get();
+    const MemLinkConfig link = link_;
+    const std::vector<Slice>& slices = slices_;
+    f1_ = std::make_unique<MemAssocPair>(*shard_, Endpoint::v4(10, 255, 0, 2, 0), *shard_,
+                                         Endpoint::v4(10, 255, 0, 1, 38472), 2, link);
+    f1_tap_ = std::make_unique<TapAssoc>(f1_->b(), [cap](bool tx, ByteView m) { cap->f1ap(tx, m); });
+    net::SctpOptions opt;
+    opt.out_streams = topo_.ng_streams;
+    net::SocketSource source;
+    if (netd_ && topo_.netd.nodes) {
+        source = [this](int family) { return netd_->socket(topo_.netd.netns, net::netd::SockKind::sctp, family); };
+    }
+    ng_ = std::make_unique<net::SctpClient>(shard_->reactor(), *shard_, std::vector<Endpoint>{topo_.ng_bind},
+                                            std::vector<Endpoint>{topo_.amf}, opt, net::SctpBackoff{}, std::move(source));
+    ng_tap_ = std::make_unique<TapAssoc>(*ng_, [cap](bool tx, ByteView m) { cap->ngap(tx, m); });
+    auto gtpu_tap = [cap](const Endpoint& from, const Endpoint& to, ByteView p) { cap->gtpu(from, to, p); };
+    e1_ = std::make_unique<MemAssocPair>(*shard_, Endpoint::v4(10, 255, 0, 3, 0), *shard_,
+                                         Endpoint::v4(10, 255, 0, 1, 38462), 2, link);
+    e1_tap_ = std::make_unique<TapAssoc>(e1_->b(), [cap](bool tx, ByteView m) { cap->e1ap(tx, m); });
+    f1u_net_ = std::make_unique<MemNet>(link);
+    auto cuup_f1u = f1u_net_->bind(*shard_, kCuUpF1u);
+    auto du_f1u = f1u_net_->bind(*shard_, kDuF1u);
+    if (!cuup_f1u || !du_f1u) {
+        return make_error(Errc::internal, 0, "F1-U ports");
+    }
+    cuup_f1u_ = std::make_unique<TapDatagram>(std::move(*cuup_f1u), gtpu_tap);   // each F1-U datagram once
+    du_f1u_ = std::move(*du_f1u);
+
+    proc::ran::CuCpConfig cc;
+    cc.id = "gnb:" + topo_.gnb_name;
+    cc.name = topo_.gnb_name;
+    cc.plmn = {topo_.mcc, topo_.mnc};
+    cc.gnb_id = topo_.gnb_id;
+    cc.gnb_id_bits = topo_.gnb_id_bits;
+    cc.allow_null = topo_.allow_null;
+    cc.slices.clear();
+    for (const auto& s : slices) {
+        cc.slices.push_back(ngap::Snssai{s.sst, s.sd});
+    }
+    cucp_ = std::make_unique<proc::ran::CuCp>(*shard_, events_, cc, *ng_tap_, *f1_tap_, e1_tap_.get());
+    proc::ran::CuUpConfig upc;
+    upc.id = "gnb:" + topo_.gnb_name + "-cuup";
+    upc.name = topo_.gnb_name + "-cuup";
+    upc.plmn = e1ap::plmn_id(topo_.mcc, topo_.mnc);
+    upc.slices.clear();
+    for (const auto& s : slices) {
+        upc.slices.push_back(e1ap::Snssai{s.sst, s.sd});
+    }
+    upc.n3_addr = v4_of(topo_.n3_bind);
+    upc.f1u_addr = v4_of(kCuUpF1u);
+    cuup_ = std::make_unique<proc::ran::CuUp>(*shard_, events_, upc, e1_->a(), *n3_, *cuup_f1u_);
+
+    proc::ran::DuConfig dc;
+    dc.id = "gnb:" + topo_.gnb_name + "-du";
+    dc.du_id = topo_.du_id;
+    dc.name = topo_.gnb_name + "-du";
+    dc.plmn = {topo_.mcc, topo_.mnc};
+    dc.nci = (std::uint64_t{topo_.gnb_id} << (36U - topo_.gnb_id_bits)) | 1U;
+    dc.pci = topo_.pci;
+    dc.tac = topo_.tac;
+    dc.arfcn = topo_.arfcn;
+    dc.f1u_addr = v4_of(kDuF1u);
+    du_ = std::make_unique<proc::ran::Du>(*shard_, events_, dc, f1_->a(), [this](const air::Frame& f) { du_to_air(f); },
+                                          du_f1u_.get());
+
+    (void)why;
+    return {};
+}
+
+void AllInOne::connect_gnb() {
     f1_->connect();
     e1_->connect();
     ng_->start();
+}
+
+void AllInOne::teardown_gnb() {
+    du_.reset();
+    cuup_.reset();
+    cucp_.reset();
+    du_f1u_.reset();
+    cuup_f1u_.reset();
+    f1u_net_.reset();
+    e1_tap_.reset();
+    e1_.reset();
+    if (ng_) {
+        ng_->shutdown();
+    }
+    ng_tap_.reset();
+    ng_.reset();
+    f1_tap_.reset();
+    f1_.reset();
+}
+
+Result<void> AllInOne::restart_gnb() {
+    // ksim-ctl gnb restart (row amf-ueransim.032): the gNB's processes stop and
+    // start again; the UEs find out on the air, the core from a new association.
+    // The cell is off the air for a while, as a restarting gNB's is: the UEs
+    // connected to it see a radio link failure (ledger A-12).
+    teardown_gnb();
+    air_off_until_ = shard_->now() + kRestartOffAir;
+    events_.emit("ran.gnb.restart", "gnb:" + topo_.gnb_name, {{"off_air_ms", std::to_string(kRestartOffAir)}});
+    std::string why;
+    if (auto r = build_gnb(why); !r) {
+        return r;
+    }
+    connect_gnb();
     return {};
 }
 
 void AllInOne::du_to_air(const air::Frame& f) {
+    if (shard_->now() < air_off_until_) {
+        return;   // the cell is off the air while the gNB restarts
+    }
     auto wire = air::encode(f);
     if (!wire) {
         ++stats_.kair_errors;
@@ -357,24 +419,10 @@ void AllInOne::ue_to_air(std::size_t i, const air::Frame& f) {
 void AllInOne::teardown() {
     ues_.clear();
     ue_air_.clear();
-    du_.reset();
-    cuup_.reset();
-    cucp_.reset();
-    du_f1u_.reset();
-    cuup_f1u_.reset();
-    f1u_net_.reset();
-    e1_tap_.reset();
-    e1_.reset();
+    teardown_gnb();
     n3_.reset();
     du_air_.reset();
     air_.reset();
-    if (ng_) {
-        ng_->shutdown();
-    }
-    ng_tap_.reset();
-    ng_.reset();
-    f1_tap_.reset();
-    f1_.reset();
     ue_net_.reset();   // after the UEs: each took its namespace down
     if (netd_) {
         if (topo_.netd.nodes) {

@@ -3,6 +3,7 @@
 
 #include "proc/ue/nas_mm/mm.hpp"
 
+#include <algorithm>
 #include <string>
 #include <utility>
 
@@ -11,6 +12,7 @@
 #include "crypto/keys5g.hpp"
 #include "platform/mutation.hpp"
 #include "proc/ue/nas_mm/suci.hpp"
+#include "proc/ue/nas_sec/persist.hpp"
 
 namespace ksim::proc::ue {
 
@@ -35,10 +37,22 @@ constexpr std::uint8_t kSecurityModeReject = 0x5F;
 constexpr std::uint8_t kStatus = 0x64;
 constexpr std::uint8_t kUlNasTransport = 0x67;
 constexpr std::uint8_t kDlNasTransport = 0x68;
+constexpr std::uint8_t kDeregistrationRequestUeTerminated = 0x47;
+constexpr std::uint8_t kDeregistrationAcceptUeTerminated = 0x48;
+constexpr std::uint8_t kServiceRequest = 0x4C;
+constexpr std::uint8_t kServiceReject = 0x4D;
+constexpr std::uint8_t kServiceAccept = 0x4E;
+constexpr std::uint8_t kConfigurationUpdateCommand = 0x54;
+constexpr std::uint8_t kConfigurationUpdateComplete = 0x55;
+constexpr std::uint8_t kIdentityRequest = 0x5B;
+constexpr std::uint8_t kIdentityResponse = 0x5C;
 
 // 5GMM causes (Annex A).
 constexpr std::uint8_t kIllegalUe = 3;
 constexpr std::uint8_t kIllegalMe = 6;
+constexpr std::uint8_t kUeIdentityNotDerived = 9;
+constexpr std::uint8_t kImplicitlyDeregistered = 10;
+constexpr std::uint8_t kCongestion = 22;
 constexpr std::uint8_t kServicesNotAllowed = 7;
 constexpr std::uint8_t kPlmnNotAllowed = 11;
 constexpr std::uint8_t kTaNotAllowed = 12;
@@ -99,6 +113,9 @@ const char* mm_timer_name(MmTimer t) noexcept {
     case MmTimer::t3516: return "T3516";
     case MmTimer::t3520: return "T3520";
     case MmTimer::t3521: return "T3521";
+    case MmTimer::t3512: return "T3512";
+    case MmTimer::t3517: return "T3517";
+    case MmTimer::t3346: return "T3346";
     }
     return "?";
 }
@@ -121,6 +138,28 @@ void Mm::power_on() {
     if (state_ != MmState::null) {
         return;
     }
+    // A power cycle: only what the card holds survives (TS 31.102 4.4.11).
+    for (std::size_t i = 0; i < kMmTimerCount; ++i) {
+        stop(static_cast<MmTimer>(i));
+    }
+    guti_.reset();
+    tai_list_.reset();
+    last_tai_.reset();
+    allowed_nssai_.clear();
+    t3512_.reset();
+    t3502_net_.reset();
+    ctx_.reset();
+    partial_.reset();
+    kgnb_count_.reset();
+    pending_sm_.clear();
+    sr_uplink_ = 0;
+    reregister_pending_ = false;
+    update_registration_pending_ = false;
+    forbidden_plmns_.clear();   // §5.3.13: the lists go when the UE is switched off
+    forbidden_tais_.clear();
+    update_ = UpdateStatus::u2_not_updated;
+    connected_ = false;
+    ++gen_;
     coro::spawn(read_card(alive_));
 }
 
@@ -143,8 +182,34 @@ coro::Task<void> Mm::read_card(std::shared_ptr<bool> alive) {
             ri = read_routing_indicator(*r);
         }
     }
+    // What the last power cycle left on the card (TS 31.102 4.4.11.2, 4.4.11.4).
+    std::optional<persist::Loci> loci;
+    std::optional<NasSecurityContext> stored;
+    if (ok && sub) {
+        if (auto l = co_await card_.read_ef({persist::kDf5gs, persist::kLoci}); l) {
+            if (auto d = persist::decode_loci(*l)) {
+                loci = std::move(*d);
+            }
+        }
+        if (auto n = co_await card_.read_record({persist::kDf5gs, persist::kNsc}, 1); n) {
+            nsc_record_size_ = n->size();
+            if (auto d = persist::decode_nsc(*n); d && *d) {
+                stored = std::move(**d);
+            }
+        }
+    }
     if (!*alive) {
         co_return;
+    }
+    if (loci && !KSIM_MUTANT("guti_not_persisted")) {
+        guti_ = loci->guti;
+        last_tai_ = loci->tai;
+        update_ = loci->update_status == 0   ? UpdateStatus::u1_updated
+                  : loci->update_status == 2 ? UpdateStatus::u3_roaming_not_allowed
+                                             : UpdateStatus::u2_not_updated;
+    }
+    if (stored && guti_) {
+        ctx_ = std::move(*stored);   // §4.4.2.1: the stored native context, valid
     }
     usim_valid_ = sub.has_value();
     attempts_ = 0;   // §5.5.1.2.1: reset when the UE is powered on
@@ -155,7 +220,10 @@ coro::Task<void> Mm::read_card(std::shared_ptr<bool> alive) {
         routing_indicator_ = ri;
     }
     events_.emit("nas.mm.power_on", cfg_.id,
-                 {{"usim", usim_valid_ ? "valid" : "invalid"}, {"supi", usim_valid_ ? "imsi-" + supi_ : ""}});
+                 {{"usim", usim_valid_ ? "valid" : "invalid"},
+                  {"supi", usim_valid_ ? "imsi-" + supi_ : ""},
+                  {"guti", guti_ ? guti_text(*guti_) : ""},
+                  {"context", ctx_ ? "stored" : "none"}});
     set_state(usim_valid_ ? MmState::deregistered_normal_service : MmState::deregistered_no_supi, "power on");
 }
 
@@ -177,17 +245,50 @@ ie::MobileIdentity Mm::identity() const {
 
 ie::NgKsi Mm::current_ngksi() const { return ctx_ ? ctx_->ngksi() : ie::NgKsi{false, 7}; }
 
-void Mm::start_registration() {
+namespace {
+
+const char* reg_type_name(std::uint8_t t) {
+    switch (t) {
+    case 1: return "initial";
+    case 2: return "mobility";
+    case 3: return "periodic";
+    default: return "?";
+    }
+}
+
+} // namespace
+
+void Mm::start_registration(RegType type) {
     stop(MmTimer::t3511);
     stop(MmTimer::t3502);
-    // Until N12 brings the protected initial message (§4.4.6), an initial
-    // registration starts without a 5G NAS security context.
-    ctx_.reset();
+    stop(MmTimer::t3512);
+    if (running(MmTimer::t3346)) {
+        // §5.5.1.2.7 / §5.3.9: not while the network's back-off runs.
+        events_.emit("nas.reg.blocked", cfg_.id, {{"why", "T3346"}});
+        return;
+    }
+    const bool forbidden_plmn = std::find(forbidden_plmns_.begin(), forbidden_plmns_.end(), cfg_.plmn) != forbidden_plmns_.end();
+    const std::optional<ie::Tai>& here = current_tai_ ? current_tai_ : last_tai_;
+    const bool forbidden_ta = here && std::find(forbidden_tais_.begin(), forbidden_tais_.end(), *here) != forbidden_tais_.end();
+    if (type == RegType::initial && (forbidden_plmn || forbidden_ta)) {
+        events_.emit("nas.reg.blocked", cfg_.id, {{"why", forbidden_plmn ? "forbidden PLMN" : "forbidden TA"}});
+        return;
+    }
     partial_.reset();
     kgnb_count_.reset();
     ++gen_;
+    reg_type_ = type;
+    // §4.4.6 b: with a 5G-GUTI and a valid context the request is protected
+    // with it; otherwise it starts from no context at all.
+    const bool with_context = ctx_.has_value() && guti_.has_value();
+    if (!with_context) {
+        ctx_.reset();
+    }
+    if (type == RegType::initial) {
+        persist_nsc(false);   // §4.4.2.1.2: the stored context is marked invalid
+    }
     nas::Message m = make(kRegistrationRequest);
-    put(m, "5GS registration type", ie::RegistrationType{ie::RegistrationType::initial, cfg_.follow_on_request}.encode());
+    put(m, "5GS registration type", ie::RegistrationType{static_cast<std::uint8_t>(type), cfg_.follow_on_request}.encode());
     put(m, "ngKSI", current_ngksi().encode());
     const ie::MobileIdentity id = identity();
     put(m, "5GS mobile identity", id.encode());
@@ -195,33 +296,92 @@ void Mm::start_registration() {
     if (!cfg_.requested_nssai.empty()) {
         put(m, "Requested NSSAI", ie::Nssai{cfg_.requested_nssai}.encode());
     }
-    initial_ = m;
-    initial_without_context_ = true;
-    // §4.4.6: without a valid context only the cleartext IEs go in the initial message.
-    auto split = split_initial(m);
-    if (!split) {
-        return;
+    if (with_context && cfg_.sm_hooks.active) {
+        ie::PsiBitmap status{cfg_.sm_hooks.active()};
+        put(m, "PDU session status", status.encode());
     }
-    auto wire = nas::encode(split->cleartext);
+    if (type == RegType::initial) {
+        reg_uplink_ = 0;
+    } else if (reg_uplink_ != 0) {
+        // §5.5.1.3.2 cases f and o; kept for the attempts T3511 restarts until an accept.
+        put(m, "Uplink data status", ie::PsiBitmap{reg_uplink_}.encode());
+    }
+    initial_ = m;
+    initial_without_context_ = !with_context;
+    Result<Bytes> wire = Bytes{};
+    if (with_context) {
+        wire = protect_initial(m);
+    } else {
+        // §4.4.6 a: without a valid context only the cleartext IEs go.
+        auto split = split_initial(m);
+        if (!split) {
+            return;
+        }
+        wire = nas::encode(split->cleartext);
+        if (wire && cfg_.tap) {
+            cfg_.tap(true, *wire);
+        }
+    }
     if (!wire) {
         return;
     }
     events_.emit("nas.reg.request", cfg_.id,
-                 {{"type", "initial"},
+                 {{"type", reg_type_name(static_cast<std::uint8_t>(type))},
                   {"identity", guti_ ? "5g-guti" : "suci"},
+                  {"protected", with_context ? "integrity" : "plain"},
                   {"attempt", str(attempts_ + 1)}});
     set_state(MmState::registered_initiated, "registration request");
-    if (cfg_.tap) {
-        cfg_.tap(true, *wire);
-    }
     send_wire(std::move(*wire));
     start(MmTimer::t3510, cfg_.timers.t3510);
+}
+
+Result<Bytes> Mm::protect_initial(const nas::Message& m) {
+    if (!ctx_) {
+        return make_error(Errc::invalid_argument, 0, "5GMM: no context to protect the initial message with");
+    }
+    auto split = split_initial(m);
+    if (!split) {
+        return split.error();
+    }
+    const std::uint32_t count = ctx_->ul_count();
+    nas::Message out = split->cleartext;
+    if (split->has_non_cleartext) {
+        // §4.4.6 b 1): the whole message in the container, its value ciphered.
+        auto whole = nas::encode(m);
+        if (!whole) {
+            return whole.error();
+        }
+        if (cfg_.tap) {
+            cfg_.tap(true, *whole);
+        }
+        auto ciphered = ctx_->container_cipher(*whole, count);
+        if (!ciphered) {
+            return ciphered.error();
+        }
+        put(out, "NAS message container", std::move(*ciphered));
+    }
+    auto plain = nas::encode(out);
+    if (!plain) {
+        return plain.error();
+    }
+    if (cfg_.tap && !split->has_non_cleartext) {
+        cfg_.tap(true, *plain);
+    }
+    kgnb_count_ = count;   // K_gNB from this COUNT unless a SECURITY MODE COMMAND follows
+    return ctx_->protect(*plain, Sht::integrity);
 }
 
 void Mm::registration_abnormal(const char* reason) {
     // §5.5.1.2.7, cases c, d and e.
     stop(MmTimer::t3510);
     paused_t3510_ = false;
+    if (reg_type_ != RegType::initial) {
+        // §5.5.1.3.7: a periodic or mobility update failed: still registered, tried again after T3511.
+        events_.emit("nas.reg.abort", cfg_.id, {{"reason", reason}, {"attempt", str(attempts_)}});
+        set_state(MmState::registered_normal_service, "registration update failed");
+        start(MmTimer::t3511, cfg_.timers.t3511);
+        return;
+    }
     if (attempts_ < kMaxAttempts) {
         ++attempts_;
     }
@@ -254,6 +414,7 @@ void Mm::on_registration_accept(const nas::Message& m) {
         send_status(kInvalidMandatory);
         return;
     }
+    reg_uplink_ = 0;   // answered (§5.5.1.3.4: the reactivation result, if any, says how)
     stop(MmTimer::t3510);
     paused_t3510_ = false;
     attempts_ = 0;
@@ -284,6 +445,8 @@ void Mm::on_registration_accept(const nas::Message& m) {
         if (v) {
             t3512_ = v->ms();
         }
+    } else if (reg_type_ == RegType::initial) {
+        t3512_ = cfg_.timers.t3512;   // §5.3.7: the default when the network gives none
     }
     t3502_net_.reset();
     if (const Bytes* t = nas::get(m, "T3502 value")) {
@@ -296,8 +459,13 @@ void Mm::on_registration_accept(const nas::Message& m) {
     for (const auto& s : allowed_nssai_) {
         nssai += (nssai.empty() ? "" : ",") + str(s.sst);
     }
+    if (tai_list_ && !tai_list_->tais.empty()) {
+        last_tai_ = tai_list_->tais.front();   // the cell's TA is in the list (fixed camping, A-12)
+    }
+    persist_loci();
     events_.emit("nas.reg.accept", cfg_.id,
-                 {{"guti", guti_ ? guti_text(*guti_) : ""},
+                 {{"type", reg_type_name(static_cast<std::uint8_t>(reg_type_))},
+                  {"guti", guti_ ? guti_text(*guti_) : ""},
                   {"tai_count", str(tai_list_ ? static_cast<std::int64_t>(tai_list_->tais.size()) : 0)},
                   {"t3512_s", t3512_ ? str(*t3512_ / 1000) : "deactivated"},
                   {"allowed_nssai", nssai},
@@ -308,6 +476,12 @@ void Mm::on_registration_accept(const nas::Message& m) {
         send(make(kRegistrationComplete));
         events_.emit("nas.reg.complete", cfg_.id, {});
     }
+    if (const Bytes* ps = nas::get(m, "PDU session status"); ps != nullptr && cfg_.sm_hooks.sync) {
+        if (auto b = ie::PsiBitmap::decode(*ps)) {
+            cfg_.sm_hooks.sync(b->psis);   // §5.5.1.3.4: the network's view of the sessions
+        }
+    }
+    flush_pending_sm();
 }
 
 void Mm::on_registration_reject(const nas::Message& m) {
@@ -333,15 +507,36 @@ void Mm::on_registration_reject(const nas::Message& m) {
         update_ = UpdateStatus::u3_roaming_not_allowed;
         delete_registration_data(true);
         attempts_ = 0;
+        forbidden_plmns_.push_back(cfg_.plmn);   // §5.5.1.2.5: the forbidden PLMN list
+        persist_loci();
         set_state(MmState::deregistered_plmn_search, "registration reject #11");
         return;
     case kTaNotAllowed:
     case kRoamingNotAllowedInTa:
     case kNoSuitableCells:
         update_ = UpdateStatus::u3_roaming_not_allowed;
+        // §5.5.1.2.5: the current TAI goes on the forbidden TA lists of §5.3.13.
+        if (const auto& here = current_tai_ ? current_tai_ : last_tai_; here) {
+            forbidden_tais_.push_back(*here);
+        }
         delete_registration_data(true);
         attempts_ = 0;
+        persist_loci();
         set_state(MmState::deregistered_limited_service, "registration reject #12, #13 or #15");
+        return;
+    case kCongestion:
+        // §5.5.1.2.5 #22: with T3346 the UE waits it out; the attempt counter is not touched.
+        if (const Bytes* t = nas::get(m, "T3346 value")) {
+            auto v = ie::GprsTimer2::decode(*t);
+            if (const auto ms = v ? v->ms() : std::nullopt; ms && *ms > 0) {
+                stop(MmTimer::t3510);
+                start(MmTimer::t3346, static_cast<Millis>(*ms));
+                events_.emit("nas.mm.t3346", cfg_.id, {{"seconds", str(*ms / 1000)}});
+                set_state(MmState::deregistered_attempting_registration, "registration reject #22");
+                return;
+            }
+        }
+        registration_abnormal("reject");
         return;
     case kN1ModeNotAllowed:
         update_ = UpdateStatus::u3_roaming_not_allowed;
@@ -390,14 +585,20 @@ void Mm::deregister(bool switch_off) {
     t3521_expiries_ = 0;
     events_.emit("nas.dereg.sent", cfg_.id,
                  {{"switch_off", switch_off ? "1" : "0"}, {"identity", guti_ ? "5g-guti" : "suci"}, {"transmission", "1"}});
+    const bool was_connected = connected_;   // send() marks the connection as on its way
     send(m);
     if (switch_off) {
+        entering_deregistered();   // §4.4.2.1.3: the context goes to the card before power off
         // §5.5.2.2.1: the UE may be switched off as soon as the request is sent.
         for (std::size_t i = 0; i < kMmTimerCount; ++i) {
             stop(static_cast<MmTimer>(i));
         }
         clear_stored_challenge();
-        lower_.release_local();
+        if (was_connected) {
+            lower_.release_local();   // the request is out already
+        }
+        // From 5GMM-IDLE the request still waits for the RRC connection: a local
+        // release would drop it (F-46); the radio goes off once it is sent.
         connected_ = false;
         set_state(MmState::null, "switch off");
         return;
@@ -414,6 +615,7 @@ void Mm::on_deregistration_accept() {
     stop(MmTimer::t3521);
     paused_t3521_ = false;
     events_.emit("nas.dereg.accept", cfg_.id, {});
+    entering_deregistered();
     set_state(MmState::deregistered_normal_service, "de-registration accept");
 }
 
@@ -501,6 +703,8 @@ coro::Task<void> Mm::run_aka(std::shared_ptr<bool> alive, std::uint64_t gen, ie:
         kamf = std::move(*k);
     }
     partial_ = Partial{ngksi, std::move(kamf)};
+    kausf_ = std::move(kausf);   // EF.5GAUTHKEYS, written with the context
+    kseaf_ = std::move(kseaf);
     stored_rand_ = rand;
     stored_res_star_ = Bytes(res_star.expose().begin(), res_star.expose().end());   // sent in clear
     start(MmTimer::t3516, cfg_.timers.t3516);
@@ -810,6 +1014,21 @@ void Mm::on_plain(const nas::Message& m, bool integrity_ok) {
     case kDlNasTransport:
         on_dl_nas_transport(m);
         return;
+    case kServiceAccept:
+        on_service_accept(m);
+        return;
+    case kServiceReject:
+        on_service_reject(m);
+        return;
+    case kDeregistrationRequestUeTerminated:
+        on_network_deregistration(m);
+        return;
+    case kConfigurationUpdateCommand:
+        on_configuration_update(m);
+        return;
+    case kIdentityRequest:
+        on_identity_request(m);
+        return;
     case kSecurityModeCommand:
         // Only with a new context (security header type 3) in N5; a command
         // under the current context (re-keying) is N12.
@@ -827,8 +1046,18 @@ void Mm::on_plain(const nas::Message& m, bool integrity_ok) {
     }
 }
 
+void Mm::on_camped(std::uint32_t tac) { current_tai_ = ie::Tai{cfg_.plmn, tac}; }
+
+void Mm::on_connection_failure(std::uint16_t up_psis) {
+    recovery_pending_ = true;
+    recovery_up_ = up_psis;
+}
+
 void Mm::on_released() {
+    const bool recovery = std::exchange(recovery_pending_, false);
+    const std::uint16_t recovery_up = std::exchange(recovery_up_, std::uint16_t{0});
     connected_ = false;
+    kgnb_count_.reset();   // the next connection's K_gNB comes from its own initial message or SMC
     // §5.4.1.3.3 d and §5.4.1.3.7: entering 5GMM-IDLE ends the stored challenge and T3520.
     clear_stored_challenge();
     stop(MmTimer::t3520);
@@ -841,8 +1070,376 @@ void Mm::on_released() {
         stop(MmTimer::t3521);   // §5.5.2.2.6 a
         paused_t3521_ = false;
         events_.emit("nas.dereg.abort", cfg_.id, {{"reason", "released"}});
+        entering_deregistered();
         set_state(MmState::deregistered_normal_service, "released before the de-registration accept");
+    } else if (state_ == MmState::service_request_initiated) {
+        stop(MmTimer::t3517);   // §5.6.1.7 a: the lower layers failed
+        events_.emit("nas.sr.abort", cfg_.id, {{"why", "released"}});
+        set_state(MmState::registered_normal_service, "service request aborted");
     }
+    if (is_registered(state_)) {
+        events_.emit("nas.mm.cm_idle", cfg_.id, {{"state", mm_state_name(state_)}});
+        // §5.3.7: T3512 starts as the UE enters 5GMM-IDLE.
+        if (const auto t3512 = t3512_; t3512 && *t3512 > 0) {
+            start(MmTimer::t3512, *t3512);
+            events_.emit("nas.mm.t3512", cfg_.id, {{"seconds", str(*t3512 / 1000)}});
+        }
+        if (update_registration_pending_) {
+            update_registration_pending_ = false;
+            start_registration(RegType::mobility);   // §5.4.4.3: the configuration update asked for it
+        } else if (recovery && pending_sm_.empty() && state_ == MmState::registered_normal_service) {
+            // §5.5.1.3.2 f: NAS signalling connection recovery; the Uplink data
+            // status names the sessions with uplink data and those whose user plane was up.
+            reg_uplink_ = static_cast<std::uint16_t>(recovery_up | sr_uplink_);
+            sr_uplink_ = 0;
+            start_registration(RegType::mobility);
+        } else if (!pending_sm_.empty() || sr_uplink_ != 0) {
+            (void)service_request(sr_uplink_ != 0 ? ie::ServiceType::data : ie::ServiceType::signalling, sr_uplink_);
+        }
+    } else if (reregister_pending_ && is_deregistered(state_) && usim_valid_) {
+        reregister_pending_ = false;
+        start_registration(RegType::initial);   // §5.5.2.3.2: re-registration required
+    }
+}
+
+void Mm::entering_connected() {
+    stop(MmTimer::t3512);   // §5.3.7: T3512 stops as the UE enters 5GMM-CONNECTED
+}
+
+void Mm::entering_deregistered() {
+    // §4.4.2.1.3: the current native context goes to the card, marked valid.
+    stop(MmTimer::t3512);
+    reg_uplink_ = 0;
+    persist_nsc(ctx_.has_value());
+    persist_loci();
+    persist_auth_keys();
+}
+
+void Mm::power_off_abrupt() {
+    for (std::size_t i = 0; i < kMmTimerCount; ++i) {
+        stop(static_cast<MmTimer>(i));
+    }
+    ++gen_;
+    connected_ = false;
+    pending_sm_.clear();
+    sr_uplink_ = 0;
+    events_.emit("nas.mm.power_off", cfg_.id, {{"mode", "abrupt"}});
+    set_state(MmState::null, "power off");
+}
+
+// ---- the service request (§5.6.1) ------------------------------------------------------
+
+Result<void> Mm::service_request(std::uint8_t type, std::uint16_t uplink) {
+    if (!is_registered(state_) || !guti_ || !ctx_) {
+        return make_error(Errc::invalid_argument, 0, "5GMM: a service request needs a registration with a 5G-GUTI");
+    }
+    if (connected_) {
+        flush_pending_sm();
+        return {};
+    }
+    if (state_ == MmState::service_request_initiated) {
+        sr_uplink_ |= uplink;   // the running one carries on; the rest waits for the bearers
+        return {};
+    }
+    if (running(MmTimer::t3346)) {
+        events_.emit("nas.sr.blocked", cfg_.id, {{"why", "T3346"}});
+        return make_error(Errc::invalid_argument, 0, "5GMM: T3346 runs");
+    }
+    auto tmsi = s_tmsi();
+    ie::MobileIdentity s;
+    s.type = ie::MobileIdentity::Type::s_tmsi;
+    s.amf_set = guti_->amf_set;
+    s.amf_pointer = guti_->amf_pointer;
+    s.tmsi = guti_->tmsi;
+    nas::Message m = make(kServiceRequest);
+    put(m, "ngKSI", current_ngksi().encode());
+    put(m, "Service type", ie::ServiceType{type}.encode());
+    put(m, "5G-S-TMSI", s.encode());
+    if (uplink != 0) {
+        put(m, "Uplink data status", ie::PsiBitmap{uplink}.encode());
+    }
+    if (cfg_.sm_hooks.active) {
+        put(m, "PDU session status", ie::PsiBitmap{cfg_.sm_hooks.active()}.encode());
+    }
+    auto wire = protect_initial(m);
+    if (!wire) {
+        return wire.error();
+    }
+    sr_type_ = type;
+    sr_uplink_ = uplink;
+    events_.emit("nas.sr.request", cfg_.id,
+                 {{"type", str(type)}, {"uplink", str(uplink)}, {"s_tmsi", tmsi ? str(static_cast<std::int64_t>(*tmsi)) : ""}});
+    set_state(MmState::service_request_initiated, "service request");
+    send_wire(std::move(*wire));
+    start(MmTimer::t3517, cfg_.timers.t3517);
+    return {};
+}
+
+void Mm::on_paged() {
+    if (KSIM_MUTANT("paging_ignore")) {
+        return;   // the planted fault: the paging record is not answered
+    }
+    events_.emit("nas.mm.paged", cfg_.id, {{"state", mm_state_name(state_)}});
+    if (!is_registered(state_) || connected_) {
+        return;
+    }
+    // §5.6.2.2.1 / §5.6.1.2: "mobile terminated services", with any uplink pending.
+    (void)service_request(ie::ServiceType::mobile_terminated, sr_uplink_);
+}
+
+void Mm::on_service_accept(const nas::Message& m) {
+    if (state_ != MmState::service_request_initiated) {
+        send_status(kNotCompatibleWithState);
+        return;
+    }
+    stop(MmTimer::t3517);
+    set_state(MmState::registered_normal_service, "service accept");
+    std::uint16_t network = 0;
+    bool synced = false;
+    if (const Bytes* ps = nas::get(m, "PDU session status")) {
+        if (auto b = ie::PsiBitmap::decode(*ps)) {
+            network = b->psis;
+            synced = true;
+        }
+    }
+    events_.emit("nas.sr.accept", cfg_.id,
+                 {{"type", str(sr_type_)}, {"uplink", str(sr_uplink_)}, {"pending_uplink", sr_uplink_ != 0 ? "1" : "0"},
+                  {"pdu_session_status", synced ? str(network) : ""}});
+    if (synced && cfg_.sm_hooks.sync) {
+        cfg_.sm_hooks.sync(network);   // §5.6.1.4: sessions the network does not hold go locally
+    }
+    sr_uplink_ = 0;
+    flush_pending_sm();
+}
+
+void Mm::on_service_reject(const nas::Message& m) {
+    if (state_ != MmState::service_request_initiated) {
+        send_status(kNotCompatibleWithState);
+        return;
+    }
+    stop(MmTimer::t3517);
+    const Bytes* c = nas::get(m, "5GMM cause");
+    const std::uint8_t cause = c != nullptr && !c->empty() ? (*c)[0] : 111;
+    events_.emit("nas.sr.reject", cfg_.id, {{"cause", str(cause)}});
+    sr_uplink_ = 0;
+    switch (cause) {
+    case kUeIdentityNotDerived:
+    case kImplicitlyDeregistered:
+        // §5.6.1.5 #9, #10: a new initial registration (#9 without the 5G-GUTI or the context).
+        if (cause == kUeIdentityNotDerived) {
+            update_ = UpdateStatus::u2_not_updated;
+            delete_registration_data(true);
+            persist_loci();
+        }
+        if (cfg_.sm_hooks.release_all) {
+            cfg_.sm_hooks.release_all();
+        }
+        reregister_pending_ = true;
+        entering_deregistered();
+        set_state(MmState::deregistered_normal_service, "service reject #9 or #10");
+        return;
+    case kCongestion:
+        if (const Bytes* t = nas::get(m, "T3346 value")) {
+            auto v = ie::GprsTimer2::decode(*t);
+            if (const auto ms = v ? v->ms() : std::nullopt; ms && *ms > 0) {
+                start(MmTimer::t3346, static_cast<Millis>(*ms));
+                events_.emit("nas.mm.t3346", cfg_.id, {{"seconds", str(*ms / 1000)}});
+            }
+        }
+        set_state(MmState::registered_normal_service, "service reject #22");
+        return;
+    default:
+        set_state(MmState::registered_normal_service, "service reject");
+        return;
+    }
+}
+
+void Mm::flush_pending_sm() {
+    if (!connected_ || !is_registered(state_)) {
+        return;
+    }
+    auto queued = std::move(pending_sm_);
+    pending_sm_.clear();
+    for (const auto& u : queued) {
+        (void)send_sm(u);
+    }
+}
+
+// ---- network-initiated procedures (§5.5.2.3, §5.4.4, §5.4.3) ----------------------------
+
+void Mm::on_network_deregistration(const nas::Message& m) {
+    const Bytes* t = nas::get(m, "De-registration type");
+    auto dt = t != nullptr ? ie::DeregistrationType::decode(*t)
+                           : Result<ie::DeregistrationType>(make_error(Errc::truncated, 0, "absent"));
+    if (!dt) {
+        send_status(kInvalidMandatory);
+        return;
+    }
+    const Bytes* c = nas::get(m, "5GMM cause");
+    const std::uint8_t cause = c != nullptr && !c->empty() ? (*c)[0] : 0;
+    for (MmTimer tm : {MmTimer::t3510, MmTimer::t3517, MmTimer::t3521, MmTimer::t3512}) {
+        stop(tm);
+    }
+    // §5.5.2.3.2: the accept, a local release of the PDU sessions, 5GMM-DEREGISTERED.
+    send(make(kDeregistrationAcceptUeTerminated));
+    if (cfg_.sm_hooks.release_all) {
+        cfg_.sm_hooks.release_all();
+    }
+    events_.emit("nas.dereg.network", cfg_.id,
+                 {{"reregistration", dt->reregistration_required ? "1" : "0"}, {"cause", cause != 0 ? str(cause) : ""}});
+    entering_deregistered();
+    set_state(MmState::deregistered_normal_service, "network de-registration");
+    if (dt->reregistration_required && !KSIM_MUTANT("dereg_no_reregistration")) {
+        // An initial registration once the network has released the connection.
+        reregister_pending_ = true;
+        ex_.start_timer(2'000, [this, alive = alive_, gen = gen_] {
+            if (*alive && gen == gen_ && reregister_pending_ && is_deregistered(state_)) {
+                reregister_pending_ = false;
+                start_registration(RegType::initial);
+            }
+        });
+    }
+}
+
+void Mm::on_configuration_update(const nas::Message& m) {
+    stop(MmTimer::t3346);   // §5.4.4.3
+    ie::ConfigurationUpdateIndication ind;
+    if (const Bytes* i = nas::get(m, "Configuration update indication")) {
+        if (auto v = ie::ConfigurationUpdateIndication::decode(*i)) {
+            ind = *v;
+        }
+    }
+    bool new_guti = false;
+    if (const Bytes* g = nas::get(m, "5G-GUTI")) {
+        if (auto id = ie::MobileIdentity::decode(*g); id && id->type == ie::MobileIdentity::Type::guti) {
+            guti_ = std::move(*id);
+            new_guti = true;
+        }
+    }
+    if (const Bytes* t = nas::get(m, "TAI list")) {
+        if (auto l = ie::TaiList::decode(*t)) {
+            tai_list_ = std::move(*l);
+        }
+    }
+    if (const Bytes* a = nas::get(m, "Allowed NSSAI")) {
+        if (auto n = ie::Nssai::decode(*a)) {
+            allowed_nssai_ = std::move(n->list);
+        }
+    }
+    if (new_guti) {
+        persist_loci();
+    }
+    events_.emit("nas.mm.config_update", cfg_.id,
+                 {{"guti", new_guti && guti_ ? guti_text(*guti_) : ""},
+                  {"ack", ind.ack_requested ? "1" : "0"},
+                  {"registration_requested", ind.registration_requested ? "1" : "0"}});
+    // §5.4.4.3: acknowledged when asked (or when it gave a new 5G-GUTI).
+    if (ind.ack_requested || new_guti) {
+        send(make(kConfigurationUpdateComplete));
+    }
+    if (ind.registration_requested) {
+        update_registration_pending_ = true;   // a mobility registration once released
+    }
+}
+
+void Mm::on_identity_request(const nas::Message& m) {
+    const Bytes* t = nas::get(m, "Identity type");
+    auto it = t != nullptr ? ie::IdentityType::decode(*t) : Result<ie::IdentityType>(make_error(Errc::truncated, 0, "absent"));
+    if (!it) {
+        send_status(kInvalidMandatory);
+        return;
+    }
+    ie::MobileIdentity id;
+    switch (it->value) {
+    case ie::IdentityType::suci:
+        id = null_suci(Subscription{supi_, home_, msin_}, routing_indicator_);
+        break;
+    case ie::IdentityType::guti:
+        if (guti_) {
+            id = *guti_;
+        }
+        break;
+    case ie::IdentityType::imeisv:
+        id.type = ie::MobileIdentity::Type::imeisv;
+        id.digits = cfg_.imeisv;
+        break;
+    case ie::IdentityType::imei: {
+        // The IMEI: the IMEISV's TAC and SNR, then the Luhn check digit (TS 23.003 6.2.1).
+        id.type = ie::MobileIdentity::Type::imei;
+        const std::string body = cfg_.imeisv.substr(0, 14);
+        int sum = 0;
+        for (std::size_t i = 0; i < body.size(); ++i) {
+            int d = body[i] - '0';
+            if (i % 2 == 1) {
+                d *= 2;
+                d = d > 9 ? d - 9 : d;
+            }
+            sum += d;
+        }
+        id.digits = body + static_cast<char>('0' + (10 - sum % 10) % 10);
+        break;
+    }
+    default:
+        break;   // no such identity: "no identity"
+    }
+    nas::Message r = make(kIdentityResponse);
+    put(r, "Mobile identity", id.encode());
+    events_.emit("nas.mm.identity", cfg_.id, {{"type", str(it->value)}});
+    send(r);
+}
+
+// ---- the USIM (TS 31.102 4.4.11) --------------------------------------------------------
+
+void Mm::card_job(CardWrite w) {
+    card_jobs_.push_back(std::move(w));
+    if (!card_busy_) {
+        card_busy_ = true;
+        coro::spawn(run_card_jobs(alive_));
+    }
+}
+
+coro::Task<void> Mm::run_card_jobs(std::shared_ptr<bool> alive) {
+    while (*alive && !card_jobs_.empty()) {
+        CardWrite w = std::move(card_jobs_.front());
+        card_jobs_.pop_front();
+        Bytes raw(w.data->expose().begin(), w.data->expose().end());
+        const std::vector<std::uint16_t> path{persist::kDf5gs, w.fid};
+        auto r = w.record ? co_await card_.update_record(path, 1, raw) : co_await card_.update_ef(path, raw);
+        secure_zero(raw);
+        if (!*alive) {
+            co_return;
+        }
+        if (!r) {
+            events_.emit("nas.mm.usim_error", cfg_.id, {{"fid", str(w.fid)}, {"what", r.error().what}});
+        }
+    }
+    if (*alive) {
+        card_busy_ = false;
+    }
+}
+
+void Mm::persist_loci() {
+    if (KSIM_MUTANT("guti_not_persisted")) {
+        return;   // the planted fault: EF.5GS3GPPLOCI is never written
+    }
+    const std::uint8_t status = update_ == UpdateStatus::u1_updated ? 0 : update_ == UpdateStatus::u2_not_updated ? 1 : 2;
+    const Bytes data = persist::encode_loci(persist::Loci{guti_, last_tai_, status});
+    card_job(CardWrite{persist::kLoci, false, std::make_shared<SecretBytes>(SecretBytes::copy_of(data))});
+}
+
+void Mm::persist_nsc(bool valid) {
+    card_job(CardWrite{persist::kNsc, true,
+                       std::make_shared<SecretBytes>(persist::encode_nsc(valid && ctx_ ? &*ctx_ : nullptr, nsc_record_size_))});
+}
+
+void Mm::persist_auth_keys() {
+    if (kausf_.empty()) {
+        return;
+    }
+    // TS 31.102 4.4.11.6: with service n°133 not available only K_AUSF and
+    // K_SEAF for 3GPP access, in octets 0 to 67 (the rest is left alone).
+    card_job(CardWrite{persist::kAuthKeys, false,
+                       std::make_shared<SecretBytes>(persist::encode_auth_keys(&kausf_, &kseaf_, 68))});
 }
 
 // ---- the NAS transport of 5GSM (§5.4.5) -------------------------------------------------
@@ -851,8 +1448,13 @@ Result<void> Mm::send_sm(const SmUplink& u) {
     if (!is_registered(state_) || !ctx_) {
         return make_error(Errc::invalid_argument, 0, "5GMM: not registered");
     }
-    if (!connected_) {
-        return make_error(Errc::closed, 0, "5GMM: no N1 signalling connection");
+    if (!connected_ || state_ == MmState::service_request_initiated) {
+        // §5.6.1.1 c: uplink signalling pending: a service request brings the connection.
+        pending_sm_.push_back(u);
+        if (!connected_) {
+            return service_request(ie::ServiceType::signalling, sr_uplink_);
+        }
+        return {};
     }
     nas::Message m = make(kUlNasTransport);
     put(m, "Payload container type", Bytes{ie::PayloadContainerType::n1_sm});
@@ -925,6 +1527,9 @@ void Mm::send(const nas::Message& m) {
 }
 
 void Mm::send_wire(Bytes wire) {
+    if (!connected_) {
+        entering_connected();
+    }
     connected_ = true;
     lower_.send_nas(std::move(wire));
 }
@@ -992,6 +1597,8 @@ void Mm::on_expiry(MmTimer t) {
     case MmTimer::t3511:
         if (state_ == MmState::deregistered_attempting_registration && usim_valid_) {
             start_registration();
+        } else if (state_ == MmState::registered_normal_service && reg_type_ != RegType::initial && !connected_) {
+            start_registration(reg_type_);   // §5.5.1.3.7: the update again
         }
         return;
     case MmTimer::t3502:
@@ -1005,6 +1612,28 @@ void Mm::on_expiry(MmTimer t) {
         return;
     case MmTimer::t3520:
         network_failed_authentication();   // §5.4.1.3.7: the network failed the check
+        return;
+    case MmTimer::t3512:
+        // §5.3.7: periodic registration, from 5GMM-REGISTERED in 5GMM-IDLE.
+        if (state_ == MmState::registered_normal_service && !connected_) {
+            start_registration(RegType::periodic);
+        }
+        return;
+    case MmTimer::t3517:
+        // §5.6.1.7 c: abort, release locally, back to 5GMM-REGISTERED.
+        events_.emit("nas.sr.abort", cfg_.id, {{"why", "T3517"}});
+        sr_uplink_ = 0;
+        pending_sm_.clear();
+        if (connected_) {
+            lower_.release_local();
+            connected_ = false;
+        }
+        set_state(MmState::registered_normal_service, "T3517 expiry");
+        return;
+    case MmTimer::t3346:
+        if (state_ == MmState::deregistered_attempting_registration && usim_valid_) {
+            start_registration(RegType::initial);
+        }
         return;
     case MmTimer::t3521:
         // §5.5.2.2.6 c: four retransmissions, then abort on the fifth expiry.

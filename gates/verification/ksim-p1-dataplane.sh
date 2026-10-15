@@ -13,7 +13,7 @@
 #   [DN_ADDR=<IPv4>]   the address pinged (default 10.60.0.1, the stub's DN;
 #                      172.30.61.1 on kaluza-core)
 #
-# UE 5 is used (the other gates use 1 to 4); it must be off at the start.
+# UE 5 is used (the other gates use 1 to 4 and 6 to 9); it must be off at the start.
 
 set -u
 . "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/lib/ksim.sh"

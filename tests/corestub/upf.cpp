@@ -26,14 +26,26 @@ void Upf::check(bool ok, const char* clause, const char* what, std::string detai
 
 std::uint32_t Upf::open(ip::Addr ue, std::uint8_t qfi) {
     const std::uint32_t teid = gtpu_.bind([this](const entity::gtpu::UserData& d, const ksim::Endpoint&) { on_ul(d.teid, d); });
-    tunnels_[teid] = Tunnel{ue, qfi, std::nullopt};
+    tunnels_[teid] = Tunnel{ue, qfi, std::nullopt, {}};
     return teid;
 }
 
 void Upf::set_dl(std::uint32_t ul_teid, const ngap::GtpTunnel& dl) {
     auto it = tunnels_.find(ul_teid);
-    if (it != tunnels_.end()) {
-        it->second.dl = dl;
+    if (it == tunnels_.end()) {
+        return;
+    }
+    it->second.dl = dl;
+    auto held = std::move(it->second.held);
+    it->second.held.clear();
+    for (auto& p : held) {
+        send_dl(it->second, std::move(p));
+    }
+}
+
+void Upf::deactivate(std::uint32_t ul_teid) {
+    if (auto it = tunnels_.find(ul_teid); it != tunnels_.end()) {
+        it->second.dl.reset();
     }
 }
 
@@ -42,8 +54,22 @@ void Upf::close(std::uint32_t ul_teid) {
     tunnels_.erase(ul_teid);
 }
 
-void Upf::send_dl(const Tunnel& t, Bytes packet) {
+void Upf::send_dl(Tunnel& t, Bytes packet) {
     if (!t.dl) {
+        // Deactivated: held, and the first one reported so the UE is paged.
+        const bool first = t.held.empty();
+        if (t.held.size() < 16) {
+            t.held.push_back(std::move(packet));
+            ++stats_.held;
+        }
+        if (first && on_pending_) {
+            for (const auto& [teid, tun] : tunnels_) {
+                if (&tun == &t) {
+                    on_pending_(teid);
+                    break;
+                }
+            }
+        }
         return;
     }
     const auto& a = t.dl->addr;
@@ -82,6 +108,7 @@ void Upf::on_ul(std::uint32_t teid, const entity::gtpu::UserData& d) {
         ++stats_.echo_from_ue;
         return;
     }
+    Tunnel& tt = it->second;
     ip::Echo reply = **e;
     reply.reply = true;
     ip::Ipv4 out;
@@ -92,13 +119,13 @@ void Upf::on_ul(std::uint32_t teid, const entity::gtpu::UserData& d) {
     out.dst = p->src;
     out.payload = ip::encode_icmp(reply);
     ++stats_.echo_replies;
-    send_dl(t, ip::encode(out));
+    send_dl(tt, ip::encode(out));
 }
 
 Result<void> Upf::ping_ue(std::uint32_t ul_teid, ip::Addr from, std::uint16_t seq) {
     auto it = tunnels_.find(ul_teid);
-    if (it == tunnels_.end() || !it->second.dl) {
-        return make_error(Errc::invalid_argument, ul_teid, "upf: no session with a downlink tunnel");
+    if (it == tunnels_.end()) {
+        return make_error(Errc::invalid_argument, ul_teid, "upf: no such session");
     }
     send_dl(it->second, ip::ping(from, it->second.ue, 0x5155, seq, 56));
     return {};

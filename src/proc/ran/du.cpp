@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "codec/asn1/msg/ngap.hpp"
+#include "platform/mutation.hpp"
 
 namespace ksim::proc::ran {
 
@@ -48,11 +49,33 @@ Du::Du(Executor& ex, IEventSink& events, DuConfig cfg, IAssoc& f1, std::function
 
 Du::~Du() {
     *alive_ = false;
-    for (auto* t : {&setup_retry_, &mib_timer_, &sib1_timer_}) {
+    for (auto* t : {&setup_retry_, &mib_timer_, &sib1_timer_, &supervision_}) {
         if (*t) {
             ex_.stop_timer(**t);
         }
     }
+}
+
+void Du::supervise() {
+    supervision_ = ex_.start_timer(cfg_.supervision, [this, alive = alive_] {
+        if (!*alive) {
+            return;
+        }
+        // TS 38.473 8.3.2: a UE the DU no longer hears from (radio link failure)
+        // is reported in UE CONTEXT RELEASE REQUEST, once.
+        for (auto& [id, ue] : ues_) {
+            if (!ue.cu_ue || ue.lost || ex_.now() - ue.last_ul <= cfg_.rlf) {
+                continue;
+            }
+            ue.lost = true;
+            events_.emit("ran.du.rlf", cfg_.id, {{"du_ue", str(id)}, {"rnti", str(ue.rnti)}});
+            if (!KSIM_MUTANT("no_release_on_radio_loss")) {
+                send_f1(f1ap::UeContextReleaseRequest{*ue.cu_ue, ue.du_ue, f1ap::Cause{"radioNetwork", "rl-failure-others"}},
+                        true);
+            }
+        }
+        supervise();
+    });
 }
 
 f1ap::NrCgi Du::cgi() const { return {ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc), cfg_.nci}; }
@@ -79,7 +102,7 @@ void Du::on_f1_event(LinkEvent e) {
     }
     // The association is gone: the cell goes down and so do its UEs.
     active_ = false;
-    for (auto* t : {&mib_timer_, &sib1_timer_}) {
+    for (auto* t : {&mib_timer_, &sib1_timer_, &supervision_}) {
         if (*t) {
             ex_.stop_timer(**t);
             t->reset();
@@ -178,6 +201,9 @@ void Du::handle(const f1ap::F1SetupResponse& m) {
         broadcast();
         schedule_si(cfg_.mib_period, true);
         schedule_si(cfg_.sib1_period, false);
+        if (!supervision_) {
+            supervise();
+        }
     }
 }
 
@@ -272,6 +298,13 @@ void Du::on_frame(const air::Frame& f) {
         return;
     case air::FrameType::ul_sdu:
         on_ul_sdu(f);
+        return;
+    case air::FrameType::keepalive:
+        if (auto r = by_rnti_.find(f.rnti); r != by_rnti_.end()) {
+            if (Ue* ue = by_du(r->second)) {
+                ue->last_ul = ex_.now();
+            }
+        }
         return;
     default:
         return;
@@ -386,6 +419,7 @@ void Du::on_msg3(const air::Frame& f) {
     ue.rnti = f.rnti;
     ue.radio_id = f.radio_id;
     ue.contention = air::contention_id_of(ccch.data);
+    ue.last_ul = ex_.now();
     auto cg = cell_group({1});
     if (!cg) {
         return;
@@ -404,6 +438,7 @@ void Du::on_ul_sdu(const air::Frame& f) {
     if (ue == nullptr || !ue->cu_ue) {
         return;
     }
+    ue->last_ul = ex_.now();
     for (const air::Sdu& s : f.sdus) {
         ++stats_.ul_sdus;
         if (ue->srbs.count(s.lcid) != 0) {

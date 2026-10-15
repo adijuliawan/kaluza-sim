@@ -15,6 +15,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -89,6 +90,21 @@ public:
     /// A DN ping to the UE's address in this session.
     Result<void> ping_ue(const std::string& supi, std::uint8_t psi, std::uint16_t seq);
 
+    // N12: the user plane follows the UE between CM-CONNECTED and CM-IDLE.
+    /// Every session of the UE loses its N3 downlink end (the N2 connection went).
+    void deactivate(const std::string& supi);
+    /// The sessions to bring back in an INITIAL CONTEXT SETUP (TS 23.502
+    /// 4.2.3.2): `psis` (bit n for PSI n), each with the transfer it was set up with.
+    std::vector<ngap::SessionSetupItem> reactivate(const std::string& supi, std::uint16_t psis) const;
+    /// Bit n for each PSI the SMF holds for the UE (the PDU session status).
+    std::uint16_t sessions_of(const std::string& supi) const;
+    /// The sessions with downlink waiting (bit n for PSI n).
+    std::uint16_t pending_of(const std::string& supi) const;
+    /// Every session of the UE goes without signalling (network de-registration).
+    void release_all(const std::string& supi);
+    /// Downlink waits for a session of this UE: the AMF pages it.
+    void on_page(std::function<void(const std::string& supi, std::uint8_t psi)> f) { on_page_ = std::move(f); }
+
     struct Session {
         std::uint8_t psi = 0;
         std::string dnn;
@@ -97,6 +113,8 @@ public:
         std::optional<ngap::GtpTunnel> dl;
         bool active = false;                       // the UE has the accept and the gNB the resources
         std::optional<std::uint8_t> release_pti;   // a RELEASE COMMAND awaits its COMPLETE
+        std::optional<ngap::SessionSetupItem> setup;   // as first set up, for a reactivation
+        bool pending = false;                      // downlink waits (the UE is paged)
     };
     const Session* session(const std::string& supi, std::uint8_t psi) const;
     std::size_t sessions() const;
@@ -122,6 +140,7 @@ private:
     std::map<std::string, int> backoff_rejected_;   // by SUPI
     int completes_ = 0;
     std::uint32_t fake_teid_ = 0x51000001;           // without a UPF
+    std::function<void(const std::string&, std::uint8_t)> on_page_;
     std::vector<Verdict> verdicts_;
 };
 

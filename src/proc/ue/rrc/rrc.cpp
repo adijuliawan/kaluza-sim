@@ -50,11 +50,63 @@ UeRrc::~UeRrc() {
     if (t300_timer_) {
         ex_.stop_timer(*t300_timer_);
     }
+    if (supervision_) {
+        ex_.stop_timer(*supervision_);
+    }
+}
+
+void UeRrc::power(bool on) {
+    off_after_setup_ = false;
+    radio_on_ = on;
+    mac_->mute(!on);
+    if (!on) {
+        if (state_ != RrcState::idle) {
+            go_idle();   // gone without a word: the network finds out by itself
+        }
+        camped_ = false;
+        mib_ok_ = false;
+        events_.emit("rrc.power", cfg_.id, {{"on", "0"}});
+        return;
+    }
+    events_.emit("rrc.power", cfg_.id, {{"on", "1"}});
+}
+
+void UeRrc::power_off_after_nas() {
+    if (pending_nas_) {
+        off_after_setup_ = true;
+        return;
+    }
+    power(false);
+}
+
+void UeRrc::supervise() {
+    supervision_.reset();
+    if (state_ != RrcState::connected) {
+        return;
+    }
+    // TS 38.331 §5.3.10 in the ideal link: the cell's downlink gone for `rlf`
+    // is a radio link failure; otherwise the KEEPALIVE keeps the DU's view.
+    if (ex_.now() - last_dl_ > cfg_.rlf) {
+        lost("radio link failure");
+        return;
+    }
+    mac_->keepalive();
+    supervision_ = ex_.start_timer(cfg_.keepalive, [this, alive = alive_] {
+        if (*alive) {
+            supervise();
+        }
+    });
 }
 
 // ---- broadcast and paging (§5.2.2, §5.3.2) ---------------------------------------------------
 
 void UeRrc::on_frame(const air::Frame& f) {
+    if (!radio_on_) {
+        return;
+    }
+    if (camped_ && f.cell_handle == cell_) {
+        last_dl_ = ex_.now();
+    }
     switch (f.type) {
     case air::FrameType::bch:
         on_mib(f);
@@ -120,6 +172,9 @@ void UeRrc::on_sib1(const air::Frame& f) {
     events_.emit("rrc.camped", cfg_.id,
                  {{"cell", str(cell_)}, {"tac", str(tac_)}, {"nci", str(static_cast<std::int64_t>(nci_))},
                   {"plmn", cfg_.plmn.mcc + cfg_.plmn.mnc}});
+    if (upper_.camped) {
+        upper_.camped(tac_);
+    }
     if (pending_nas_ && state_ == RrcState::idle) {
         establish();
     }
@@ -206,6 +261,9 @@ void UeRrc::setup_failed(const char* reason) {
     if (upper_.released) {
         upper_.released();
     }
+    if (std::exchange(off_after_setup_, false)) {
+        power(false);
+    }
 }
 
 void UeRrc::on_ccch(Bytes sdu) {
@@ -234,6 +292,14 @@ void UeRrc::on_ccch(Bytes sdu) {
     }
     add_srb(1);
     state_ = RrcState::connected;
+    last_dl_ = ex_.now();
+    if (!supervision_) {
+        supervision_ = ex_.start_timer(cfg_.keepalive, [this, alive = alive_] {
+            if (*alive) {
+                supervise();
+            }
+        });
+    }
     rrc::SetupComplete c;
     c.tid = setup.tid;
     c.selected_plmn = plmn_index_;
@@ -245,6 +311,9 @@ void UeRrc::on_ccch(Bytes sdu) {
     while (!pending_ul_.empty()) {
         ul_nas(std::move(pending_ul_.front()));
         pending_ul_.pop_front();
+    }
+    if (std::exchange(off_after_setup_, false)) {
+        power(false);   // the switch-off's DEREGISTRATION REQUEST went in RRCSetupComplete
     }
 }
 
@@ -517,6 +586,14 @@ void UeRrc::on_reconfiguration(const rrc::Reconfiguration& m) {
             }
         });
     }
+    if (m.bearers && !m.bearers->drbs.empty() && upper_.bearers_up) {
+        // After the NAS: data held for a service request goes once the DRBs are there.
+        ex_.post([this, alive = alive_] {
+            if (*alive && upper_.bearers_up) {
+                upper_.bearers_up();
+            }
+        });
+    }
 }
 
 // ---- user plane --------------------------------------------------------------------------------
@@ -562,7 +639,15 @@ void UeRrc::lost(const char* why) {
     // Called from a PDCP delivery: the bearers go once it has returned.
     ex_.post([this, alive = alive_] {
         if (*alive && state_ != RrcState::idle) {
+            // §5.3.11: no re-establishment in P1, so the failure goes up as such.
+            std::uint16_t up = 0;
+            for (const auto& [id, b] : drbs_) {
+                up = static_cast<std::uint16_t>(up | (1U << (b.psi & 0x0FU)));
+            }
             go_idle();
+            if (upper_.connection_failure) {
+                upper_.connection_failure(up);
+            }
             if (upper_.released) {
                 upper_.released();
             }
@@ -574,6 +659,10 @@ void UeRrc::go_idle() {
     if (t300_timer_) {
         ex_.stop_timer(*t300_timer_);
         t300_timer_.reset();
+    }
+    if (supervision_) {
+        ex_.stop_timer(*supervision_);
+        supervision_.reset();
     }
     drbs_.clear();
     srbs_.clear();

@@ -105,6 +105,10 @@ public:
     void on_downlink(const SmDownlink& d);
     /// Every session released locally (de-registration, switch-off).
     void release_all_local(const char* why);
+    /// The PDU session status (§9.11.3.44): bit n for each PSI not PDU SESSION INACTIVE.
+    std::uint16_t active_bitmap() const;
+    /// §5.6.1.4, §5.5.1.3.4: sessions the network does not hold are released locally.
+    void sync(std::uint16_t network);
 
     std::vector<SessionInfo> sessions() const;
     const SessionInfo* session(std::uint8_t psi) const;

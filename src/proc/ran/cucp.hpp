@@ -114,6 +114,10 @@ public:
     bool e1_ready() const noexcept { return e1_ready_; }
     /// The PDU sessions the RAN holds for the UE with this RAN UE NGAP ID.
     std::vector<std::uint8_t> sessions_of(std::uint32_t ran_ue) const;
+    /// A gNB-initiated release (TS 38.413 §8.3.2; `ksim-ctl gnb ue-release`):
+    /// UE CONTEXT RELEASE REQUEST with a radio network cause ("user-inactivity").
+    /// Errc::invalid_argument for a UE the AMF does not know yet.
+    Result<void> request_release(std::uint32_t ran_ue, const std::string& cause = "user-inactivity");
     /// The AMF Name of the last NG SETUP RESPONSE, "" before one.
     const std::string& amf_name() const noexcept { return amf_name_; }
 

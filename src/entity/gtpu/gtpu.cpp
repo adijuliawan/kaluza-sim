@@ -93,6 +93,10 @@ Endpoint::Endpoint(IDatagram& port, std::uint8_t tag) : port_(port), tag_(tag) {
     port_.set_handler([this](ByteView in, const ksim::Endpoint& from) { on_datagram(in, from); });
 }
 
+Endpoint::~Endpoint() {
+    port_.set_handler({});   // the port may outlive this endpoint (a gNB restart keeps N3's socket)
+}
+
 std::uint32_t Endpoint::bind(OnData rx) {
     std::uint32_t teid = 0;
     do {

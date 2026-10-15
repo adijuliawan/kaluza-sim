@@ -123,7 +123,78 @@ SessionProfile SessionProfile::from_yaml(const Yaml& y) {
     return p;
 }
 
-Smf::Smf(SessionProfile p, Upf* upf) : p_(std::move(p)), upf_(upf) {}
+Smf::Smf(SessionProfile p, Upf* upf) : p_(std::move(p)), upf_(upf) {
+    if (upf_ != nullptr) {
+        upf_->on_dl_pending([this](std::uint32_t teid) {
+            for (auto& [key, s] : sessions_) {
+                if (s.ul_teid == teid) {
+                    s.pending = true;
+                    if (on_page_) {
+                        on_page_(key.first, key.second);
+                    }
+                    return;
+                }
+            }
+        });
+    }
+}
+
+void Smf::deactivate(const std::string& supi) {
+    for (auto& [key, s] : sessions_) {
+        if (key.first == supi) {
+            s.active = false;
+            s.dl.reset();
+            if (upf_ != nullptr) {
+                upf_->deactivate(s.ul_teid);
+            }
+        }
+    }
+}
+
+std::vector<ngap::SessionSetupItem> Smf::reactivate(const std::string& supi, std::uint16_t psis) const {
+    std::vector<ngap::SessionSetupItem> out;
+    for (const auto& [key, s] : sessions_) {
+        if (key.first == supi && (psis & (1U << key.second)) != 0 && s.setup) {
+            ngap::SessionSetupItem item = *s.setup;
+            item.nas.reset();   // no 5GSM message this time: only the resources
+            out.push_back(std::move(item));
+        }
+    }
+    return out;
+}
+
+std::uint16_t Smf::sessions_of(const std::string& supi) const {
+    std::uint16_t out = 0;
+    for (const auto& [key, s] : sessions_) {
+        if (key.first == supi) {
+            out = static_cast<std::uint16_t>(out | (1U << key.second));
+        }
+    }
+    return out;
+}
+
+std::uint16_t Smf::pending_of(const std::string& supi) const {
+    std::uint16_t out = 0;
+    for (const auto& [key, s] : sessions_) {
+        if (key.first == supi && s.pending) {
+            out = static_cast<std::uint16_t>(out | (1U << key.second));
+        }
+    }
+    return out;
+}
+
+void Smf::release_all(const std::string& supi) {
+    for (auto it = sessions_.begin(); it != sessions_.end();) {
+        if (it->first.first == supi) {
+            if (upf_ != nullptr) {
+                upf_->close(it->second.ul_teid);
+            }
+            it = sessions_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
 
 void Smf::check(bool ok, const char* clause, const char* what, std::string detail) {
     verdicts_.push_back(Verdict{clause, what, ok, std::move(detail)});
@@ -289,6 +360,7 @@ std::vector<SmAction> Smf::on_establishment(const std::string& supi, std::uint8_
     item.transfer.type = "ipv4";
     item.transfer.security = ngap::SecurityIndication{p_.up_integrity, "required"};
     item.transfer.flows = {ngap::QosFlowRequest{p_.qfi, p_.five_qi, ngap::Arp{}}};
+    s.setup = item;
     sessions_[{supi, psi}] = s;
     std::vector<SmAction> out;
     out.push_back(SmAction{psi, std::move(*wire), std::move(item), false});
@@ -303,8 +375,9 @@ void Smf::on_setup_response(const std::string& supi, std::uint8_t psi, const nga
     }
     it->second.dl = dl;
     it->second.active = true;
+    it->second.pending = false;
     if (upf_ != nullptr) {
-        upf_->set_dl(it->second.ul_teid, dl);
+        upf_->set_dl(it->second.ul_teid, dl);   // what was held goes now
     }
 }
 

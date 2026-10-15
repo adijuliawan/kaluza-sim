@@ -60,6 +60,8 @@ struct RrcConfig {
     entity::UeMacConfig mac;                // radio_id and the random access parameters
     bool allow_null_integrity = false;      // D1: NIA0 only as the bisect switch
     Millis t300_default = 1000;             // until SIB1 gives T300
+    Millis keepalive = 200;                 // KAIR KEEPALIVE while connected (P1 N12)
+    Millis rlf = 1000;                      // no downlink this long while connected: radio link failure
     std::optional<Bytes> nr_capability;     // the persona's UE-NR-Capability; a generic one if absent
     /// Each RRC message in clear as the UE sends or takes it, with Wireshark's
     /// channel name ("nr-rrc.ul.dcch", …) for the run's Uu capture. Broadcast
@@ -75,6 +77,11 @@ struct RrcUpper {
     std::function<std::optional<std::uint64_t>()> s_tmsi;        // the 5G-S-TMSI, if the UE has a 5G-GUTI
     std::function<void()> paged;                                 // a paging record for this UE
     std::function<void(std::uint8_t psi, std::optional<sdap::DlHeader>, Bytes)> dl_data;
+    std::function<void()> bearers_up;                            // a reconfiguration added DRBs (N12)
+    /// N12: "RRC Connection failure" (TS 24.501 5.5.1.3.2 f), just before
+    /// `released`; bit n for PSI n whose user plane was up.
+    std::function<void(std::uint16_t up_psis)> connection_failure;
+    std::function<void(std::uint32_t tac)> camped;               // the UE camps on a cell of its PLMN (N12)
 };
 
 class UeRrc final : public INasLower {
@@ -90,6 +97,13 @@ public:
     void release_local() override;
 
     void on_frame(const air::Frame& f);
+    /// Power (N12): off mutes the radio and drops the connection without a word
+    /// (no release reported); on starts from finding the cell again.
+    void power(bool on);
+    /// Switch-off (N12): the radio goes off once the NAS message just handed
+    /// down is on the air: at once in RRC_CONNECTED, after RRCSetupComplete
+    /// carried it from RRC_IDLE, or when that setup fails.
+    void power_off_after_nas();
     /// Uplink user data of QoS flow `qfi` in PDU session `psi`.
     Result<void> send_data(std::uint8_t psi, std::uint8_t qfi, Bytes ip);
 
@@ -129,6 +143,7 @@ private:
     void send_dcch(Result<Bytes> msg, std::uint8_t srb = 1);
     void ul_nas(Bytes pdu);
     void go_idle();
+    void supervise();
     void lost(const char* why);
 
     Executor& ex_;
@@ -143,12 +158,16 @@ private:
     RrcState state_ = RrcState::idle;
     bool mib_ok_ = false;
     bool camped_ = false;
+    bool off_after_setup_ = false;   // power_off_after_nas waits for the setup
+    bool radio_on_ = true;           // off: nothing heard, nothing sent
     std::uint32_t cell_ = 0;
     std::uint32_t tac_ = 0;
     std::uint64_t nci_ = 0;
     std::uint8_t plmn_index_ = 1;
     Millis t300_ = 1000;
     std::optional<TimerId> t300_timer_;
+    std::optional<TimerId> supervision_;
+    Millis last_dl_ = 0;
     std::optional<std::uint16_t> s_tmsi_part2_;
     std::optional<Bytes> pending_nas_;
     std::deque<Bytes> pending_ul_;

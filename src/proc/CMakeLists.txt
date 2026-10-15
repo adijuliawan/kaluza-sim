@@ -10,6 +10,7 @@ add_library(ksim_proc STATIC
     ue/nas_mm/state.cpp
     ue/nas_mm/suci.cpp
     ue/nas_sec/nas_sec.cpp
+    ue/nas_sec/persist.cpp
     ue/nas_sm/sm.cpp
     ue/rrc/rrc.cpp
     ran/du.cpp

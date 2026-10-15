@@ -53,6 +53,20 @@ constexpr std::array kTransitions{
     MmTransition{S::registered_normal_service, S::deregistered_no_supi, "5.4.1.3.5"},
     MmTransition{S::deregistered_initiated, S::deregistered_normal_service, "5.5.2.2.2, 5.5.2.2.6"},
     MmTransition{S::deregistered_initiated, S::deregistered_no_supi, "5.4.1.3.5"},
+    // N12
+    MmTransition{S::registered_normal_service, S::registered_initiated, "5.5.1.3.2"},
+    MmTransition{S::registered_normal_service, S::service_request_initiated, "5.6.1.2"},
+    MmTransition{S::service_request_initiated, S::registered_normal_service, "5.6.1.4, 5.6.1.5, 5.6.1.7"},
+    MmTransition{S::service_request_initiated, S::deregistered_normal_service, "5.6.1.5"},
+    MmTransition{S::registered_normal_service, S::deregistered_normal_service, "5.5.2.3.2"},
+    MmTransition{S::registered_initiated, S::deregistered_normal_service, "5.5.2.3.2"},
+    MmTransition{S::service_request_initiated, S::null, "power off"},
+    MmTransition{S::deregistered_normal_service, S::null, "power off"},
+    MmTransition{S::deregistered_initiated, S::null, "power off"},
+    MmTransition{S::deregistered_attempting_registration, S::null, "power off"},
+    MmTransition{S::deregistered_limited_service, S::null, "power off"},
+    MmTransition{S::deregistered_plmn_search, S::null, "power off"},
+    MmTransition{S::deregistered_no_supi, S::null, "power off"},
 };
 
 } // namespace

@@ -101,6 +101,11 @@ public:
     /// MAC, then deciphering. A message that verifies advances the stored
     /// downlink COUNT; one that does not changes nothing.
     Inbound unprotect(ByteView wire);
+    /// §4.4.6, TS 33.501 6.4.6: the value part of an initial message's NAS
+    /// message container, ciphered with this context's NEA and the COUNT of the
+    /// message that carries it, uplink (direction 0); a stream cipher, so the
+    /// same call deciphers it at the network. 5G-EA0 leaves it as it is.
+    Result<Bytes> container_cipher(ByteView value, std::uint32_t count) const;
     /// The MAC a message would carry, for a candidate context checking a
     /// SECURITY MODE COMMAND before taking it into use.
     Result<crypto::Mac> mac_of(std::uint32_t count, std::uint8_t direction, ByteView seq_and_message) const;

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <utility>
 
+#include "codec/nas/build.hpp"
+
 namespace ksim::corestub {
 
 namespace {
@@ -58,9 +60,110 @@ const char* name_of(const ngap::Pdu& p) {
 
 NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc& ng, IDatagram* n3,
                  std::array<std::uint8_t, 4> n3_addr)
-    : ex_(ex), home_(home), plmn_(std::move(plmn)), p_(std::move(p)), ng_(ng),
+    : ex_(ex), home_(home), plmn_(std::move(plmn)), p_(std::move(p)), ng_(&ng),
       upf_(n3 != nullptr ? std::make_unique<Upf>(*n3, n3_addr) : nullptr), smf_(p_.session, upf_.get()) {
-    ng_.set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [](LinkEvent) {});
+    ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [](LinkEvent) {});
+    smf_.on_page([this](const std::string& supi, std::uint8_t) { page(supi); });
+}
+
+void NgapAmf::rebind(IAssoc& ng) {
+    ng_ = &ng;
+    ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [](LinkEvent) {});
+    ng_setup_ = false;
+    for (auto& [id, ue] : ues_) {
+        drop_n2(ue);
+    }
+}
+
+void NgapAmf::drop_n2(Ue& ue) {
+    if (!ue.connected) {
+        return;
+    }
+    ue.connected = false;
+    ue.releasing = false;
+    ue.setups.clear();
+    ue.releases.clear();
+    ue.nas->on_ue_released();
+    smf_.deactivate(ue.nas->supi());
+}
+
+void NgapAmf::status_indication() {
+    const ngap::PlmnId plmn = ngap::plmn_id(plmn_.mcc, plmn_.mnc);
+    send(ngap::AmfStatusIndication{{ngap::Guami{plmn, p_.amf_region, p_.amf_set, p_.amf_pointer}}}, 0);
+}
+
+bool NgapAmf::deregister(const std::string& supi, bool reregistration_required) {
+    Amf* a = nas_by_supi(supi);
+    return a != nullptr && a->network_deregister(reregistration_required);
+}
+
+void NgapAmf::set_t3512(std::optional<int> seconds) {
+    p_.t3512_s = seconds;
+    for (auto& [id, ue] : ues_) {
+        ue.nas->profile().t3512_s = seconds;
+    }
+}
+
+void NgapAmf::page(const std::string& supi) {
+    Ue* ue = nullptr;
+    for (auto it = order_.rbegin(); it != order_.rend(); ++it) {
+        Ue* u = by_amf(*it);
+        if (u != nullptr && u->nas->supi() == supi) {
+            ue = u;
+            break;
+        }
+    }
+    if (ue == nullptr || ue->connected) {
+        return;   // a connected UE gets its downlink once the gNB's end is back
+    }
+    const auto s = ue->nas->s_tmsi();
+    if (!s || (ue->paged_at && ex_.now() - *ue->paged_at < 2'000)) {
+        return;
+    }
+    ue->paged_at = ex_.now();
+    ++pagings_;
+    // TS 23.502 4.2.3.3: downlink waits for an idle UE: PAGING with its 5G-S-TMSI to the TAs it registered in.
+    std::vector<ngap::Tai> tais;
+    tais.reserve(p_.tacs.size());
+    for (std::uint32_t tac : p_.tacs) {
+        tais.push_back(ngap::Tai{ngap::plmn_id(plmn_.mcc, plmn_.mnc), tac});
+    }
+    send(ngap::Paging{ngap::FiveGSTmsi::of(*s), std::move(tais), std::nullopt}, 0);
+}
+
+NgapAmf::Ue* NgapAmf::returning(const ngap::InitialUeMessage& m) {
+    std::optional<std::uint64_t> s;
+    if (m.s_tmsi) {
+        s = m.s_tmsi->value();
+    }
+    std::optional<nas::ie::MobileIdentity> guti;
+    Bytes plain;
+    if (nas::is_protected(m.nas)) {
+        if (auto p = nas::decode_protected(m.nas)) {
+            plain = p->payload;   // an initial message is integrity protected only: its IEs are readable
+        }
+    } else {
+        plain = m.nas;
+    }
+    if (auto msg = nas::decode(plain)) {
+        if (const Bytes* id = nas::get(*msg, "5GS mobile identity")) {
+            if (auto d = nas::ie::MobileIdentity::decode(*id); d && d->type == nas::ie::MobileIdentity::Type::guti) {
+                guti = *d;
+            }
+        }
+        if (const Bytes* id = nas::get(*msg, "5G-S-TMSI")) {
+            if (auto d = nas::ie::MobileIdentity::decode(*id); d && d->type == nas::ie::MobileIdentity::Type::s_tmsi) {
+                s = ngap::FiveGSTmsi{d->amf_set, d->amf_pointer, d->tmsi}.value();
+            }
+        }
+    }
+    for (auto it = order_.rbegin(); it != order_.rend(); ++it) {
+        Ue* ue = by_amf(*it);
+        if (ue != nullptr && ((s && ue->nas->owns_s_tmsi(*s)) || (guti && ue->nas->owns(*guti)))) {
+            return ue;
+        }
+    }
+    return nullptr;
 }
 
 void NgapAmf::check(bool ok, const char* clause, const char* what, std::string detail) {
@@ -121,13 +224,13 @@ NgapAmf::Ue* NgapAmf::by_amf(std::uint64_t id) {
 }
 
 std::uint16_t NgapAmf::stream_of(const Ue& ue) const {
-    if (ng_.out_streams() <= 1) {
+    if (ng_->out_streams() <= 1) {
         return 0;
     }
-    return static_cast<std::uint16_t>(1U + ue.ran_ue % (ng_.out_streams() - 1U));
+    return static_cast<std::uint16_t>(1U + ue.ran_ue % (ng_->out_streams() - 1U));
 }
 
-void NgapAmf::send_raw(ByteView pdu, std::uint16_t stream) { (void)ng_.send(pdu, SctpMeta{kNgapPpid, stream}); }
+void NgapAmf::send_raw(ByteView pdu, std::uint16_t stream) { (void)ng_->send(pdu, SctpMeta{kNgapPpid, stream}); }
 
 void NgapAmf::send(const ngap::Pdu& p, std::uint16_t stream) {
     auto wire = ngap::encode(p);
@@ -150,11 +253,45 @@ void NgapAmf::release(std::size_t n, ngap::Cause cause) {
 }
 
 void NgapAmf::attach_nas(Ue& ue) {
-    const std::uint64_t id = ue.amf_ue;
     // One 5G-TMSI per UE: the profile's, then the next ones in arrival order.
     Profile p = p_;
     p.tmsi = p_.tmsi + static_cast<std::uint32_t>(order_.size() - 1);
     ue.nas = std::make_unique<Amf>(ex_, home_, plmn_, std::move(p));
+    relink(ue);
+}
+
+void NgapAmf::send_ics(Ue& u, Bytes nas, SecretBytes kgnb, std::vector<ngap::SessionSetupItem> sessions) {
+    const auto& caps = u.nas->ue_capabilities();
+    ngap::InitialContextSetupRequest r;
+    r.amf = u.amf_ue;
+    r.ran = u.ran_ue;
+    const ngap::PlmnId plmn = ngap::plmn_id(plmn_.mcc, plmn_.mnc);
+    r.guami = ngap::Guami{plmn, p_.amf_region, p_.amf_set, p_.amf_pointer};
+    for (std::uint8_t sst : p_.allowed_sst) {
+        r.allowed_nssai.push_back(ngap::Snssai{sst, std::nullopt});
+    }
+    r.nr_enc = caps ? nr_map(caps->ea) : 0;
+    r.nr_int = caps ? nr_map(caps->ia) : 0;
+    r.security_key.assign(kgnb.expose().begin(), kgnb.expose().end());
+    if (u.radio_capability) {
+        r.ue_radio_capability = u.radio_capability;
+    }
+    if (!sessions.empty()) {
+        r.ue_ambr = ngap::Ambr{1'000'000'000, 1'000'000'000};   // mandatory with sessions (9.2.2.1)
+        for (const auto& item : sessions) {
+            u.setups.push_back(item.psi);
+        }
+        r.sessions = std::move(sessions);
+    }
+    r.nas = std::move(nas);
+    u.ics_sent = true;
+    u.ics_answered = false;
+    send(r, stream_of(u));
+    secure_zero(r.security_key);
+}
+
+void NgapAmf::relink(Ue& ue) {
+    const std::uint64_t id = ue.amf_ue;
     Amf::Link link;
     link.to_ue = [this, id](Bytes nas) {
         if (Ue* u = by_amf(id)) {
@@ -168,29 +305,14 @@ void NgapAmf::attach_nas(Ue& ue) {
         }
     };
     link.initial_context = [this, id](Bytes accept, SecretBytes kgnb) {
-        Ue* u = by_amf(id);
-        if (u == nullptr) {
-            return;
+        if (Ue* u = by_amf(id)) {
+            send_ics(*u, std::move(accept), std::move(kgnb), {});
         }
-        const auto& caps = u->nas->ue_capabilities();
-        ngap::InitialContextSetupRequest r;
-        r.amf = u->amf_ue;
-        r.ran = u->ran_ue;
-        const ngap::PlmnId plmn = ngap::plmn_id(plmn_.mcc, plmn_.mnc);
-        r.guami = ngap::Guami{plmn, p_.amf_region, p_.amf_set, p_.amf_pointer};
-        for (std::uint8_t sst : p_.allowed_sst) {
-            r.allowed_nssai.push_back(ngap::Snssai{sst, std::nullopt});
+    };
+    link.service_accept = [this, id](Bytes accept, SecretBytes kgnb, std::uint16_t psis) {
+        if (Ue* u = by_amf(id)) {
+            send_ics(*u, std::move(accept), std::move(kgnb), smf_.reactivate(u->nas->supi(), psis));
         }
-        r.nr_enc = caps ? nr_map(caps->ea) : 0;
-        r.nr_int = caps ? nr_map(caps->ia) : 0;
-        r.security_key.assign(kgnb.expose().begin(), kgnb.expose().end());
-        if (u->radio_capability) {
-            r.ue_radio_capability = u->radio_capability;
-        }
-        r.nas = std::move(accept);
-        u->ics_sent = true;
-        send(r, stream_of(*u));
-        secure_zero(r.security_key);
     };
     link.session_setup = [this, id](Bytes nas, ngap::SessionSetupItem item) {
         Ue* u = by_amf(id);
@@ -245,11 +367,37 @@ void NgapAmf::on_message(ByteView msg) {
                        }
                        r.plmns = {{our_tai.plmn, slices}};
                        ng_setup_ = true;
+                       for (auto& [uid, ue] : ues_) {
+                           drop_n2(ue);   // TS 38.413 8.7.1.2: the NG-RAN node's UE contexts are gone
+                       }
                        send(r, 0);
                    },
                    [&](const ngap::InitialUeMessage& m) {
                        check(m.tai == our_tai, "TS 38.413 9.2.5.1", "the user location's TAI is the cell's", "");
                        check(!m.cause.empty(), "TS 38.413 9.2.5.1", "an RRC establishment cause");
+                       if (Ue* old = returning(m)) {
+                           // A returning UE: its NAS context under a new N2 connection (N12).
+                           const std::uint64_t old_id = old->amf_ue;
+                           Ue moved = std::move(*old);
+                           ues_.erase(old_id);
+                           if (moved.connected) {
+                               moved.nas->on_ue_released();   // the old connection is stale
+                           }
+                           moved.amf_ue = next_amf_ue_++;
+                           moved.ran_ue = m.ran;
+                           moved.connected = true;
+                           moved.ics_sent = moved.ics_answered = moved.releasing = false;
+                           moved.setups.clear();
+                           moved.releases.clear();
+                           moved.paged_at.reset();
+                           const std::uint64_t nid = moved.amf_ue;
+                           ues_.emplace(nid, std::move(moved));
+                           std::replace(order_.begin(), order_.end(), old_id, nid);
+                           Ue& u = ues_.at(nid);
+                           relink(u);
+                           u.nas->on_uplink(m.nas, true);
+                           return;
+                       }
                        Ue ue;
                        ue.amf_ue = next_amf_ue_++;
                        ue.ran_ue = m.ran;
@@ -273,6 +421,14 @@ void NgapAmf::on_message(ByteView msg) {
                        check(ue != nullptr && ue->ics_sent, "TS 38.413 8.3.1.2", "the response answers a setup request");
                        if (ue != nullptr) {
                            ue->ics_answered = true;
+                           for (const auto& s : m.sessions) {
+                               ue->setups.erase(std::remove(ue->setups.begin(), ue->setups.end(), s.psi), ue->setups.end());
+                               smf_.on_setup_response(ue->nas->supi(), s.psi, s.transfer.dl);   // the user plane is back
+                           }
+                           for (const auto& f : m.failed) {
+                               check(false, "TS 38.413 8.3.1.2", "the gNB brought the session back",
+                                     std::to_string(f.psi) + " " + f.cause.group + "/" + f.cause.value);
+                           }
                        }
                    },
                    [&](const ngap::InitialContextSetupFailure& m) {
@@ -282,7 +438,7 @@ void NgapAmf::on_message(ByteView msg) {
                        Ue* ue = by_amf(m.amf);
                        check(ue != nullptr && ue->releasing, "TS 38.413 8.3.3.2", "the complete answers a release command");
                        if (ue != nullptr) {
-                           ue->nas->on_ue_released();
+                           drop_n2(*ue);   // the NAS context stays; the user plane is deactivated
                        }
                    },
                    [&](const ngap::UeContextReleaseRequest& m) {

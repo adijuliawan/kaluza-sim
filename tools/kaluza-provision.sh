@@ -21,7 +21,10 @@
 # time and never by this script; the client secret's file name is
 # KSIM_PROV_SECRET_FILE (default client-secret). The range master is
 # ~/.kaluza-sim/secrets/range-master.key (KSIM_MASTER). ksim-sim prints UE_ID,
-# STATUS, PROFILE and K_FPR only.
+# STATUS, PROFILE and K_FPR only, then CREATED, EXISTING, FAILED and NOT_TRIED.
+# A create counts 201 as created and 412 as existing; the first other status,
+# 0 (TLS or the connection) included, stops the run with STOPPED_AT: no retry
+# against an address that may have gone stale (agreed for W0).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SIM="${KSIM_SIM:-$ROOT/build/dev/apps/ksim-sim/ksim-sim}"

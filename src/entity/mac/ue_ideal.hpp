@@ -66,6 +66,11 @@ public:
     void send(std::uint8_t lcid, RlcMode mode, Bytes sdu) override;
     void attach(std::uint8_t lcid, IRlcBearer* bearer) override;
     void on_frame(const air::Frame& f);
+    /// A KAIR KEEPALIVE with the C-RNTI (P1 N12): the DU's radio supervision
+    /// sees the UE while it has nothing else to send.
+    void keepalive();
+    /// Nothing goes on the air while muted (an abrupt power off).
+    void mute(bool on) noexcept { muted_ = on; }
 
     std::optional<std::uint16_t> c_rnti() const noexcept { return c_rnti_; }
     bool ra_running() const noexcept { return ra_.has_value(); }
@@ -97,6 +102,7 @@ private:
     std::optional<Ra> ra_;
     std::map<std::uint8_t, IRlcBearer*> bearers_;
     std::uint16_t seq_ = 0;
+    bool muted_ = false;
     UeMacStats stats_;
 };
 

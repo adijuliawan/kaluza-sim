@@ -26,15 +26,33 @@
 // session ID, or with the 5GMM cause and back-off timer of a message the AMF
 // could not forward.
 //
-// N12 adds the service request, idle mode, the periodic update, network
-// de-registration, identification, the configuration update and the protected
-// initial message of a UE that holds a context (§4.4.6). Until then an initial
-// registration starts without a 5G NAS security context.
+// N12 adds:
+//  - 5GMM-IDLE: the release of the N1 connection is an event, T3512 runs in
+//    idle and its expiry starts a periodic registration (§5.3.7, §5.5.1.3);
+//  - the protected initial message of a UE that holds a context (§4.4.6):
+//    integrity protected, the whole message ciphered in a NAS message
+//    container when it has non-cleartext IEs; K_gNB from its COUNT when no
+//    SECURITY MODE COMMAND follows in that connection;
+//  - the service request (§5.6.1) for uplink data, for paging, and for 5GSM
+//    signalling queued while idle, under T3517; the accept's PDU session
+//    status synchronises 5GSM; the reject causes that call for a new
+//    registration;
+//  - network-initiated de-registration (§5.5.2.3) with re-registration, the
+//    configuration update (§5.4.4), identification (§5.4.3);
+//  - registration rejects #22 (T3346) and the forbidden lists of #11, #12,
+//    #13 and #15 (§5.5.1.2.5), which hold back a new registration;
+//  - the USIM (TS 31.102 4.4.11; §4.4.2.1, §5.5.1.2.4): the 5G-GUTI, TAI and
+//    update status in EF.5GS3GPPLOCI on every change; the native context in
+//    EF.5GS3GPPNSC, marked invalid when an initial registration starts and
+//    stored valid on entering 5GMM-DEREGISTERED, and K_AUSF and K_SEAF in
+//    EF.5GAUTHKEYS; all read back at power on, which begins from the card
+//    alone (nothing of the last power cycle stays in memory).
 
 #pragma once
 
 #include <array>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -54,9 +72,9 @@
 
 namespace ksim::proc::ue {
 
-/// The UE's 5GMM timers (§10.2, Table 10.2.2) the entity runs in N5.
-enum class MmTimer : std::uint8_t { t3502, t3510, t3511, t3516, t3520, t3521 };
-inline constexpr std::size_t kMmTimerCount = 6;
+/// The UE's 5GMM timers (§10.2, Table 10.2.2) the entity runs.
+enum class MmTimer : std::uint8_t { t3502, t3510, t3511, t3516, t3520, t3521, t3512, t3517, t3346 };
+inline constexpr std::size_t kMmTimerCount = 9;
 const char* mm_timer_name(MmTimer t) noexcept;
 
 /// Default values from Table 10.2.2.
@@ -67,6 +85,17 @@ struct MmTimerValues {
     Millis t3516 = 30'000;
     Millis t3520 = 15'000;
     Millis t3521 = 15'000;
+    Millis t3512 = 3'240'000;   // 54 min, when the network gives none
+    Millis t3517 = 15'000;
+};
+
+/// What 5GMM asks of 5GSM (N12): the sessions it holds, for the PDU session
+/// status (§9.11.3.44); a local release of those the network does not hold;
+/// a local release of every one (network de-registration).
+struct SmHooks {
+    std::function<std::uint16_t()> active;                  // bit n: PSI n not PDU SESSION INACTIVE
+    std::function<void(std::uint16_t network)> sync;        // keep only these
+    std::function<void()> release_all;
 };
 
 /// A 5GSM message for UL NAS TRANSPORT (§5.4.5.2.1).
@@ -101,6 +130,7 @@ struct MmConfig {
     std::function<void(bool uplink, ByteView plain)> tap;
     /// 5GSM's downlink (N10).
     std::function<void(const SmDownlink&)> sm;
+    SmHooks sm_hooks;
 };
 
 class Mm {
@@ -128,12 +158,30 @@ public:
     void on_nas(ByteView wire);
     /// The N1 signalling connection was released, or the lower layers failed.
     void on_released();
+    /// "RRC Connection failure" from the lower layers, before on_released:
+    /// with no signalling pending, a mobility registration follows (§5.5.1.3.2 f)
+    /// naming the sessions whose user plane was up (bit n for PSI n).
+    void on_connection_failure(std::uint16_t up_psis);
+    /// The cell the UE camps on: its TAI is the current TAI (§5.3.13).
+    void on_camped(std::uint32_t tac);
 
     // ---- from 5GSM
 
-    /// UL NAS TRANSPORT (§5.4.5.2.2), in 5GMM-REGISTERED with an N1 signalling
-    /// connection; Errc::closed without one (the service request is N12).
+    /// UL NAS TRANSPORT (§5.4.5.2.2) in 5GMM-REGISTERED. In 5GMM-IDLE the
+    /// message waits for a service request (signalling) to bring the connection.
     Result<void> send_sm(const SmUplink& u);
+
+    // ---- N12
+
+    /// SERVICE REQUEST (§5.6.1.2) from 5GMM-IDLE: `type` a §9.11.3.50 value,
+    /// `uplink` the PSIs with uplink data pending. Errc::invalid_argument when
+    /// not registered with a 5G-GUTI and a context, or a procedure runs.
+    Result<void> service_request(std::uint8_t type, std::uint16_t uplink);
+    /// A paging record for this UE from the lower layers (§5.6.2.2.1).
+    void on_paged();
+    /// Power off without signalling: what is in memory is lost, the card keeps
+    /// what it holds (nothing is written).
+    void power_off_abrupt();
 
     // ---- read side
 
@@ -157,6 +205,8 @@ public:
     /// The 5G-S-TMSI of the 5G-GUTI (AMF set, pointer, 5G-TMSI: 48 bits), if any.
     std::optional<std::uint64_t> s_tmsi() const noexcept;
     bool running(MmTimer t) const noexcept { return timers_.at(static_cast<std::size_t>(t)).has_value(); }
+    /// The PSIs with uplink data a service request is waiting for.
+    std::uint16_t pending_uplink() const noexcept { return sr_uplink_; }
     /// Transitions made that mm_transitions() does not list (must stay 0).
     std::uint64_t unlisted_transitions() const noexcept { return unlisted_; }
 
@@ -170,7 +220,29 @@ private:
     coro::Task<void> run_aka(std::shared_ptr<bool> alive, std::uint64_t gen, nas::ie::NgKsi ngksi, Bytes rand,
                              Bytes autn, Bytes abba);
 
-    void start_registration();
+    enum class RegType : std::uint8_t { initial = 1, mobility = 2, periodic = 3 };
+    void start_registration(RegType type = RegType::initial);
+    /// §4.4.6: the initial message as it goes, protected with the current context.
+    Result<Bytes> protect_initial(const nas::Message& m);
+    void on_service_accept(const nas::Message& m);
+    void on_service_reject(const nas::Message& m);
+    void on_network_deregistration(const nas::Message& m);
+    void on_configuration_update(const nas::Message& m);
+    void on_identity_request(const nas::Message& m);
+    void flush_pending_sm();
+    void entering_connected();
+    void entering_deregistered();
+    // The USIM (TS 31.102 4.4.11), written in order by one job at a time.
+    struct CardWrite {
+        std::uint16_t fid = 0;
+        bool record = false;
+        std::shared_ptr<SecretBytes> data;   // two of the files hold keys
+    };
+    void card_job(CardWrite w);
+    coro::Task<void> run_card_jobs(std::shared_ptr<bool> alive);
+    void persist_loci();
+    void persist_nsc(bool valid);
+    void persist_auth_keys();
     void registration_abnormal(const char* reason);
     void send_authentication_failure(std::uint8_t cause, Bytes auts);
     void network_failed_authentication();
@@ -232,6 +304,26 @@ private:
     bool dereg_switch_off_ = false;
     std::optional<std::uint32_t> kgnb_count_;   // the uplink NAS COUNT K_gNB takes
     int t3521_expiries_ = 0;
+
+    // N12
+    RegType reg_type_ = RegType::initial;
+    bool recovery_pending_ = false;    // §5.5.1.3.2 f
+    std::uint16_t reg_uplink_ = 0;     // the mobility registration's Uplink data status, until accepted
+    std::uint16_t recovery_up_ = 0;    // its Uplink data status
+    std::optional<nas::ie::Tai> last_tai_;      // the last visited registered TAI
+    std::optional<nas::ie::Tai> current_tai_;   // the camped cell's
+    std::uint8_t sr_type_ = 0;
+    std::uint16_t sr_uplink_ = 0;           // the PSIs the service request asked for
+    std::vector<SmUplink> pending_sm_;      // 5GSM messages waiting for the connection
+    bool reregister_pending_ = false;
+    bool update_registration_pending_ = false;   // a configuration update asked for one
+    std::vector<nas::ie::Plmn> forbidden_plmns_;
+    std::vector<nas::ie::Tai> forbidden_tais_;
+    SecretBytes kausf_;
+    SecretBytes kseaf_;
+    std::deque<CardWrite> card_jobs_;
+    bool card_busy_ = false;
+    std::size_t nsc_record_size_ = 62;
 
     Bytes stored_rand_;
     Bytes stored_res_star_;          // RES* is sent in clear; stored with its RAND (§5.4.1.3.3)

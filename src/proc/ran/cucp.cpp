@@ -289,6 +289,20 @@ void CuCp::handle(const f1ap::UeContextSetupFailure& m) {
     }
 }
 
+Result<void> CuCp::request_release(std::uint32_t ran_ue, const std::string& cause) {
+    Ue* ue = by_ran(ran_ue);
+    if (ue == nullptr || !ue->amf_ue) {
+        return make_error(Errc::invalid_argument, ran_ue, "CU-CP: no UE with that RAN UE NGAP ID known to the AMF");
+    }
+    if (cause == "user-inactivity" && !ue->jobs.empty()) {
+        // A UE whose context or sessions are being set up is not inactive.
+        return make_error(Errc::invalid_argument, ran_ue, "CU-CP: a UE procedure is in progress");
+    }
+    events_.emit("ran.ue.release_request", cfg_.id, {{"ran_ue", str(ue->ran_ue)}, {"cause", cause}});
+    send_ngap(ngap::UeContextReleaseRequest{*ue->amf_ue, ue->ran_ue, ngap::Cause{"radioNetwork", cause}}, ue->ran_ue);
+    return {};
+}
+
 void CuCp::handle(const f1ap::UeContextReleaseRequest& m) {
     Ue* ue = by_cu(m.cu_ue);
     if (ue == nullptr) {
@@ -320,8 +334,21 @@ void CuCp::release_locally(Ue& ue) {
     if (ue.cu_up_ue && e1_ != nullptr) {
         send_e1(e1ap::BearerContextReleaseCommand{ue.cu_ue, *ue.cu_up_ue, e1ap::Cause{"radioNetwork", "unspecified"}}, true);
     }
-    send_f1(f1ap::UeContextReleaseCommand{ue.cu_ue, ue.du_ue, f1ap::Cause{"radioNetwork", "unspecified"}, std::nullopt,
-                                          std::nullopt},
+    // The Uu side goes too (TS 38.413 8.7.4.2.2; TS 38.473 8.3.3.2): an RRCRelease
+    // on SRB1 when the UE has one, so it does not stay on bearers nobody serves.
+    std::optional<Bytes> rrc_release;
+    if (ue.srb1) {
+        ue.capture = true;
+        ue.srb1->write_sdu(rrc::encode(rrc::Release{next_tid(ue)}).value_or(Bytes{}));
+        rrc_release = std::move(ue.captured);
+        ue.captured.reset();
+    }
+    std::optional<std::uint8_t> srb;
+    if (rrc_release) {
+        srb = 1;
+    }
+    send_f1(f1ap::UeContextReleaseCommand{ue.cu_ue, ue.du_ue, f1ap::Cause{"radioNetwork", "unspecified"},
+                                          std::move(rrc_release), srb},
             true);
     ues_.erase(ue.cu_ue);
 }

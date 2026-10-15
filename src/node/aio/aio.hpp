@@ -31,6 +31,7 @@
 #include "node/ue/device.hpp"
 #include "platform/clock.hpp"
 #include "platform/event.hpp"
+#include "platform/memlink.hpp"
 #include "platform/shard.hpp"
 
 namespace ksim::net {
@@ -98,12 +99,17 @@ public:
     proc::ran::Du& du() { return *du_; }
     proc::ran::CuUp& cuup() { return *cuup_; }
     bool ng_up() const;
+    /// The gNB's nodes stop and start again (P1 N12, ksim-ctl gnb restart).
+    Result<void> restart_gnb();
     const std::vector<std::string>& groups() const noexcept { return groups_; }   // by farm index - 1
     AioStats stats() const noexcept { return stats_; }
 
 private:
     AllInOne(Topology t, std::string run_dir);
     Result<void> build(std::string& why);   // on the shard
+    Result<void> build_gnb(std::string& why);
+    void connect_gnb();
+    void teardown_gnb();
     void teardown();                         // on the shard
     void du_to_air(const air::Frame& f);
     void ue_to_air(std::size_t i, const air::Frame& f);
@@ -138,6 +144,10 @@ private:
     std::vector<std::unique_ptr<UeDevice>> ues_;
     std::vector<std::unique_ptr<IDatagram>> ue_air_;
     std::vector<std::uint32_t> radio_ids_;
+    std::vector<Slice> slices_;
+    MemLinkConfig link_{};
+    static constexpr Millis kRestartOffAir = 2'000;
+    Millis air_off_until_ = 0;   // the cell is off the air before this (gnb restart)
     std::vector<std::string> groups_;
     AioStats stats_;
 };

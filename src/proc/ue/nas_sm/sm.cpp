@@ -553,6 +553,25 @@ void Sm::release_all_local(const char* why) {
     }
 }
 
+std::uint16_t Sm::active_bitmap() const {
+    std::uint16_t out = 0;
+    for (const auto& [psi, s] : sessions_) {
+        if (s.info.state != SmState::inactive && s.info.state != SmState::active_pending) {
+            out = static_cast<std::uint16_t>(out | (1U << psi));
+        }
+    }
+    return out;
+}
+
+void Sm::sync(std::uint16_t network) {
+    for (auto& [psi, s] : sessions_) {
+        const bool here = s.info.state != SmState::inactive && s.info.state != SmState::active_pending;
+        if (here && (network & (1U << psi)) == 0) {
+            release_local(s, "PDU session status");
+        }
+    }
+}
+
 // ---- network-requested modification (§6.3.2) ---------------------------------------------------
 
 void Sm::on_modification_command(Session& s, const nas::Message& m, std::uint8_t pti) {

@@ -8,7 +8,23 @@
 namespace ksim::entity {
 
 UeIdealMac::UeIdealMac(TimerService& timers, Rng rng, UeMacConfig cfg, AirSink to_air)
-    : timers_(timers), rng_(rng), cfg_(cfg), to_air_(std::move(to_air)), alive_(std::make_shared<bool>(true)) {}
+    : timers_(timers), rng_(rng), cfg_(cfg), alive_(std::make_shared<bool>(true)) {
+    to_air_ = [this, out = std::move(to_air)](air::Frame f) {
+        if (!muted_) {
+            out(std::move(f));
+        }
+    };
+}
+
+void UeIdealMac::keepalive() {
+    if (!c_rnti_) {
+        return;
+    }
+    air::Frame f = frame(air::FrameType::keepalive);
+    f.rnti = *c_rnti_;
+    f.seq = seq_++;
+    to_air_(std::move(f));
+}
 
 UeIdealMac::~UeIdealMac() {
     *alive_ = false;

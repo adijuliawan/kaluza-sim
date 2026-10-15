@@ -5,7 +5,13 @@
 // network half of registration, 5G AKA, security mode control and UE
 // de-registration for one UE at a time, as a profile tells it to (N10: and
 // carries 5GSM between the UE and the stub's SMF in UL and DL NAS TRANSPORT,
-// a session's accept going in a PDU SESSION RESOURCE SETUP REQUEST), and checks
+// a session's accept going in a PDU SESSION RESOURCE SETUP REQUEST; N12: keeps
+// the UE's context across N1 connections, takes the protected initial message
+// of a UE that holds one (§4.4.6, the container deciphered), accepts a
+// registration it verifies without a new authentication, releases a UE after
+// its periodic registration, answers a SERVICE REQUEST with an INITIAL CONTEXT
+// SETUP that brings the sessions back, and de-registers a UE from the network
+// side when a test asks), and checks
 // every uplink message against the spec: the mandatory IEs, the protection
 // it must carry, the uplink NAS COUNT, the MAC, and what each procedure
 // requires of its content. Each check is recorded with its clause as a
@@ -48,6 +54,9 @@ struct Profile {
     enum class Registration : std::uint8_t { accept, reject, silent, accept_plain };
     Registration registration = Registration::accept;
     std::uint8_t reject_cause = 0;
+    std::optional<int> t3346_s;              // T3346 value in a #22 reject (N12)
+    std::uint8_t service_reject_cause = 0;   // a SERVICE REQUEST rejected with this cause (N12)
+    bool silent_service_request = false;     // a SERVICE REQUEST left unanswered (T3517)
     std::uint32_t tmsi = 0x00000001;
     std::uint8_t amf_region = 0xCA;
     std::uint16_t amf_set = 1;
@@ -58,6 +67,7 @@ struct Profile {
     std::optional<int> t3502_s;
     enum class Deregistration : std::uint8_t { accept, silent };
     Deregistration deregistration = Deregistration::accept;
+    bool reauthenticate = false;   // a registration that verifies is authenticated anyway
     SessionProfile session;   // the SMF's (N10)
 
     /// Reads a profile; unknown keys are an error (YamlError with the path).
@@ -76,6 +86,9 @@ public:
         /// resource setup or release, instead of to_ue.
         std::function<void(Bytes nas, ngap::SessionSetupItem item)> session_setup;
         std::function<void(Bytes nas, std::uint8_t psi)> session_release;
+        /// N12: the SERVICE ACCEPT in an INITIAL CONTEXT SETUP REQUEST with K_gNB
+        /// and the sessions (bit n for PSI n) whose user plane comes back.
+        std::function<void(Bytes accept, SecretBytes kgnb, std::uint16_t psis)> service_accept;
     };
 
     Amf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p);
@@ -89,6 +102,14 @@ public:
     /// Network-requested release and modification of a session (TS 24.501 §6.3.3, §6.3.2).
     bool release_session(std::uint8_t psi, std::uint8_t cause);
     bool modify_session(std::uint8_t psi, std::uint32_t ambr_mbps);
+    /// Network-initiated de-registration (§5.5.2.3.1) of a registered, connected UE.
+    bool network_deregister(bool reregistration_required);
+    /// Whether this context is the UE's that `id` (a 5G-GUTI) or `s_tmsi` names.
+    bool owns(const nas::ie::MobileIdentity& id) const;
+    bool owns_s_tmsi(std::uint64_t s_tmsi) const;
+    bool connected() const noexcept { return connected_; }
+    std::optional<std::uint64_t> s_tmsi() const;
+    int service_requests() const noexcept { return service_requests_; }
     Profile& profile() noexcept { return p_; }
 
     void on_uplink(ByteView wire, bool initial);
@@ -117,11 +138,12 @@ public:
     Result<SecretBytes> kgnb() const;
 
 private:
-    enum class State : std::uint8_t { idle, authenticating, securing, accepting, registered, released };
+    enum class State : std::uint8_t { idle, authenticating, securing, accepting, registered, released, deregistering };
 
     void check(bool ok, const char* clause, const char* what, std::string detail = {});
-    void on_message(const nas::Message& m, proc::ue::Sht sht, bool initial);
-    void on_registration_request(const nas::Message& m, bool initial);
+    void on_message(const nas::Message& m, proc::ue::Sht sht, bool initial, bool verified = false);
+    void on_registration_request(const nas::Message& m, bool initial, proc::ue::Sht sht, bool verified);
+    void on_service_request(const nas::Message& m, bool initial, bool verified);
     void start_challenge();
     void on_authentication_response(const nas::Message& m);
     void on_authentication_failure(const nas::Message& m);
@@ -171,6 +193,13 @@ private:
     int challenges_ = 0;
     int resyncs_ = 0;
     bool lost_one_ = false;
+    // N12
+    bool connected_ = false;
+    std::uint8_t reg_type_ = 1;
+    std::uint16_t reg_uplink_ = 0;   // the REGISTRATION REQUEST's Uplink data status
+    std::uint16_t reg_up_ = 0;       // the sessions whose user plane the accept brought back
+    std::optional<std::uint32_t> initial_count_;   // the COUNT of a verified initial message
+    int service_requests_ = 0;
 
     std::vector<Verdict> verdicts_;
     std::vector<std::string> uplink_;

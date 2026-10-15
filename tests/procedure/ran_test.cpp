@@ -57,6 +57,14 @@ struct Gnb {
         mc.imeisv = "8600000000000101";
         mm = std::make_unique<proc::ue::Mm>(loop, terminal, *rrc, events, mc);
     }
+    ~Gnb() {
+    // The in-process card answers on the loop's next turn (uicc/transport): a
+    // card write still in flight (N12 writes at accepts and de-registrations)
+    // finishes before the UE goes, so no procedure is left suspended.
+        loop.run_until([] { return false; }, loop.now() + 1);
+    }
+    Gnb(const Gnb&) = delete;
+    Gnb& operator=(const Gnb&) = delete;
 
     /// F1 and NG-C up, F1 Setup and NG Setup done, the cell on air.
     void start() {

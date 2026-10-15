@@ -13,6 +13,15 @@
 // accept goes to the gNB in PDU SESSION RESOURCE SETUP REQUEST (the gNB's N3
 // end comes back to the UPF), a release in PDU SESSION RESOURCE RELEASE
 // COMMAND, both answers checked.
+//
+// N12: a UE's NAS context outlives its N2 connection: a returning UE (its
+// 5G-S-TMSI in the INITIAL UE MESSAGE, or the 5G-GUTI or 5G-S-TMSI of its
+// initial message) gets its context back under a new AMF UE NGAP ID. A
+// release (UE CONTEXT RELEASE COMPLETE) deactivates the UE's user plane;
+// downlink held for an idle UE pages it; a SERVICE ACCEPT goes in an INITIAL
+// CONTEXT SETUP REQUEST with the sessions brought back. A new association
+// (the gNB or this AMF restarted) or a second NG SETUP drops every N2
+// connection but keeps every NAS context.
 
 #pragma once
 
@@ -56,6 +65,15 @@ public:
     void send(const ngap::Pdu& p, std::uint16_t stream = 0);
     /// UE CONTEXT RELEASE COMMAND for the n-th UE.
     void release(std::size_t n, ngap::Cause cause);
+    /// A new association replaces the old one (N12); the NAS contexts stay.
+    void rebind(IAssoc& ng);
+    /// AMF STATUS INDICATION: this AMF's GUAMI unavailable (a draining AMF, row amf-ueransim.063).
+    void status_indication();
+    /// Network-initiated de-registration of the UE with this SUPI.
+    bool deregister(const std::string& supi, bool reregistration_required);
+    /// T3512 for the accepts from now on (a subscription change).
+    void set_t3512(std::optional<int> seconds);
+    std::size_t pagings() const noexcept { return pagings_; }
     struct UeIds {
         std::uint64_t amf = 0;
         std::uint32_t ran = 0;
@@ -75,19 +93,26 @@ private:
         std::optional<Bytes> radio_capability;
         std::vector<std::uint8_t> setups;      // PSIs with a resource setup awaiting its response
         std::vector<std::uint8_t> releases;    // and with a release awaiting its response
+        bool connected = true;                 // the N2 connection is up
+        std::optional<Millis> paged_at;
     };
 
     void on_message(ByteView msg);
     void check(bool ok, const char* clause, const char* what, std::string detail = {});
     Ue* by_amf(std::uint64_t id);
     void attach_nas(Ue& ue);
+    void relink(Ue& ue);
+    Ue* returning(const ngap::InitialUeMessage& m);
+    void send_ics(Ue& ue, Bytes nas, SecretBytes kgnb, std::vector<ngap::SessionSetupItem> sessions);
+    void page(const std::string& supi);
+    void drop_n2(Ue& ue);
     std::uint16_t stream_of(const Ue& ue) const;
 
     Executor& ex_;
     Home& home_;
     nas::ie::Plmn plmn_;
     Profile p_;
-    IAssoc& ng_;
+    IAssoc* ng_;
     std::unique_ptr<Upf> upf_;
     Smf smf_;
     bool ng_setup_ = false;
@@ -98,6 +123,7 @@ private:
     std::vector<std::string> received_;
     std::uint64_t error_indications_ = 0;
     std::optional<ngap::Cause> last_error_;
+    std::size_t pagings_ = 0;
 };
 
 } // namespace ksim::corestub

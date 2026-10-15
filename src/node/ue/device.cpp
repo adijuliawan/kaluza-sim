@@ -36,10 +36,13 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     }
     proc::ue::RrcUpper up;
     up.nas = [this](Bytes b) { mm_->on_nas(b); };
+    up.connection_failure = [this](std::uint16_t up_psis) { mm_->on_connection_failure(up_psis); };
     up.released = [this] { mm_->on_released(); };
+    up.camped = [this](std::uint32_t tac) { mm_->on_camped(tac); };
     up.kgnb = [this] { return mm_->kgnb(); };
     up.s_tmsi = [this] { return mm_->s_tmsi(); };
-    up.paged = [] {};   // the service request is N12
+    up.paged = [this] { mm_->on_paged(); };
+    up.bearers_up = [this] { flush_held(); };
     up.dl_data = [this](std::uint8_t psi, std::optional<sdap::DlHeader>, Bytes sdu) { on_dl_ip(psi, std::move(sdu)); };
     rrc_ = std::make_unique<proc::ue::UeRrc>(ex_, Rng(cfg_.seed, {cfg_.index, 1}), events, rc, up, std::move(to_air));
     proc::ue::MmConfig mc;
@@ -51,6 +54,9 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
         mc.tap = [tap = taps.nas, supi = cfg_.supi](bool uplink, ByteView plain) { tap(uplink, plain, supi); };
     }
     mc.sm = [this](const proc::ue::SmDownlink& d) { sm_->on_downlink(d); };
+    mc.sm_hooks.active = [this] { return sm_->active_bitmap(); };
+    mc.sm_hooks.sync = [this](std::uint16_t network) { sm_->sync(network); };
+    mc.sm_hooks.release_all = [this] { sm_->release_all_local("network"); };
     mm_ = std::make_unique<proc::ue::Mm>(ex_, terminal_, *rrc_, events, mc);
     proc::ue::SmConfig sc;
     sc.id = subject;
@@ -174,6 +180,8 @@ void UeDevice::on_ul_ip(std::uint8_t psi, ByteView packet) {
     if (rrc_->send_data(psi, s->default_qfi, Bytes(packet.begin(), packet.end()))) {
         ++ul_packets_;
         ++t->second.ul;
+    } else {
+        (void)send_ul(psi, Bytes(packet.begin(), packet.end()));   // held for a service request
     }
 }
 
@@ -205,6 +213,7 @@ Result<void> UeDevice::power_on() {
         }
     }
     powered_ = true;
+    rrc_->power(true);
     mm_->power_on();
     poll_registration(kPollTries);
     return {};
@@ -247,10 +256,67 @@ Result<void> UeDevice::deregister(bool switch_off) {
     mm_->deregister(switch_off);
     // TS 24.501 §5.5.2.2.1: the UE's PDU sessions go with its registration.
     sm_->release_all_local(switch_off ? "switch-off" : "deregistration");
+    held_.clear();
     if (switch_off) {
         powered_ = false;   // 5GMM-NULL at once: the UE is off (§5.5.2.2.1)
+        rrc_->power_off_after_nas();   // from CM-IDLE the request still has to reach the AMF (F-46)
     }
     return {};
+}
+
+Result<void> UeDevice::power_off_abrupt() {
+    if (!powered_) {
+        return make_error(Errc::invalid_argument, 0, "the UE is off");
+    }
+    // The battery pulled: no signalling at all, nothing written to the card.
+    rrc_->power(false);
+    mm_->power_off_abrupt();
+    sm_->release_all_local("switch-off");
+    held_.clear();
+    powered_ = false;
+    events_.emit("ue.power", subject(), {{"state", "off"}, {"mode", "abrupt"}});
+    return {};
+}
+
+Result<void> UeDevice::service_request() {
+    if (!powered_) {
+        return make_error(Errc::invalid_argument, 0, "the UE is off");
+    }
+    return mm_->service_request(nas::ie::ServiceType::signalling, 0);
+}
+
+bool UeDevice::send_ul(std::uint8_t psi, Bytes packet) {
+    const proc::ue::SessionInfo* s = sm_->session(psi);
+    if (s == nullptr) {
+        return false;
+    }
+    if (rrc_->send_data(psi, s->default_qfi, packet)) {
+        ++ul_packets_;
+        return true;
+    }
+    // No DRB: in 5GMM-IDLE (or while a service request runs) the packet waits.
+    auto& q = held_[psi];
+    if (q.size() < 64) {
+        q.push_back(std::move(packet));
+    }
+    (void)mm_->service_request(nas::ie::ServiceType::data, static_cast<std::uint16_t>(1U << psi));
+    return true;
+}
+
+void UeDevice::flush_held() {
+    auto held = std::move(held_);
+    held_.clear();
+    for (auto& [psi, q] : held) {
+        const proc::ue::SessionInfo* s = sm_->session(psi);
+        for (auto& p : q) {
+            if (s != nullptr && rrc_->send_data(psi, s->default_qfi, p)) {
+                ++ul_packets_;
+                if (auto t = tuns_.find(psi); t != tuns_.end()) {
+                    ++t->second.ul;
+                }
+            }
+        }
+    }
 }
 
 Result<void> UeDevice::ps_establish(const proc::ue::SessionRequest& r) {
@@ -312,13 +378,12 @@ void UeDevice::ping_next() {
         ping_done("session released");
         return;
     }
-    auto sent = rrc_->send_data(g.psi, s->default_qfi, ip::ping(g.src, g.req.dst, g.id, seq, g.req.size));
+    const bool sent = send_ul(g.psi, ip::ping(g.src, g.req.dst, g.id, seq, g.req.size));
     ++g.sent;
     if (sent) {
-        ++ul_packets_;
-        g.outstanding[seq] = ex_.now();
+        g.outstanding[seq] = ex_.now();   // from idle the time includes the service request
     } else {
-        events_.emit("ue.ping.error", subject(), {{"seq", std::to_string(seq)}, {"what", sent.error().what}});
+        events_.emit("ue.ping.error", subject(), {{"seq", std::to_string(seq)}, {"what", "no such session"}});
     }
     const Millis wait = g.sent >= g.req.count ? g.req.linger : g.req.interval;
     g.timer = ex_.start_timer(wait, [this, alive = alive_] {

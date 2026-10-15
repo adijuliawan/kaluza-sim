@@ -100,6 +100,11 @@ public:
     Result<void> power_on();
     Result<void> register_initial();
     Result<void> deregister(bool switch_off);
+    /// Power off without signalling (cli.md power off --abrupt): the radio goes
+    /// silent, what is in memory is lost, the card keeps what it holds.
+    Result<void> power_off_abrupt();
+    /// SERVICE REQUEST for signalling (cli.md service-request).
+    Result<void> service_request();
     Result<void> ps_establish(const proc::ue::SessionRequest& r);
     Result<void> ps_release(std::uint8_t psi);
     Result<void> ping(const PingRequest& p);
@@ -118,6 +123,7 @@ public:
     bool powered() const noexcept { return powered_; }
     /// The status of cli.md §3 as KEY=value pairs.
     std::vector<std::pair<std::string, std::string>> status() const;
+    proc::ue::MmState mm_state() const noexcept { return mm_->state(); }
 
 private:
     struct Ping {
@@ -145,6 +151,10 @@ private:
     void poll_registration(int left);
     void on_dl_ip(std::uint8_t psi, Bytes packet);
     void on_ul_ip(std::uint8_t psi, ByteView packet);
+    /// Sends an uplink packet on its session's DRB; in 5GMM-IDLE it is held and
+    /// a service request asks for the bearers (§5.6.1.1 d).
+    bool send_ul(std::uint8_t psi, Bytes packet);
+    void flush_held();
     void session_up(const proc::ue::SessionInfo& s);
     void session_down(std::uint8_t psi);
     Result<void> ensure_netns();
@@ -168,6 +178,7 @@ private:
     bool netns_up_ = false;
     std::map<std::uint8_t, Tun> tuns_;   // by PSI
     std::uint64_t noise_ = 0;
+    std::map<std::uint8_t, std::vector<Bytes>> held_;   // uplink waiting for a service request
     bool powered_ = false;
     std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };

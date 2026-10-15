@@ -62,6 +62,8 @@ struct DuConfig {
     Millis sib1_period = 160;
     std::array<std::uint8_t, 4> f1u_addr{};   // the F1-U tunnel address it advertises (N10)
     std::uint16_t gtpu_port = 2152;
+    Millis rlf = 1000;                        // a connected UE silent this long is lost (N12)
+    Millis supervision = 200;                 // how often the DU looks
 };
 
 struct DuStats {
@@ -107,6 +109,8 @@ private:
             std::uint32_t dl_teid = 0;    // ours
         };
         std::map<std::uint8_t, Drb> drbs;   // by DRB ID
+        Millis last_ul = 0;                 // the last frame from the UE
+        bool lost = false;                  // the release request went
     };
 
     void on_f1_event(LinkEvent e);
@@ -129,6 +133,7 @@ private:
     void handle(const f1ap::Paging& m);
     void dl_sdu(const Ue& ue, std::uint8_t lcid, Bytes sdu);
     void drop_drbs(Ue& ue);
+    void supervise();
     Result<Bytes> cell_group(const std::set<std::uint8_t>& srbs, const std::vector<Ue::Drb>& drbs = {},
                              const std::vector<std::uint8_t>& release_lcids = {}) const;
     /// Sets up and releases DRBs; their F1-U ends and the cell group's RLC bearers.
@@ -151,6 +156,7 @@ private:
     std::optional<TimerId> setup_retry_;
     std::optional<TimerId> mib_timer_;
     std::optional<TimerId> sib1_timer_;
+    std::optional<TimerId> supervision_;
     Bytes mib_frame_;    // BCCH-BCH, as broadcast
     Bytes sib1_frame_;   // BCCH-DL-SCH, as broadcast
 

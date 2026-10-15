@@ -14,7 +14,11 @@
 // socket reports what it saw and its verdicts (every check it made, with the
 // clause); POST /v1/stub/release (ue, psi, cause) releases a session from the
 // network side and POST /v1/stub/ping-ue (ue, psi, seq) pings a UE from the DN,
-// for the gate rows a UE cannot trigger; POST /v1/stop ends it.
+// for the gate rows a UE cannot trigger; from N12 POST /v1/stub/deregister
+// (ue, rereg) de-registers a UE from the network side, /v1/stub/t3512 (seconds)
+// changes T3512 for the next accepts, and /v1/stub/restart plays an AMF
+// restart: AMF STATUS INDICATION, then the association aborted, the UE
+// contexts kept for the gNB's next association; POST /v1/stop ends it.
 
 #include <CLI/CLI.hpp>
 
@@ -210,15 +214,15 @@ static int run_main(int argc, char** argv) {
         opt.out_streams = 3;
         opt.max_in_streams = 3;
         auto l = ksim::net::SctpListener::listen(s.shard.reactor(), {*ep}, opt, [&s](std::unique_ptr<ksim::IAssoc> a) {
-            // One gNB at a time: a new association replaces the last (its verdicts are kept).
-            if (s.amf) {
-                const auto f = s.amf->failures();
-                s.past.insert(s.past.end(), f.begin(), f.end());
-            }
-            s.amf.reset();
+            // One gNB at a time: a new association replaces the last. The AMF keeps
+            // its UE contexts across it (N12: a gNB or AMF restart), its N2 connections go.
             s.assoc = std::move(a);
-            s.amf = std::make_unique<ksim::corestub::NgapAmf>(s.shard, s.home, s.plmn, s.profile, *s.assoc, s.n3.get(),
-                                                              s.n3_addr);
+            if (s.amf) {
+                s.amf->rebind(*s.assoc);
+            } else {
+                s.amf = std::make_unique<ksim::corestub::NgapAmf>(s.shard, s.home, s.plmn, s.profile, *s.assoc, s.n3.get(),
+                                                                  s.n3_addr);
+            }
             ++s.associations;
         });
         if (!l) {
@@ -288,6 +292,64 @@ static int run_main(int argc, char** argv) {
         }
         Reply out;
         out.set("PING", "sent");
+        return out;
+    });
+    server.post("/v1/stub/deregister", [&s, find_ue](const ksim::api::Request& req) {
+        const bool rereg = req.arg("rereg") == "1";
+        auto r = s.call<bool>([&s, &req, find_ue, rereg] {
+            auto* nas = find_ue(s, req);
+            return nas != nullptr && nas->network_deregister(rereg);
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        if (!*r) {
+            return Reply::fail(Exit::wrong_state, "no such registered, connected UE");
+        }
+        Reply out;
+        out.set("DEREGISTER", "sent");
+        return out;
+    });
+    server.post("/v1/stub/t3512", [&s, num](const ksim::api::Request& req) {
+        const auto secs = static_cast<int>(num(req, "seconds", 3600, 100000));
+        auto r = s.call<bool>([&s, secs] {
+            s.profile.t3512_s = secs;
+            if (s.amf) {
+                s.amf->set_t3512(secs);
+            }
+            return true;
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        Reply out;
+        out.set("T3512_S", static_cast<std::int64_t>(secs));
+        return out;
+    });
+    server.post("/v1/stub/restart", [&s](const ksim::api::Request&) {
+        // An AMF going away and back (rows amf-ueransim.063-066): AMF STATUS
+        // INDICATION, then the association aborted after a moment; the UE
+        // contexts stay for the gNB's next association (L11).
+        auto r = s.call<bool>([&s] {
+            if (!s.amf || !s.assoc) {
+                return false;
+            }
+            s.amf->status_indication();
+            s.shard.start_timer(300, [&s] {
+                if (s.assoc) {
+                    s.assoc->abort();
+                }
+            });
+            return true;
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        if (!*r) {
+            return Reply::fail(Exit::wrong_state, "no gNB associated");
+        }
+        Reply out;
+        out.set("RESTART", "started");
         return out;
     });
     server.post("/v1/stop", [&stop](const ksim::api::Request&) {

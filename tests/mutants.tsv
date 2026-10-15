@@ -10,3 +10,7 @@ null_suci_full_imsi	ksim-p1.reg-null-suci	the null-scheme SUCI carries the whole
 kamf_input_sbi_spelling	amf-ueransim.012	K_AMF derived with the SUPI in its SBI form "imsi-..." instead of its digits (TS 33.501 A.7.0)
 kgnb_wrong_ul_count	ksim-p1.as-smc-nia2	K_gNB derived from the next uplink NAS COUNT instead of the SECURITY MODE COMPLETE's (TS 33.501 6.8.1.2.2)
 ignore_backoff	ksim-p1.backoff	a PDU SESSION ESTABLISHMENT REQUEST sent while a back-off timer runs for its DNN and S-NSSAI (TS 24.501 6.4.1.4.3)
+paging_ignore	amf-ueransim.027	a paging record for the UE is not answered with a service request (TS 24.501 5.6.2.2.1)
+dereg_no_reregistration	ksim-p1.reregistration-required	after a network de-registration with "re-registration required" the UE does not register again (TS 24.501 5.5.2.3.2)
+no_release_on_radio_loss	ksim-p1.radio-loss-release	the DU never reports a UE it no longer hears from, so no release request with radio connection with UE lost (TS 38.473 8.3.2)
+guti_not_persisted	ksim-p1.guti-after-power-cycle	EF.5GS3GPPLOCI is neither written nor read, so a power cycle loses the 5G-GUTI (TS 31.102 4.4.11.2, TS 24.501 5.5.1.2.4)

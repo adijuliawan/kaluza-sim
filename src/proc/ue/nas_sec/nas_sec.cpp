@@ -101,6 +101,14 @@ Result<crypto::Mac> NasSecurityContext::mac_of(std::uint32_t count, std::uint8_t
                        seq_and_message.size() * 8);
 }
 
+Result<Bytes> NasSecurityContext::container_cipher(ByteView value, std::uint32_t count) const {
+    const std::optional<crypto::Nea> alg = nea_of(ea_);
+    if (!alg.has_value()) {
+        return make_error(Errc::unsupported, ea_, "nas security: no ciphering algorithm");
+    }
+    return crypto::nea(alg.value(), knas_enc_, crypto::SecInput{count, kBearer3gpp, 0}, value, value.size() * 8);
+}
+
 Result<Bytes> NasSecurityContext::protect(ByteView plain, Sht sht) {
     if (sht == Sht::plain) {
         return make_error(Errc::invalid_argument, 0, "nas security: protect() needs a protected header type");

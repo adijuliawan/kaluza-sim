@@ -54,8 +54,10 @@ paths:
       summary: >-
         state=on: card read, fixed camping, initial registration; with wait_ms it
         ends at nas.reg.accept (exit 0) or nas.reg.reject / nas.reg.abort (exit 1).
-        state=off with mode=switch-off: a switch-off de-registration, ending at
-        nas.dereg.sent switch_off=1. Other modes come with N12 (exit 5).
+        state=off with mode=switch-off (or graceful): a switch-off de-registration,
+        ending at nas.dereg.sent switch_off=1, the context and the 5G-GUTI written
+        to the USIM; mode=abrupt (N12): the battery pulled, no signalling and no
+        card write, ending at ue.power state=off.
       parameters: [{$ref: "#/components/parameters/sel"}]
       requestBody:
         content:
@@ -79,6 +81,55 @@ paths:
         switch-off (ends at nas.dereg.sent switch_off=1)
       parameters: [{$ref: "#/components/parameters/sel"}]
       responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/service-request:
+    post:
+      summary: >-
+        N12: a SERVICE REQUEST for signalling from CM-IDLE; with wait_ms it ends at
+        nas.sr.accept (exit 0), nas.sr.reject or nas.sr.abort (exit 1)
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/ps:
+    get:
+      summary: >-
+        N10: PDU_SESSIONS and per PSI PS.<psi>.DNN, .SNSSAI, .TYPE, .IP, .DNS, .MTU,
+        .QFI, .AMBR_UL/.AMBR_DL, .STATE
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/ps-establish:
+    post:
+      summary: >-
+        N10: type=ipv4, dnn, sst and sd (the S-NSSAI), psi (default: the lowest free);
+        with wait_ms it ends at nas.sm.est.accept (RESULT=ACCEPT, PSI, IP, QFI) or a
+        reject (RESULT=REJECT, CAUSE; exit 1). Refused with exit 6 while a back-off runs
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/ps-release:
+    post:
+      summary: N10 - psi; with wait_ms it ends at nas.sm.release (RESULT=ACCEPT)
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/ping:
+    post:
+      summary: >-
+        N10/N11: dst, psi, count, interval_ms, size, df. In inject mode the UE's own
+        echo requests (SENT, RECEIVED, LOSS_PCT, RTT_*); in netns mode iputils ping in
+        the UE's namespace (EXIT_CODE, IFACE). MODE=inject|netns
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/exec:
+    post:
+      summary: >-
+        N11, netns mode only: argv run in the UE's namespace as the caller (never root)
+        through ksim-netd; timeout_ms; EXIT_CODE, STDOUT, STDERR, TIMED_OUT
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/ifaces:
+    get:
+      summary: >-
+        N11: MODE, NETNS, IFACES and per interface its address and MTU; KERNEL.* the
+        kernel's own view in netns mode; NOISE (uplink packets not from a session)
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
   /v1/wait:
     get:
       summary: >-
@@ -122,6 +173,22 @@ paths:
       summary: AMFS, AMF.<n>.ADDR, AMF.<n>.SCTP=up|down, AMF.<n>.NG_SETUP, AMF.<n>.NAME
       parameters: [{name: name, in: path, required: true, schema: {type: string}}]
       responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
+  /v1/gnb/{name}/ue-release:
+    post:
+      summary: >-
+        N12: ue (a UE selector) and cause (default user-inactivity): the CU-CP sends
+        UE CONTEXT RELEASE REQUEST for that UE's RRC connection; RESULT=STARTED,
+        RAN_UE_NGAP_ID, CAUSE. Refused (exit 4) without a connection or while a UE
+        procedure is in progress
+      parameters: [{name: name, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/gnb/{name}/restart:
+    post:
+      summary: >-
+        N12: the DU, CU-CP and CU-UP stop and start again, the cell off the air for
+        2 s (ledger A-14); RESULT=STARTED, EVENT_SEQ (wait for ran.ng.setup after it)
+      parameters: [{name: name, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
   /v1/stop:
     post:
       summary: Ends the run (STOPPING=1); the manifest records the end.
@@ -133,6 +200,28 @@ paths:
         REGISTERED, ERROR_INDICATIONS, FAILURES, FAILURE.<n> (each failed check
         with its clause)
       responses: {"200": {$ref: "#/components/responses/Reply"}}
+  /v1/stub/release:
+    post:
+      summary: "ksim-corestub, N10: ue (SUPI or index), psi, cause: a network-requested PDU session release"
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/stub/ping-ue:
+    post:
+      summary: "ksim-corestub, N10: ue, psi, seq: an echo request from the DN to the UE (held and paged for while it is idle, N12)"
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/stub/deregister:
+    post:
+      summary: "ksim-corestub, N12: ue, rereg=1 for re-registration required: a network-initiated de-registration"
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/stub/t3512:
+    post:
+      summary: "ksim-corestub, N12: seconds: the T3512 value of the next accepts"
+      responses: {"200": {$ref: "#/components/responses/Reply"}}
+  /v1/stub/restart:
+    post:
+      summary: >-
+        ksim-corestub, N12: an AMF restart: AMF STATUS INDICATION, then the association
+        aborted after 300 ms; the UE contexts stay for the gNB's next association
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
 components:
   parameters:
     sel: {name: sel, in: path, required: true, schema: {type: string}, description: "imsi-<15 digits> or a farm index"}

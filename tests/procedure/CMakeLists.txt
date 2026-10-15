@@ -22,3 +22,8 @@ add_executable(procedure_session session_test.cpp)
 target_link_libraries(procedure_session PRIVATE ksim_corestub ksim::node ksim::proc ksim::uicc ksim::warnings GTest::gtest_main)
 gtest_discover_tests(procedure_session DISCOVERY_MODE PRE_TEST)
 target_compile_definitions(procedure_session PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
+add_executable(procedure_idle idle_test.cpp)
+target_link_libraries(procedure_idle PRIVATE ksim_corestub ksim::node ksim::proc ksim::uicc ksim::warnings GTest::gtest_main)
+target_compile_definitions(procedure_idle PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+gtest_discover_tests(procedure_idle DISCOVERY_MODE PRE_TEST)

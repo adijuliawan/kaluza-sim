@@ -31,7 +31,7 @@ public:
     void bind(proc::ue::Mm* ue, corestub::Amf* amf) {
         ue_ = ue;
         amf_ = amf;
-        amf_->attach({[this](Bytes b) { to_ue(std::move(b)); }, [this] { release_from_network(); }, {}, {}, {}});
+        amf_->attach({[this](Bytes b) { to_ue(std::move(b)); }, [this] { release_from_network(); }, {}, {}, {}, {}});
     }
 
     void send_nas(Bytes pdu) override {
@@ -119,6 +119,14 @@ struct Rig {
                  uicc::test::sb("cd63cb71954a9f4e48a5994e37a02baf"));
         link.bind(&ue, &amf);
     }
+    ~Rig() {
+    // The in-process card answers on the loop's next turn (uicc/transport): a
+    // card write still in flight (N12 writes at accepts and de-registrations)
+    // finishes before the UE goes, so no procedure is left suspended.
+        loop.run_until([] { return false; }, loop.now() + 1);
+    }
+    Rig(const Rig&) = delete;
+    Rig& operator=(const Rig&) = delete;
 
     /// Powers the UE on and waits for its first 5GMM-DEREGISTERED substate.
     void power_on() {

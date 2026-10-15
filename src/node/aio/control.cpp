@@ -407,8 +407,17 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         }
         if (state == "off") {
             const std::string mode = req.arg("mode", "switch-off");
-            if (mode != "switch-off") {
-                return Reply::fail(Exit::capability, "power off --" + mode + " comes with N12");
+            if (mode == "abrupt") {
+                // N12: the battery pulled: no signalling (the gNB finds out by radio supervision).
+                return run_ue_command(aio, req,
+                                      UeCommand{[](UeDevice& u) { return u.power_off_abrupt(); },
+                                                {"ue.power"},
+                                                {},
+                                                {{"mode", "abrupt"}},
+                                                "power-off"});
+            }
+            if (mode != "switch-off" && mode != "graceful") {
+                return Reply::fail(Exit::usage, "power off --switch-off|--graceful|--abrupt");
             }
             return run_ue_command(aio, req,
                                   UeCommand{[](UeDevice& u) { return u.deregister(true); },
@@ -418,6 +427,14 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                                             "deregistration"});
         }
         return Reply::fail(Exit::usage, "power on|off");
+    });
+    server.post("/v1/ue/:sel/service-request", [&aio](const Request& req) {
+        return run_ue_command(aio, req,
+                              UeCommand{[](UeDevice& u) { return u.service_request(); },
+                                        {"nas.sr.accept"},
+                                        {"nas.sr.reject", "nas.sr.abort"},
+                                        {},
+                                        "service-request"});
     });
     server.post("/v1/ue/:sel/register", [&aio](const Request& req) {
         if (const std::string type = req.arg("type", "initial"); type != "initial") {
@@ -763,6 +780,61 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             return r;
         });
         return s ? *s : unsound();
+    });
+    server.post("/v1/gnb/:name/ue-release", [&aio, &t](const Request& req) {
+        if (req.params.at("name") != t.gnb_name) {
+            return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        const std::string sel = req.arg("ue");
+        const std::string cause = req.arg("cause", "user-inactivity");
+        auto s = aio.call<Reply>([&aio, sel, cause] {
+            // The UE by its farm selector, found at the CU-CP by its C-RNTI.
+            UeDevice* ue = aio.ue(sel);
+            if (ue == nullptr) {
+                return Reply::fail(Exit::unknown, "no such UE");
+            }
+            std::string crnti;
+            for (const auto& [k, v] : ue->status()) {
+                if (k == "C_RNTI") {
+                    crnti = v;
+                }
+            }
+            for (const auto& u : aio.cucp().ue_list()) {
+                if (!crnti.empty() && fmt::format("0x{:04x}", u.c_rnti) == crnti) {
+                    if (auto r = aio.cucp().request_release(u.ran_ue, cause); !r) {
+                        return Reply::fail(Exit::wrong_state, r.error().what);
+                    }
+                    Reply out;
+                    out.set("UE", ue->subject().substr(3));
+                    out.set("RAN_UE_NGAP_ID", static_cast<std::int64_t>(u.ran_ue));
+                    out.set("CAUSE", cause);
+                    out.set("RESULT", "STARTED");
+                    return out;
+                }
+            }
+            return Reply::fail(Exit::wrong_state, "the UE has no RRC connection at this gNB");
+        });
+        return s ? *s : unsound();
+    });
+    server.post("/v1/gnb/:name/restart", [&aio, &t](const Request& req) {
+        if (req.params.at("name") != t.gnb_name) {
+            return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        const std::uint64_t since = aio.events().last_seq();
+        auto s = aio.call<Reply>([&aio] {
+            if (auto r = aio.restart_gnb(); !r) {
+                return Reply::fail(Exit::internal, r.error().what);
+            }
+            Reply out;
+            out.set("RESULT", "STARTED");
+            return out;
+        });
+        if (!s) {
+            return unsound();
+        }
+        Reply r = *s;
+        r.set("EVENT_SEQ", static_cast<std::int64_t>(since));
+        return r;
     });
     server.post("/v1/stop", [&stop](const Request&) {
         stop.store(true);

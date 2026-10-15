@@ -53,6 +53,7 @@ public:
 
     /// `tag` goes into the top 8 bits of every TEID this endpoint allocates.
     Endpoint(IDatagram& port, std::uint8_t tag);
+    ~Endpoint();
     Endpoint(const Endpoint&) = delete;
     Endpoint& operator=(const Endpoint&) = delete;
 

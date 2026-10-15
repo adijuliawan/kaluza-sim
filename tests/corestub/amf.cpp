@@ -33,6 +33,11 @@ constexpr std::uint8_t kSecurityModeComplete = 0x5E;
 constexpr std::uint8_t kSecurityModeReject = 0x5F;
 constexpr std::uint8_t kStatus = 0x64;
 constexpr std::uint8_t kUlNasTransport = 0x67;
+constexpr std::uint8_t kDeregistrationRequestUeTerminated = 0x47;
+constexpr std::uint8_t kDeregistrationAcceptUeTerminated = 0x48;
+constexpr std::uint8_t kServiceRequest = 0x4C;
+constexpr std::uint8_t kServiceReject = 0x4D;
+constexpr std::uint8_t kServiceAccept = 0x4E;
 constexpr std::uint8_t kDlNasTransport = 0x68;
 constexpr std::uint8_t kPayloadNotForwarded = 90;
 
@@ -184,6 +189,9 @@ void Amf::on_uplink(ByteView wire, bool initial) {
         return;
     }
     const auto sht = static_cast<Sht>(wire[1] & 0x0F);
+    if (initial) {
+        connected_ = true;
+    }
     if (sht == Sht::plain) {
         auto m = nas::decode(wire);
         if (!m) {
@@ -191,6 +199,45 @@ void Amf::on_uplink(ByteView wire, bool initial) {
             return;
         }
         on_message(*m, sht, initial);
+        return;
+    }
+    if (initial) {
+        // §4.4.6: an initial message protected with the context the UE kept.
+        if (ctx_) {
+            proc::ue::Inbound in = ctx_->unprotect(wire);
+            if (in.verdict == proc::ue::Verdict::ok) {
+                check(in.sht == Sht::integrity, "4.4.6", "an initial message is integrity protected, not ciphered");
+                last_ul_ = in.count;
+                initial_count_ = in.count;
+                auto m = nas::decode(in.plain);
+                if (!m) {
+                    check(false, "8", "the uplink message decodes", m.error().what);
+                    return;
+                }
+                nas::Message msg = *m;
+                if (const Bytes* c = nas::get(*m, "NAS message container")) {
+                    auto clear = ctx_->container_cipher(*c, in.count);
+                    auto inner = clear ? nas::decode(*clear) : Result<nas::Message>(clear.error());
+                    check(inner && inner->desc == m->desc, "4.4.6",
+                          "the container holds the whole initial message, ciphered with its COUNT");
+                    if (!inner) {
+                        return;
+                    }
+                    msg = std::move(*inner);
+                }
+                on_message(msg, in.sht, true, true);
+                return;
+            }
+        }
+        // No context here, or the MAC does not verify: the cleartext IEs only (§4.4.4.3).
+        auto p = nas::decode_protected(wire);
+        auto m = p ? nas::decode(p->payload) : Result<nas::Message>(make_error(Errc::malformed, 0, "protected"));
+        if (!m) {
+            check(false, "8", "the uplink message decodes", m.error().what);
+            return;
+        }
+        nas::unset(*m, "NAS message container");   // ciphered with a context the AMF does not have
+        on_message(*m, sht, true, false);
         return;
     }
     if (!ctx_) {
@@ -214,7 +261,7 @@ void Amf::on_uplink(ByteView wire, bool initial) {
     on_message(*m, in.sht, initial);
 }
 
-void Amf::on_message(const nas::Message& m, Sht sht, bool initial) {
+void Amf::on_message(const nas::Message& m, Sht sht, bool initial, bool verified) {
     uplink_.emplace_back(m.desc->name);
     const auto missing = nas::missing_mandatory(m);
     check(missing.empty(), "8.2", "the mandatory IEs are present", missing.empty() ? "" : std::string(missing.front()));
@@ -225,7 +272,20 @@ void Amf::on_message(const nas::Message& m, Sht sht, bool initial) {
     }
     switch (type) {
     case kRegistrationRequest:
-        on_registration_request(m, initial);
+        on_registration_request(m, initial, sht, verified);
+        return;
+    case kServiceRequest:
+        on_service_request(m, initial, verified);
+        return;
+    case kDeregistrationAcceptUeTerminated:
+        check(state_ == State::deregistering, "5.5.2.3.2", "DEREGISTRATION ACCEPT answers the network's request");
+        if (state_ == State::deregistering) {
+            state_ = State::idle;
+            if (smf_ != nullptr) {
+                smf_->release_all(supi_);
+            }
+            release();
+        }
         return;
     case kAuthenticationResponse:
         on_authentication_response(m);
@@ -244,6 +304,9 @@ void Amf::on_message(const nas::Message& m, Sht sht, bool initial) {
         check(sht == Sht::integrity_ciphered, "4.4.5", "REGISTRATION COMPLETE is integrity protected and ciphered");
         if (state_ == State::accepting) {
             state_ = State::registered;
+            if (reg_type_ != ie::RegistrationType::initial && reg_up_ == 0) {
+                release();   // a periodic or mobility update needs no connection afterwards
+            }
         }
         return;
     case kDeregistrationRequestUe:
@@ -253,6 +316,8 @@ void Amf::on_message(const nas::Message& m, Sht sht, bool initial) {
         on_ul_nas_transport(m, sht);
         return;
     case kStatus:
+    case 0x55:    // CONFIGURATION UPDATE COMPLETE
+    case 0x5C:    // IDENTITY RESPONSE
         return;   // recorded in uplink_
     default:
         check(false, "5", "an uplink message the stub expects", m.desc->name);
@@ -260,25 +325,38 @@ void Amf::on_message(const nas::Message& m, Sht sht, bool initial) {
     }
 }
 
-void Amf::on_registration_request(const nas::Message& m, bool initial) {
+void Amf::on_registration_request(const nas::Message& m, bool initial, Sht sht, bool verified) {
     check(initial, "5.5.1.2.2", "REGISTRATION REQUEST is the initial NAS message");
     stop_t3560();
-    // A new N1 connection and a new procedure: what the stub knew of the last one goes.
-    ctx_.reset();
-    last_ul_.reset();
+    if (!verified) {
+        // No context the AMF can use: what the stub knew of the last procedure goes.
+        ctx_.reset();
+        last_ul_.reset();
+    }
     av_.reset();
     lost_one_ = false;
     state_ = State::idle;
     initial_ = m;
-    initial_had_context_ = false;
-    auto split = proc::ue::split_initial(m);
-    check(split && !split->has_non_cleartext, "4.4.6", "without a context the initial message holds cleartext IEs only");
+    initial_had_context_ = verified;
     const Bytes* rt = nas::get(m, "5GS registration type");
     auto type = rt ? ie::RegistrationType::decode(*rt) : Result<ie::RegistrationType>(make_error(Errc::truncated, 0, ""));
-    check(type && type->value == ie::RegistrationType::initial, "5.5.1.2.2", "the registration type is initial");
-    const Bytes* k = nas::get(m, "ngKSI");
-    auto ngksi = k ? ie::NgKsi::decode(*k) : Result<ie::NgKsi>(make_error(Errc::truncated, 0, ""));
-    check(ngksi && ngksi->none(), "4.4.6, 9.11.3.32", "a plain initial message names no key (ngKSI 7)");
+    check(type && type->value >= ie::RegistrationType::initial && type->value <= 3, "5.5.1.2.2, 5.5.1.3.2",
+          "the registration type is initial, mobility or periodic updating");
+    reg_type_ = type ? type->value : std::uint8_t{1};
+    reg_uplink_ = 0;
+    reg_up_ = 0;
+    if (const Bytes* u = nas::get(m, "Uplink data status")) {
+        if (auto b = ie::PsiBitmap::decode(*u)) {
+            reg_uplink_ = b->psis;
+        }
+    }
+    if (sht == Sht::plain) {
+        auto split = proc::ue::split_initial(m);
+        check(split && !split->has_non_cleartext, "4.4.6", "without a context the initial message holds cleartext IEs only");
+        const Bytes* k = nas::get(m, "ngKSI");
+        auto ngksi = k ? ie::NgKsi::decode(*k) : Result<ie::NgKsi>(make_error(Errc::truncated, 0, ""));
+        check(ngksi && ngksi->none(), "4.4.6, 9.11.3.32", "a plain initial message names no key (ngKSI 7)");
+    }
     const Bytes* caps = nas::get(m, "UE security capability");
     auto c = caps ? ie::UeSecurityCapability::decode(*caps)
                   : Result<ie::UeSecurityCapability>(make_error(Errc::truncated, 0, ""));
@@ -306,9 +384,103 @@ void Amf::on_registration_request(const nas::Message& m, bool initial) {
     if (supi_.empty() || p_.registration == Profile::Registration::silent) {
         return;
     }
+    if (verified && !p_.reauthenticate) {
+        // The UE proved its context (§4.4.6): no new authentication (TS 33.501 6.1.1),
+        // and K_gNB comes from this message's COUNT (TS 33.501 6.8.1.2.2).
+        smc_count_ = initial_count_;
+        send_registration_result();
+        return;
+    }
+    check(reg_type_ == ie::RegistrationType::initial, "5.5.1.3.2",
+          "a periodic or mobility update comes with a context the AMF can verify");
     challenges_ = 0;
     start_challenge();
 }
+
+void Amf::on_service_request(const nas::Message& m, bool initial, bool verified) {
+    check(initial, "5.6.1.2", "SERVICE REQUEST is an initial NAS message");
+    ++service_requests_;
+    stop_t3560();
+    if (p_.silent_service_request) {
+        return;
+    }
+    const Bytes* t = nas::get(m, "5G-S-TMSI");
+    auto id = t ? ie::MobileIdentity::decode(*t) : Result<ie::MobileIdentity>(make_error(Errc::truncated, 0, ""));
+    const bool known = id && id->type == ie::MobileIdentity::Type::s_tmsi && guti_ && guti_->tmsi == id->tmsi &&
+                       guti_->amf_set == id->amf_set && guti_->amf_pointer == id->amf_pointer;
+    check(known, "5.6.1.2", "the 5G-S-TMSI is the one this AMF assigned");
+    if (!verified || !known || state_ != State::registered || p_.service_reject_cause != 0) {
+        // §5.6.1.5: #9 when the identity cannot be derived, #10 when not registered;
+        // or the profile's cause (#22 with T3346).
+        nas::Message r = make(kServiceReject);
+        const std::uint8_t cause = !verified || !known ? 9 : state_ != State::registered ? 10 : p_.service_reject_cause;
+        put(r, "5GMM cause", Bytes{cause});
+        if (cause == 22 && p_.t3346_s) {
+            put(r, "T3346 value", timer2(*p_.t3346_s).encode());
+        }
+        send(r, verified);
+        release();
+        return;
+    }
+    std::uint8_t type = 0;
+    if (const Bytes* st = nas::get(m, "Service type"); st != nullptr && !st->empty()) {
+        type = static_cast<std::uint8_t>((*st)[0] & 0x0F);
+    }
+    std::uint16_t uplink = 0;
+    if (const Bytes* u = nas::get(m, "Uplink data status")) {
+        if (auto b = ie::PsiBitmap::decode(*u)) {
+            uplink = b->psis;
+        }
+    }
+    check(type != ie::ServiceType::data || uplink != 0, "5.6.1.2", "a service request for data names its sessions");
+    smc_count_ = initial_count_;   // K_gNB from the SERVICE REQUEST's COUNT
+    const std::uint16_t held = smf_ != nullptr ? smf_->sessions_of(supi_) : 0;
+    // The user plane comes back for the uplink asked for and the downlink waiting.
+    const std::uint16_t up = static_cast<std::uint16_t>((uplink | (smf_ != nullptr ? smf_->pending_of(supi_) : 0)) & held);
+    nas::Message a = make(kServiceAccept);
+    put(a, "PDU session status", ie::PsiBitmap{held}.encode());
+    if (uplink != 0) {
+        put(a, "PDU session reactivation result", ie::PsiBitmap{static_cast<std::uint16_t>(uplink & ~held)}.encode());
+    }
+    auto plain = nas::encode(a);
+    auto wire = plain ? ctx_->protect(*plain, Sht::integrity_ciphered) : Result<Bytes>(plain.error());
+    auto key = kgnb();
+    check(wire.has_value() && key.has_value(), "TS 33.501 6.8.1.2.2", "the AMF has K_gNB for the service accept");
+    if (!wire || !key) {
+        return;
+    }
+    if (link_.service_accept) {
+        link_.service_accept(std::move(*wire), std::move(*key), up);
+    } else {
+        downlink(std::move(*wire));
+    }
+}
+
+bool Amf::network_deregister(bool reregistration_required) {
+    if (state_ != State::registered || !ctx_ || !connected_) {
+        return false;
+    }
+    nas::Message d = make(kDeregistrationRequestUeTerminated);
+    put(d, "De-registration type", ie::DeregistrationType{false, reregistration_required, 1}.encode());
+    state_ = State::deregistering;
+    send(d, true);
+    return true;
+}
+
+bool Amf::owns(const ie::MobileIdentity& id) const {
+    return guti_ && id.type == ie::MobileIdentity::Type::guti && id.tmsi == guti_->tmsi &&
+           id.amf_region == guti_->amf_region && id.amf_set == guti_->amf_set && id.amf_pointer == guti_->amf_pointer;
+}
+
+std::optional<std::uint64_t> Amf::s_tmsi() const {
+    if (!guti_) {
+        return std::nullopt;
+    }
+    return (static_cast<std::uint64_t>(guti_->amf_set & 0x3FF) << 38) |
+           (static_cast<std::uint64_t>(guti_->amf_pointer & 0x3F) << 32) | guti_->tmsi;
+}
+
+bool Amf::owns_s_tmsi(std::uint64_t s) const { return s_tmsi() == s; }
 
 Profile::Challenge Amf::challenge_kind() const {
     const auto i = static_cast<std::size_t>(std::max(challenges_ - 1, 0));
@@ -532,7 +704,25 @@ void Amf::send_registration_result() {
             put(a, "T3502 value", timer2(*p_.t3502_s).encode());
         }
         state_ = State::accepting;
-        if (link_.initial_context && p_.registration == Profile::Registration::accept && ctx_) {
+        if (link_.service_accept && p_.registration == Profile::Registration::accept && ctx_ &&
+            reg_type_ != ie::RegistrationType::initial && reg_uplink_ != 0) {
+            // §5.5.1.3.4: the user plane comes back for the sessions the Uplink data
+            // status names, in an INITIAL CONTEXT SETUP as for a service request.
+            const std::uint16_t held = smf_ != nullptr ? smf_->sessions_of(supi_) : 0;
+            reg_up_ = static_cast<std::uint16_t>((reg_uplink_ | (smf_ != nullptr ? smf_->pending_of(supi_) : 0)) & held);
+            put(a, "PDU session status", ie::PsiBitmap{held}.encode());
+            put(a, "PDU session reactivation result", ie::PsiBitmap{static_cast<std::uint16_t>(reg_uplink_ & ~held)}.encode());
+            auto plain = nas::encode(a);
+            auto wire = plain ? ctx_->protect(*plain, Sht::integrity_ciphered) : Result<Bytes>(plain.error());
+            auto key = kgnb();
+            check(wire.has_value() && key.has_value(), "TS 33.501 6.8.1.2.2", "the AMF has K_gNB for the accept");
+            if (wire && key) {
+                link_.service_accept(std::move(*wire), std::move(*key), reg_up_);
+            }
+            return;
+        }
+        if (link_.initial_context && p_.registration == Profile::Registration::accept && ctx_ &&
+            reg_type_ == ie::RegistrationType::initial) {
             auto plain = nas::encode(a);
             auto wire = plain ? ctx_->protect(*plain, Sht::integrity_ciphered) : Result<Bytes>(plain.error());
             auto key = kgnb();
@@ -548,6 +738,9 @@ void Amf::send_registration_result() {
     case Profile::Registration::reject: {
         nas::Message r = make(kRegistrationReject);
         put(r, "5GMM cause", Bytes{p_.reject_cause});
+        if (p_.t3346_s) {
+            put(r, "T3346 value", timer2(*p_.t3346_s).encode());
+        }
         send(r, true);
         state_ = State::released;
         release();
@@ -752,6 +945,8 @@ void Amf::release() {
 
 void Amf::on_ue_released() {
     stop_t3560();
+    connected_ = false;
+    initial_count_.reset();
     if (state_ != State::registered) {
         state_ = State::idle;
     }

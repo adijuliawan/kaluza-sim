@@ -8,12 +8,16 @@
 // with the session's QFI; the inner packet from the UE's address), and an ICMP
 // echo request to any address is answered from that address, on the downlink
 // tunnel with a DL PDU SESSION INFORMATION frame naming the QFI. A test can
-// also ping the UE from the DN (N12 paging rows).
+// also ping the UE from the DN (N12 paging rows). From N12, downlink for a
+// session whose user plane is deactivated (the UE in CM-IDLE) is held, a few
+// packets per tunnel, and reported once so the AMF pages; the held packets go
+// when the gNB's end is known again.
 
 #pragma once
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
@@ -35,6 +39,7 @@ struct UpfStats {
     std::uint64_t echo_replies = 0;      // sent to a UE
     std::uint64_t echo_from_ue = 0;      // echo replies a UE sent to a DN ping
     std::uint64_t unknown_teid = 0;
+    std::uint64_t held = 0;              // downlink held for a deactivated session
 };
 
 class Upf {
@@ -47,7 +52,11 @@ public:
     /// A new uplink tunnel for a UE address and its flow's QFI; its TEID.
     std::uint32_t open(ip::Addr ue, std::uint8_t qfi);
     void set_dl(std::uint32_t ul_teid, const ngap::GtpTunnel& dl);
+    /// The user plane deactivated (TS 23.502 4.2.6): downlink is held from now on.
+    void deactivate(std::uint32_t ul_teid);
     void close(std::uint32_t ul_teid);
+    /// Called with the uplink TEID when downlink starts to wait for a deactivated session.
+    void on_dl_pending(std::function<void(std::uint32_t ul_teid)> f) { on_pending_ = std::move(f); }
     /// An echo request from `from` to the UE behind `ul_teid` (a DN ping).
     Result<void> ping_ue(std::uint32_t ul_teid, ip::Addr from, std::uint16_t seq);
 
@@ -61,15 +70,17 @@ private:
         ip::Addr ue{};
         std::uint8_t qfi = 1;
         std::optional<ngap::GtpTunnel> dl;
+        std::vector<Bytes> held;
     };
     void on_ul(std::uint32_t teid, const entity::gtpu::UserData& d);
-    void send_dl(const Tunnel& t, Bytes packet);
+    void send_dl(Tunnel& t, Bytes packet);
     void check(bool ok, const char* clause, const char* what, std::string detail = {});
 
     entity::gtpu::Endpoint gtpu_;
     std::array<std::uint8_t, 4> addr_;
     std::uint16_t port_;
     std::map<std::uint32_t, Tunnel> tunnels_;
+    std::function<void(std::uint32_t)> on_pending_;
     UpfStats stats_;
     std::vector<Verdict> verdicts_;
 };

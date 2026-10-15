@@ -142,6 +142,22 @@ std::optional<std::string> token(const KaluzaApi& api) {
     return tok;
 }
 
+/// What one PUT's status means (agreed with the kaluza-core session for W0):
+/// a create is 201 (created) or 412 (the subscriber exists, left as it is); a
+/// replace is 200, 201 or 204. Anything else, 0 included (no answer: TLS or
+/// the connection), stops the run: no retry against an address gone stale.
+enum class PutOutcome : std::uint8_t { created, existing, stop };
+
+PutOutcome judge_put(int status, bool replace) {
+    if (status == 201 || (replace && (status == 200 || status == 204))) {
+        return PutOutcome::created;
+    }
+    if (status == 412 && !replace) {
+        return PutOutcome::existing;
+    }
+    return PutOutcome::stop;
+}
+
 } // namespace
 
 int kaluza_provision(const std::string& first, unsigned count, const std::string& master_file, const KaluzaApi& api,
@@ -175,8 +191,10 @@ int kaluza_provision(const std::string& first, unsigned count, const std::string
     std::cout << "BATCH_SALT=" << to_hex(*salt) << "\n";
     auto c = client(*u, api, true);
     httplib::Headers h{{"Authorization", "Bearer " + *tok}};
-    int failed = 0;
-    for (unsigned i = 0; i < count; ++i) {
+    unsigned created = 0;
+    unsigned existing = 0;
+    unsigned failed = 0;
+    for (unsigned i = 0; i < count && failed == 0; ++i) {
         const std::string imsi = imsi_at(first, i);
         auto sub = uicc::image::range_subscriber(imsi);
         const auto k = uicc::secrets::derive(*master, "K", imsi);
@@ -200,7 +218,7 @@ int kaluza_provision(const std::string& first, unsigned count, const std::string
                 std::cout << "UE_ID=imsi-" << imsi << " STATUS=" << gs << " STEP=read-for-replace\n";
                 ++failed;
                 wipe(body);
-                continue;
+                break;
             }
         }
         auto res = c->Put(path, put, body, "application/json");
@@ -209,15 +227,30 @@ int kaluza_provision(const std::string& first, unsigned count, const std::string
             wipe(v);
         }
         const int status = res ? res->status : 0;
-        failed += status == 200 || status == 201 || status == 204 ? 0 : 1;
+        // K_FPR: 4 octets of HMAC-SHA-256 under this batch's salt, never part of K or OPc.
         std::cout << "UE_ID=imsi-" << imsi << " STATUS=" << status << " PROFILE=" << profile_for(imsi).name
                   << " K_FPR=" << uicc::secrets::key_fingerprint(*salt, k) << "\n";
+        switch (judge_put(status, replace)) {
+        case PutOutcome::created:
+            ++created;
+            break;
+        case PutOutcome::existing:
+            ++existing;
+            break;
+        case PutOutcome::stop:
+            ++failed;
+            std::cout << "STOPPED_AT=imsi-" << imsi << (status == 0 ? " (no answer: TLS or the connection)" : "")
+                      << "\n";
+            break;
+        }
     }
     for (auto& [name, v] : h) {
         wipe(v);
     }
     wipe(*tok);
-    std::cout << "PROVISIONED=" << (count - static_cast<unsigned>(failed)) << "/" << count << "\n";
+    std::cout << "CREATED=" << created << " EXISTING=" << existing << " FAILED=" << failed
+              << " NOT_TRIED=" << (count - created - existing - failed) << "\n";
+    std::cout << "PROVISIONED=" << (created + existing) << "/" << count << "\n";
     return failed == 0 ? 0 : 1;
 }
 
@@ -233,19 +266,25 @@ int kaluza_deprovision(const std::string& first, unsigned count, const KaluzaApi
     }
     auto c = client(*u, api, true);
     httplib::Headers h{{"Authorization", "Bearer " + *tok}};
-    int failed = 0;
-    for (unsigned i = 0; i < count; ++i) {
+    unsigned failed = 0;
+    unsigned done = 0;
+    for (unsigned i = 0; i < count && failed == 0; ++i) {
         const std::string imsi = imsi_at(first, i);
         auto res = c->Delete(u->path + "/provisioning/v1/subscribers/imsi-" + imsi, h);
         const int status = res ? res->status : 0;
-        failed += status == 204 || status == 404 ? 0 : 1;
         std::cout << "UE_ID=imsi-" << imsi << " STATUS=" << status << "\n";
+        if (status == 204 || status == 404) {
+            ++done;
+        } else {
+            ++failed;   // the same rule as the import: stop, no retry
+            std::cout << "STOPPED_AT=imsi-" << imsi << "\n";
+        }
     }
     for (auto& [name, v] : h) {
         wipe(v);
     }
     wipe(*tok);
-    std::cout << "DEPROVISIONED=" << (count - static_cast<unsigned>(failed)) << "/" << count << "\n";
+    std::cout << "DEPROVISIONED=" << done << "/" << count << "\n";
     return failed == 0 ? 0 : 1;
 }
 
