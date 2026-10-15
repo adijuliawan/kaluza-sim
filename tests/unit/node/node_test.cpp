@@ -72,12 +72,12 @@ TEST(Topology, TheRepositorysTopologiesLoad) {
         for (const auto& g : t->ues) {
             n += g.count;
         }
-        EXPECT_EQ(n, 12u) << f;
+        EXPECT_EQ(n, std::string(f) == "aio-lab.yaml" ? 13u : 12u) << f;
     }
     std::string why;
     auto lab = load_topology(root + "/topologies/aio-lab.yaml", why);
     ASSERT_TRUE(lab) << why;
-    ASSERT_EQ(lab->ues.size(), 2u);
+    ASSERT_EQ(lab->ues.size(), 3u);
     EXPECT_EQ(lab->ues[1].first_imsi, "001010000300050");
 }
 

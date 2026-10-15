@@ -14,6 +14,8 @@
 #   [T3512_S=<s>]        the T3512 the core gives (default 3600: the stub's, the bundles' subsRegTimer)
 #   [DN_PING=<command>]  on a real core, a command that pings the address given as its argument from
 #                        the DN host (kaluza-core: 172.30.61.1); without it the DN rows SKIP
+#   [SHORTREG_UE=<n>]    on a real core, a UE whose subscription has a short subsRegTimer
+#                        (kaluza-core: 120 s) for the periodic rows; without it they SKIP
 #
 # UEs 6, 7 and 8 are used; all must be off at the start.
 
@@ -111,28 +113,41 @@ wire=$(tshark_fields "$RUN/uu.pcapng" \
 sht=$(printf '%s' "$wire" | cut -f1 | cut -d, -f1); tid=$(printf '%s' "$wire" | cut -f2 | cut -d, -f1)
 row ksim-p1.guti-after-power-cycle '^identity=5g-guti protected=integrity wire=sht1,id2$' \
     "identity=$(printf '%s\n' "$req" | kv IDENTITY) protected=$(printf '%s\n' "$req" | kv PROTECTED) wire=sht$sht,id$tid"
+# periodic UE SECONDS: idle with a session, the periodic registration within
+# SECONDS, no authentication for it, and the session still carrying data.
+periodic() {
+    _est=$(ctl ue "$1" ps-establish ipv4 --dnn internet $SLICE --wait 15s)
+    _psi=$(printf '%s\n' "$_est" | kv PSI)
+    _seq=$(ctl info | kv EVENT_SEQ)
+    release "$1" >/dev/null
+    t3512=$(ctl ue "$1" wait nas.mm.t3512 --since "$_seq" --timeout 5s | kv SECONDS)
+    _preq=$(ctl ue "$1" wait nas.reg.request --since "$_seq" --where type=periodic --timeout "${2}s")
+    _pseq=$(printf '%s\n' "$_preq" | kv SEQ)
+    _acc=$(ctl ue "$1" wait nas.reg.accept --since "$_seq" --where type=periodic --timeout 10s | kv TYPE)
+    row amf-ueransim.037 '^accept=periodic$' "accept=$_acc"
+    ctl ue "$1" wait nas.auth.response --since "${_pseq:-$_seq}" --timeout 1ms >/dev/null 2>&1
+    _auth=$?   # 3: none since the periodic request
+    row amf-ueransim.038 '^authentication=none$' "authentication=$([ "$_auth" -eq 3 ] && echo none || echo found)"
+    _png=$(ctl ue "$1" ping "$DN_ADDR" --psi "$_psi" -c 2 --interval 300)
+    row amf-ueransim.039 '^received=[1-9]' "received=$(printf '%s\n' "$_png" | kv RECEIVED)"
+}
 if on_stub; then
-    est=$(ctl ue 7 ps-establish ipv4 --dnn internet $SLICE --wait 15s)
-    psi=$(printf '%s\n' "$est" | kv PSI)
-    seq=$(ctl info | kv EVENT_SEQ)
-    release 7 >/dev/null
-    t3512=$(ctl ue 7 wait nas.mm.t3512 --since "$seq" --timeout 5s | kv SECONDS)
+    periodic 7 20
     row amf-ueransim.036 '^t3512=8$' "t3512=$t3512"
-    preq=$(ctl ue 7 wait nas.reg.request --since "$seq" --where type=periodic --timeout 20s)
-    pseq=$(printf '%s\n' "$preq" | kv SEQ)
-    acc=$(ctl ue 7 wait nas.reg.accept --since "$seq" --where type=periodic --timeout 10s | kv TYPE)
-    row amf-ueransim.037 '^accept=periodic$' "accept=$acc"
-    ctl ue 7 wait nas.auth.response --since "${pseq:-$seq}" --timeout 1ms >/dev/null 2>&1
-    auth=$?   # 3: none since the periodic request
-    row amf-ueransim.038 '^authentication=none$' "authentication=$([ "$auth" -eq 3 ] && echo none || echo found)"
-    png=$(ctl ue 7 ping "$DN_ADDR" --psi "$psi" -c 2 --interval 300)
-    row amf-ueransim.039 '^received=[1-9]' "received=$(printf '%s\n' "$png" | kv RECEIVED)"
     stub t3512 --seconds "$T3512_S" >/dev/null
 else
     skip_row amf-ueransim.036 "needs a subscription change on $CORE (no trigger grant in P1)"
-    for r in amf-ueransim.037 amf-ueransim.038 amf-ueransim.039; do
-        skip_row "$r" "needs the short subsRegTimer sub-block's UE on $CORE (N17/N18)"
-    done
+    if [ -n "${SHORTREG_UE:-}" ]; then
+        # N18: a UE of the sub-block with subsRegTimer 120 s.
+        ctl ue "$SHORTREG_UE" power on --wait 30s | grep -q '^RESULT=ACCEPT$' || abort "UE $SHORTREG_UE did not register"
+        periodic "$SHORTREG_UE" 150
+        release_all "$SHORTREG_UE"
+        ctl ue "$SHORTREG_UE" power off --switch-off --wait 10s >/dev/null
+    else
+        for r in amf-ueransim.037 amf-ueransim.038 amf-ueransim.039; do
+            skip_row "$r" "needs the short subsRegTimer sub-block's UE on $CORE (SHORTREG_UE)"
+        done
+    fi
 fi
 release_all 7
 ctl ue 7 power off --switch-off --wait 10s >/dev/null

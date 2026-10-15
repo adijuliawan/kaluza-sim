@@ -9,7 +9,8 @@
 # carrying 172.30.30.31/24 for N3 (GTP-U 2152 to the V-UPF at .2, agreed with
 # kaluza-core-1e). gNB 0x1A0 (22 bits), PCI 101, TAC 000001, S-NSSAI 1/000001.
 # UEs 1-10 are imsi-001010000300000..009 (the default sub-block, no SMS); 11
-# and 12 are ..050 and ..051, from the sub-block with SMS (N13, the SMS gate).
+# and 12 are ..050 and ..051, from the sub-block with SMS (N13, the SMS gate);
+# 13 is ..060, subsRegTimer 120 s (N18, the idle gate's periodic rows).
 plmn: "00101"
 seed: 42
 amf: [{addr: 172.30.30.1, port: 38412}]
@@ -23,6 +24,8 @@ ues:
   - {group: w0, count: 10, range: "001010000300000", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
      imeisv_tac: "86000000"}
   - {group: sms, count: 2, range: "001010000300050", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+     imeisv_tac: "86000000"}
+  - {group: shortreg, count: 1, range: "001010000300060", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
      imeisv_tac: "86000000"}
 secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
 peer: {name: kaluza-core}

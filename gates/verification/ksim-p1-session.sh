@@ -85,7 +85,12 @@ if [ "$CORE" = stub ]; then
     row ksim-p1.backoff '^reject=29 seconds=[1-9][0-9]* during=6 after=ACCEPT$' \
         "reject=$(printf '%s\n' "$first" | kv CAUSE) seconds=$secs during=$again after=$after"
 else
-    skip_row ksim-p1.backoff "needs a core-side #29 with a back-off timer (N17/N18 triage)"
+    # N18: what the core answers for a DNN it does not serve, on record; the row
+    # needs a reject with a back-off timer and an accept after it (the stub's).
+    _seq=$(ctl info | kv EVENT_SEQ)
+    probe=$(ctl ue "$UE" ps-establish ipv4 --dnn ksim-backoff $SLICE --wait 15s)
+    pbo=$(ctl ue "$UE" wait nas.sm.backoff --since "$_seq" --timeout 3s | kv SECONDS)
+    skip_row ksim-p1.backoff "no reject-then-accept trigger on $CORE: an unserved DNN got $(printf '%s\n' "$probe" | kv RESULT) cause=$(printf '%s\n' "$probe" | kv CAUSE) backoff=${pbo:-none}"
 fi
 
 release_all "$UE"
