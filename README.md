@@ -7,13 +7,13 @@ It is a **second implementation**. It shares no code, tables or reference output
 - The UE talks to its SIM through **real APDUs**.
 - PDCP runs with the keys the core hands out, so the core's K_gNB, NH and NCC are checked end to end.
 
-**Status (2026-10-15):** build phase **P0** is closed (`tools/p0_exit.sh`: P0_EXIT=PASS). **P1** (the UE, the soft card and NAS over an all-in-one gNB) runs since the user's go on 2026-10-15, by milestones N0–N19; its shape is [ADR 0009](docs/adr/0009-p1-runtime-shape.md), its control core [ADR 0010](docs/adr/0010-open5gs-control-core.md), its rows `gates/rows/p1.tsv`.
+**Status (2026-10-15):** build phases **P0** and **P1** are closed (`tools/p0_exit.sh`: P0_EXIT=PASS; `tools/p1_exit.sh`: P1_EXIT=PASS). P1 built the UE, the soft card and NAS over an all-in-one gNB. Its rows (`gates/rows/p1.tsv`) pass on kaluza-core, and pass or are allowed on the Open5GS fork. Its shape is [ADR 0009](docs/adr/0009-p1-runtime-shape.md), its control core [ADR 0010](docs/adr/0010-open5gs-control-core.md). **P2** starts only on the user's go.
 
 **Review page (private artifact):** https://claude.ai/artifact/DdYiFQqkbaC8kaMCn4ft95. It summarises these docs as of the commit named in its header. Where they differ, the repo wins. Republish the page when the docs change.
 
 ## Start here (new session)
 
-1. [`docs/handoff/2026-10-14-p0-close.md`](docs/handoff/2026-10-14-p0-close.md): the resume point after P0 (what exists, the exit check, what to know before P1, P1's first steps). [`docs/handoff/2026-10-14-design-session.md`](docs/handoff/2026-10-14-design-session.md) keeps the design decisions, their reasons and the research.
+1. [`docs/handoff/2026-10-15-p1-close.md`](docs/handoff/2026-10-15-p1-close.md): the resume point after P1 (milestones, the exit check, the lab runs, what to know before P2). It supersedes parts of [`docs/handoff/2026-10-14-p0-close.md`](docs/handoff/2026-10-14-p0-close.md), whose rest still holds. [`docs/handoff/2026-10-14-design-session.md`](docs/handoff/2026-10-14-design-session.md) keeps the design decisions, their reasons and the research.
 2. [`docs/roadmap.md`](docs/roadmap.md): build phases P0–P5 and their exit criteria. The compliance registers are under [`docs/compliance/`](docs/compliance/).
 3. [`docs/architecture.md`](docs/architecture.md) and [`docs/requirements.md`](docs/requirements.md).
 
