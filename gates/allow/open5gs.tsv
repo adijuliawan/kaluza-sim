@@ -5,6 +5,10 @@
 # names is scored ALLOWED. Columns: allow id, row id, reason, clause, Open5GS reference (fork 741c29d8d).
 # O5GS-1 is decision D3 (2026-10-15): the fork has no SMS over NAS, its AMF never sets "SMS over NAS allowed";
 # ksim-p1.sms-not-allowed checks the UE honours that and is not allowed here.
+# O5GS-2 (N17, run open5gs-20261015T105150Z): the fork's AMF keeps UE contexts in amfd's memory only and
+# drops SCTP when it stops, with no draining. After a restart it answers a SERVICE REQUEST with #9, the UE
+# (rightly, TS 24.501 5.6.1.5) releases its sessions and registers again from the SUCI with a new
+# authentication. The kaluza-core rows assume an AMF that keeps them.
 O5GS-1	smsf.010	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
 O5GS-1	smsf.011	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
 O5GS-1	smsf.012	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
@@ -26,3 +30,12 @@ O5GS-1	smsf.034	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.5
 O5GS-1	smsf.035	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
 O5GS-1	smsf.036	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
 O5GS-1	smsf.037	the fork has no SMSF: SMS over NAS is never allowed (D3)	TS 24.501 5.5.1.2.4	src/amf/gmm-build.c 509-524: the registration result carries the access type and the NSSAA bit only, never SMS over NAS allowed
+O5GS-2	amf-ueransim.063	the fork sends no AMF STATUS INDICATION when amfd stops: no draining (the indication is optional, TS 38.413 8.7.6)	TS 23.501 5.21.2; TS 24.501 5.6.1.5	src/amf (741c29d8d): amf_ue contexts in memory only; amfd SIGTERM closes the NGAP association with no AMF STATUS INDICATION
+O5GS-2	amf-ueransim.065	a restarted fork AMF has no UE context: SERVICE REJECT #9, then a new initial registration (TS 24.501 5.6.1.5)	TS 23.501 5.21.2; TS 24.501 5.6.1.5	src/amf (741c29d8d): amf_ue contexts in memory only; amfd SIGTERM closes the NGAP association with no AMF STATUS INDICATION
+O5GS-2	amf-ueransim.066	the new initial registration after #9 runs a new authentication (no stored context to reuse)	TS 23.501 5.21.2; TS 24.501 5.6.1.5	src/amf (741c29d8d): amf_ue contexts in memory only; amfd SIGTERM closes the NGAP association with no AMF STATUS INDICATION
+O5GS-2	amf-ueransim.069	the PDU session goes with the #9 (TS 24.501 5.6.1.5: released locally); no session left for the ping	TS 23.501 5.21.2; TS 24.501 5.6.1.5	src/amf (741c29d8d): amf_ue contexts in memory only; amfd SIGTERM closes the NGAP association with no AMF STATUS INDICATION
+O5GS-3	amf-ueransim.036	the fork takes T3512 from the AMF configuration only (amf.yaml time.t3512), not from the subscription, so no subscription change moves it	TS 24.501 5.3.7	src/amf/context.c: time.t3512 from the configuration; no subscribed periodic timer
+O5GS-4	smf-ueransim.034	the fork offers no operator trigger for a network-requested PDU session release without a change to its code (ADR 0010 point 5)	TS 24.501 6.3.3	src/smf (741c29d8d): no management interface for a release
+O5GS-4	smf-ueransim.036	as smf-ueransim.034: no network-side release trigger in the fork	TS 24.501 6.3.3	src/smf (741c29d8d)
+O5GS-5	ksim-p1.reregistration-required	no trigger for a network-initiated de-registration with re-registration required: the fork's dereg_time applies to SNPN onboarding registrations only	TS 24.501 5.5.2.3	src/amf/gmm-sm.c 3684: onboarding.dereg_time only
+O5GS-6	ksim-p1.backoff	the fork sends nothing back for a DNN no SMF serves (the silence kaluza-core's KF-001/F-76 records), so there is no reject with a back-off timer to wait out	TS 24.501 5.4.5.2.5	runs open5gs-20261015T094554Z and open5gs-20261015T105150Z

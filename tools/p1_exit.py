@@ -79,7 +79,8 @@ def allowed_open5gs() -> set[str]:
     f = ROOT / "gates/allow/open5gs.tsv"
     if not f.is_file():
         return set()
-    return {l.split("\t")[0] for l in f.read_text().splitlines() if l and not l.startswith("#")}
+    # Columns: allow id, row id, reason, clause, Open5GS reference (gates/lib/ksim.sh reads the same).
+    return {l.split("\t")[1] for l in f.read_text().splitlines() if l and not l.startswith("#") and "\t" in l}
 
 
 def kf_rows() -> dict[str, str]:

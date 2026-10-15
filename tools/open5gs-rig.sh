@@ -12,7 +12,9 @@
 # fork's install/var/log files, reported to kaluza-core-df),
 # the SBI addresses of nrf, ausf, udm and nssf (the fork's loopback defaults,
 # as in the .preroam variants: the 5gc FQDNs do not resolve on the rig), the
-# AMF's NGAP on vmnet8 only (no wg0 address) and NSAC off (no NSACF in the set).
+# AMF's NGAP on vmnet8 only (no wg0 address) and NSAC off (no NSACF in the set),
+# and from N17 the internet and ims pools of smf.yaml and upf.yaml moved to
+# 10.55.0.0/16 and 10.56.0.0/16.
 #
 # start: refuses when any open5gs NF already runs on the rig (a kaluza-core
 #        set would be using it); then starts nrfd scpd ausfd udmd udrd pcfd bsfd
@@ -21,7 +23,8 @@
 #        peers kaluza-core's gates start, no EPC daemon.
 #        --session (P1 N17) adds smfd and upfd. upfd runs as root (sudo -n; the
 #        user allowed it on 2026-10-15 for upfd only) and makes ogstun, which
-#        then gets the pool gateways 10.45.0.1/16 and 10.46.0.1/16. --t3512 N
+#        then gets the pool gateways 10.55.0.1/16 and 10.56.0.1/16 (our copy's
+#        pools, off kaluza-core's 10.45-10.50 at kaluza-core-df's request). --t3512 N
 #        sets T3512 in our copy's amf.yaml first (the periodic rows).
 # stop:  stops every NF started from ~/kaluza-sim-rig/etc (upfd as root),
 #        deletes ogstun and ogstun-edge, and checks no NF and no ogstun is left.
@@ -64,8 +67,8 @@ if [ '$session' = 1 ]; then
     nf=upf   # named through a variable, so this script's text never matches its own pgrep patterns
     sudo -n ~/open5gs-n3iwf/install/bin/open5gs-\${nf}d -D -c ~/kaluza-sim-rig/etc/\${nf}.yaml </dev/null >/dev/null 2>&1
     sleep 2
-    sudo -n ip addr replace 10.45.0.1/16 dev ogstun
-    sudo -n ip addr replace 10.46.0.1/16 dev ogstun
+    sudo -n ip addr replace 10.55.0.1/16 dev ogstun
+    sudo -n ip addr replace 10.56.0.1/16 dev ogstun
     sudo -n ip link set ogstun up
     pid=\$(pgrep -f 'open5gs-[u]pfd .*kaluza-sim-rig/etc/upf.yaml' | head -n 1 || true)
     echo \"NF.upf=\${pid:-DOWN}\"
