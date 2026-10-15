@@ -90,6 +90,11 @@ NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc
 
 void NgapAmf::set_sms_subscribed(const std::string& supi, bool on) { sms_sub_[supi] = on; }
 
+std::optional<Bytes> NgapAmf::radio_capability(std::uint64_t amf_ue) {
+    Ue* u = by_amf(amf_ue);
+    return u != nullptr ? u->radio_capability : std::nullopt;
+}
+
 void NgapAmf::rebind(IAssoc& ng) {
     ng_ = &ng;
     ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [](LinkEvent) {});

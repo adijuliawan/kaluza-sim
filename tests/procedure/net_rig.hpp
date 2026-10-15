@@ -99,7 +99,8 @@ public:
 
 struct Net {
     explicit Net(corestub::Profile p = {}, node::IUeNet* ue_net = nullptr,
-                 std::optional<proc::ue::MmTimerValues> mm_timers = std::nullopt)
+                 std::optional<proc::ue::MmTimerValues> mm_timers = std::nullopt,
+                 std::optional<node::Persona> persona = std::nullopt)
         : amf(loop, home, kPlmn, std::move(p), ng.b(), upf_port.get(), {127, 0, 0, 9}) {
         home.add(kSupi, uicc::test::sb("465b5ce8b199b49faa5f0a2ee238a6bc"), uicc::test::sb("cd63cb71954a9f4e48a5994e37a02baf"));
         node::UeDeviceConfig uc;
@@ -110,6 +111,10 @@ struct Net {
         uc.imeisv = "8600000000000101";
         uc.seed = 5;
         uc.mm_timers = mm_timers;
+        if (persona) {
+            uc.imeisv = node::imeisv_for(&*persona, "86000000", kSupi);
+            uc.persona = std::move(persona);
+        }
         if (ue_net != nullptr) {
             uc.netns = "ksim-ue-1";
         }

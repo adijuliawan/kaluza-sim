@@ -17,7 +17,8 @@
 //       dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
 //   ues:
 //     - {group: phones, count: 3, range: "001010000300001", card: {template: ../cards/usim-5g.yaml},
-//        nssai: [1, "1-000001"], imeisv_tac: "86000000"}   # SST, or SST-SD in hex
+//        nssai: [1, "1-000001"], imeisv_tac: "86000000",    # SST, or SST-SD in hex
+//        persona: ../personas/s22plus.yaml}                  # N15, optional
 //   secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek}
 //   peer: {name: stub}                      # free-form pins for the manifest
 //   security: {allow_null: false}            # D1: the bisect switch only
@@ -53,6 +54,7 @@ struct UeGroup {
     std::string card_template;
     std::vector<Slice> nssai{Slice{}};   // the requested NSSAI
     std::string imeisv_tac = "86000000";   // 8 digits; the SNR comes from the IMSI
+    std::string persona;                    // N15: a persona file (personas/), empty: the generic UE
 };
 
 /// The CU-CP's namespace from ksim-netd (ADR 0009 points 3 and 4): ng_bind is

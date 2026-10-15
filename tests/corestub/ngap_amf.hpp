@@ -51,6 +51,8 @@ public:
 
     bool ng_setup_done() const noexcept { return ng_setup_; }
     std::size_t ues() const noexcept { return ues_.size(); }
+    /// The UE Radio Capability the gNB indicated for a UE (N15), if any.
+    std::optional<Bytes> radio_capability(std::uint64_t amf_ue);
     /// The NAS side of the n-th UE that came (0 first), or nullptr.
     Amf* nas(std::size_t n = 0);
     /// The NAS side of the latest UE with this SUPI, or nullptr.

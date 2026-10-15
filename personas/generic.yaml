@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# Persona generic (P1 N15): the UE kaluza-sim is without a persona, written down
+# so a topology can name it. Its UE-NR-Capability is rrc::generic_nr_capability()
+# (Rel-15, no ROHC, band n78; tests/unit/node Persona.TheGenericOneIsTheBuiltInCapability
+# keeps the two equal); its NAS capabilities are what the UE implements: UE
+# security capability 5G-EA0-2 and 128-5G-IA1-2, no 5GMM capability IE.
+name: generic
+device: kaluza-sim generic UE
+rrc:
+  ue_capability_rat_containers:
+    - rat: nr
+      uper: 0000000000000000009a

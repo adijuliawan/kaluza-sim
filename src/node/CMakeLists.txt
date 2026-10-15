@@ -8,6 +8,7 @@
 add_library(ksim_node STATIC
     ue/device.cpp
     ue/dataplane.cpp
+    ue/persona.cpp
     aio/topology.cpp
     aio/run_dir.cpp
     aio/capture.cpp

@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <algorithm>
 #include <utility>
 
@@ -109,7 +110,16 @@ Result<void> AllInOne::build(std::string& why) {
     };
     std::vector<Card> cards;
     std::vector<Slice> slices;   // the gNB's: every slice a UE group asks for
+    std::map<const UeGroup*, Persona> personas;   // N15: per group, loaded once
     for (const auto& g : topo_.ues) {
+        if (!g.persona.empty()) {
+            auto p = load_persona(g.persona, why);
+            if (!p) {
+                why.insert(0, "group " + g.group + ": ");
+                return p.error();
+            }
+            personas.emplace(&g, std::move(*p));
+        }
         for (const auto& s : g.nssai) {
             if (std::find(slices.begin(), slices.end(), s) == slices.end()) {
                 slices.push_back(s);
@@ -247,7 +257,10 @@ Result<void> AllInOne::build(std::string& why) {
         for (const auto& s : c.g->nssai) {
             uc.nssai.push_back(nas::ie::Snssai{s.sst, s.sd, std::nullopt, std::nullopt});
         }
-        uc.imeisv = c.g->imeisv_tac + c.imsi.substr(9) + "01";
+        if (auto it = personas.find(c.g); it != personas.end()) {
+            uc.persona = it->second;
+        }
+        uc.imeisv = imeisv_for(uc.persona ? &*uc.persona : nullptr, c.g->imeisv_tac, c.imsi);
         uc.allow_null_integrity = topo_.allow_null;
         uc.seed = topo_.seed;
         if (ue_net_) {

@@ -348,6 +348,9 @@ void Mm::start_registration(RegType type) {
     const ie::MobileIdentity id = identity();
     put(m, "5GS mobile identity", id.encode());
     put(m, "UE security capability", cfg_.security.encode());
+    if (cfg_.mm_capability) {
+        put(m, "5GMM capability", *cfg_.mm_capability);   // not a cleartext IE: in the full message (§4.4.6)
+    }
     if (cfg_.sms_requested) {
         put(m, "5GS update type", ie::UpdateType{true, false, 0, 0}.encode());   // N13: SMS over NAS requested
     }

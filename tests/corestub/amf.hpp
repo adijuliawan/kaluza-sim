@@ -144,6 +144,10 @@ public:
     /// The uplink messages by name, in order ("REGISTRATION REQUEST", …).
     const std::vector<std::string>& uplink() const noexcept { return uplink_; }
     std::size_t count_uplink(std::string_view name) const;
+    /// The last REGISTRATION REQUEST: whole when it came in a container (N15), else as received.
+    const nas::Message* last_registration_request() const noexcept {
+        return full_request_ ? &*full_request_ : (initial_.desc != nullptr ? &initial_ : nullptr);
+    }
     int challenges() const noexcept { return challenges_; }
     int resyncs() const noexcept { return resyncs_; }
     bool registered() const noexcept { return state_ == State::registered; }
@@ -196,6 +200,7 @@ private:
     std::optional<nas::ie::MobileIdentity> guti_;   // the one assigned
     std::string guti_supi_;                         // and whose it is
     nas::Message initial_;                          // the REGISTRATION REQUEST as received
+    std::optional<nas::Message> full_request_;      // and whole, from the SECURITY MODE COMPLETE's container
     bool initial_had_context_ = false;
     std::optional<nas::ie::UeSecurityCapability> ue_caps_;
     std::uint8_t next_ngksi_ = 1;

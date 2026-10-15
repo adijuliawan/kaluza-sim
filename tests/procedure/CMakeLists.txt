@@ -37,3 +37,8 @@ add_executable(procedure_card card_test.cpp)
 target_link_libraries(procedure_card PRIVATE ksim_corestub ksim::node ksim::proc ksim::uicc ksim::warnings GTest::gtest_main)
 target_compile_definitions(procedure_card PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 gtest_discover_tests(procedure_card DISCOVERY_MODE PRE_TEST)
+
+add_executable(procedure_persona persona_test.cpp)
+target_link_libraries(procedure_persona PRIVATE ksim_corestub ksim::node ksim::proc ksim::uicc ksim::warnings GTest::gtest_main)
+target_compile_definitions(procedure_persona PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+gtest_discover_tests(procedure_persona DISCOVERY_MODE PRE_TEST)

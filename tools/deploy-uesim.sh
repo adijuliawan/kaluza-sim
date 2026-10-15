@@ -8,7 +8,7 @@
 #   tools/deploy-uesim.sh --window-agreed [--host kaluza-uesim] [--secrets] [--selftest]
 #
 # A release is ~/ksim/releases/<commit>/ (bin: ksim, ksim-ctl, ksim-sim,
-# ksim-netd, ksim-selftest from the release-lab preset; topologies, cards,
+# ksim-netd, ksim-selftest from the release-lab preset; topologies, cards, personas,
 # gates, tools/systemd), ~/ksim/current points at it, and the newest three
 # releases are kept. Every binary's shared libraries must resolve on the VM
 # (LDD=PASS). --secrets streams the sealed card files and the KEK into
@@ -48,7 +48,7 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/$REL/bin" "$STAGE/$REL/tools"
 for b in "${BINS[@]}"; do cp "$B/$b/$b" "$STAGE/$REL/bin/"; done
-cp -r "$ROOT/topologies" "$ROOT/cards" "$ROOT/gates" "$STAGE/$REL/"
+cp -r "$ROOT/topologies" "$ROOT/cards" "$ROOT/personas" "$ROOT/gates" "$STAGE/$REL/"
 cp -r "$ROOT/tools/systemd" "$STAGE/$REL/tools/"
 rig "mkdir -p ~/ksim/releases && test ! -e ~/ksim/releases/$REL" || { echo "DEPLOY=FAIL (release $REL is on the VM already)"; exit 1; }
 tar -C "$STAGE" -cf - "$REL" | rig "tar -C ~/ksim/releases -xf -"

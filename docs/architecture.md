@@ -292,6 +292,16 @@ UeDevice (one actor, pinned to a shard)
 
   The two Quectel personas also draw on the AT manuals and the firmware study ([research/quectel.md](research/quectel.md)). Captures are anonymised before they become fixtures: IMSI and IMEI are rewritten, inside RRC `dedicatedInfoNAS` too.
 
+  **As built in P1 N15 (v0):**
+  - **Files:** `personas/s22plus.yaml` and `personas/oneplus9pro.yaml`, extracted from the kaluza-ue `step4` captures, plus `personas/generic.yaml`, the built-in UE.
+  - **What a persona holds:** the UE-CapabilityRAT-ContainerList entries as the phone sent them (NR only, since the gNB asked for NR), the five NAS capability IEs as values, and the IMEISV's TAC and SVN, never the serial number. The extractor refuses to write a persona that contains the capture's IMSI or IMEI digits; a persona keeps no whole message, so no `dedicatedInfoNAS` is involved.
+  - **How a UE applies it** (`node/ue/persona`, row KS-SCN-B1):
+    - the NR capability goes out byte for byte;
+    - the UE security capability is cut to what kaluza-sim implements;
+    - the 5GMM capability keeps the phone's length with every feature bit clear;
+    - the S1 UE network capability, the usage setting and the NSSAI stay on record only.
+  - **Topology:** a UE group names its persona with `persona:`. The stub topology runs UEs 1–6 as the S22+ and 7–12 as the OnePlus 9 Pro.
+
 ## 7. Inside the RAN nodes
 
 ### 7.1 Components

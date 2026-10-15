@@ -125,6 +125,7 @@ struct MmConfig {
     std::string id;                                // the events' subject, e.g. "ue-1"
     nas::ie::Plmn plmn;                            // the selected PLMN (fixed camping, ledger A-12)
     nas::ie::UeSecurityCapability security{0xE0, 0x60, std::nullopt, std::nullopt, {}};   // 5G-EA0-2, 128-5G-IA1-2
+    std::optional<Bytes> mm_capability;            // N15: the 5GMM capability IE's value, from a persona
     std::vector<nas::ie::Snssai> requested_nssai;
     std::string imeisv;                            // 16 digits
     bool follow_on_request = false;

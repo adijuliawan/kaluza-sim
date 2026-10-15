@@ -31,6 +31,7 @@
 #include "codec/air/kair.hpp"
 #include "codec/ip/ipv4.hpp"
 #include "node/ue/dataplane.hpp"
+#include "node/ue/persona.hpp"
 #include "codec/nas/ie/ie.hpp"
 #include "platform/event.hpp"
 #include "platform/executor.hpp"
@@ -57,6 +58,7 @@ struct UeDeviceConfig {
     std::uint64_t seed = 0;
     std::string netns;                        // with an IUeNet: "ksim-ue-<index>"
     std::optional<proc::ue::MmTimerValues> mm_timers;   // the defaults of TS 24.501 10.2 unless set
+    std::optional<Persona> persona;           // N15: a device persona, applied as node/ue/persona says
 };
 
 /// A session's interface as `ifaces` shows it.

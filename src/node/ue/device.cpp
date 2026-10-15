@@ -34,6 +34,9 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     rc.plmn = {cfg_.plmn.mcc, cfg_.plmn.mnc};
     rc.mac.radio_id = cfg_.radio_id;
     rc.allow_null_integrity = cfg_.allow_null_integrity;
+    if (cfg_.persona) {
+        rc.nr_capability = cfg_.persona->nr_capability();   // N15: the phone's UE-NR-Capability, as it came
+    }
     if (taps.rrc) {
         rc.tap = [tap = taps.rrc, supi = cfg_.supi](std::string_view channel, ByteView pdu) { tap(channel, pdu, supi); };
     }
@@ -57,6 +60,10 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     }
     mc.requested_nssai = cfg_.nssai;
     mc.imeisv = cfg_.imeisv;
+    if (cfg_.persona) {
+        mc.security = cfg_.persona->security();
+        mc.mm_capability = cfg_.persona->mm_capability_sent();
+    }
     if (taps.nas) {
         mc.tap = [tap = taps.nas, supi = cfg_.supi](bool uplink, ByteView plain) { tap(uplink, plain, supi); };
     }

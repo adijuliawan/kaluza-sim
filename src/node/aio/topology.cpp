@@ -103,7 +103,7 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         const Yaml ues = y.at("ues");
         for (std::size_t i = 0; i < ues.size(); ++i) {
             const Yaml u = ues.at(i);
-            u.only({"group", "count", "range", "card", "nssai", "imeisv_tac"});
+            u.only({"group", "count", "range", "card", "nssai", "imeisv_tac", "persona"});
             UeGroup grp;
             grp.group = u.get<std::string>("group", "ues");
             grp.count = u.get<unsigned>("count", 1);
@@ -113,6 +113,9 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             }
             u.at("card").only({"template"});
             grp.card_template = resolve_path(u.at("card").at("template").as<std::string>(), base);
+            if (u.has("persona")) {
+                grp.persona = resolve_path(u.at("persona").as<std::string>(), base);   // N15
+            }
             if (u.has("nssai")) {
                 grp.nssai.clear();
                 for (std::size_t k = 0; k < u.at("nssai").size(); ++k) {

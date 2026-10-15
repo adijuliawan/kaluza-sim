@@ -824,6 +824,12 @@ void Amf::on_security_mode_complete(const nas::Message& m, Sht sht) {
                     sms_requested_ = u->sms_requested;
                 }
             }
+            // §5.5.1.2.2: S1 mode in the 5GMM capability goes with an S1 UE network capability (N15).
+            const Bytes* mmcap = nas::get(*full, "5GMM capability");
+            const bool s1 = mmcap != nullptr && !mmcap->empty() && ((*mmcap)[0] & 0x01) != 0;
+            check(s1 == (nas::get(*full, "S1 UE network capability") != nullptr), "5.5.1.2.2",
+                  "an S1 UE network capability exactly when the 5GMM capability says S1 mode");
+            full_request_ = *full;
         }
     }
     send_registration_result();
