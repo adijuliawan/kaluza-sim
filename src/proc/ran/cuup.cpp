@@ -218,6 +218,9 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                     sdu.erase(sdu.begin());
                 }
                 ++stats_.ul_packets;
+                QfiTraffic& q = per_qfi_[qfi];
+                ++q.ul_packets;
+                q.ul_bytes += sdu.size();
                 activity(*cx);
                 (void)n3_.send(at(ss.ng_ul, cfg_.gtpu_port),
                                entity::gtpu::UserData::ul_psc(ss.ng_ul.teid, qfi, std::move(sdu)));
@@ -390,6 +393,9 @@ void CuUp::on_n3(std::uint32_t cu_up_ue, std::uint8_t psi, const entity::gtpu::U
     }
     Session& s = c->sessions.at(psi);
     const std::uint8_t qfi = d.dl_qfi.value_or(0);
+    QfiTraffic& q = per_qfi_[qfi];
+    ++q.dl_packets;
+    q.dl_bytes += d.payload.size();
     auto m = s.qfi_to_drb.find(qfi);
     const std::optional<std::uint8_t> drb = m != s.qfi_to_drb.end() ? std::optional<std::uint8_t>(m->second) : s.default_drb;
     if (!drb || s.drbs.count(*drb) == 0) {

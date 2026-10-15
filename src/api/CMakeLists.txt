@@ -12,5 +12,8 @@ add_library(ksim_api STATIC
 add_library(ksim::api ALIAS ksim_api)
 target_include_directories(ksim_api PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(ksim_api SYSTEM PUBLIC ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
+# P2 Q7 (KS-PLAT-D8): httplib's backlog is 5, and its client connects non-blocking, so on
+# AF_UNIX a full backlog is EAGAIN: a failed call. ksim-ctl --parallel goes up to 64.
+target_compile_definitions(ksim_api PUBLIC CPPHTTPLIB_LISTEN_BACKLOG=128)
 target_link_libraries(ksim_api PUBLIC ksim::platform nlohmann_json::nlohmann_json PRIVATE ksim::warnings)
 ksim_layer(ksim_api api)

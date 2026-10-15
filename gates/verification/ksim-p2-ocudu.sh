@@ -114,5 +114,6 @@ sleep 1
 rel=$(tshark_fields "$RUN/f1ap.pcapng" "f1ap.UEContextReleaseCommand_element" frame.number | wc -l)
 row ksim-p2.ocudu-dereg '^dereg=nas.dereg.accept release_commands=[1-9][0-9]*$' "dereg=$dereg release_commands=$rel"
 ctl ue "$u" power off --switch-off --wait 10s >/dev/null 2>&1
+ctl ue "$u" power off --abrupt >/dev/null 2>&1   # deregistered but on: off for the next gate
 
 summary "ksim-p2-ocudu"

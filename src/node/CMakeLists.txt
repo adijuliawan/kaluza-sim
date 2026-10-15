@@ -14,7 +14,8 @@ add_library(ksim_node STATIC
     aio/capture.cpp
     aio/guard.cpp
     aio/aio.cpp
-    aio/control.cpp)
+    aio/control.cpp
+    aio/metrics.cpp)
 add_library(ksim::node ALIAS ksim_node)
 target_include_directories(ksim_node PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_node

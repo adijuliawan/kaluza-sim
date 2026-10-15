@@ -11,4 +11,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ "${1:-quick}" == full ]] || { echo "PYSIM=SKIP (full mode only)"; exit 77; }
 command -v tshark >/dev/null || { echo "PYSIM=SKIP (no tshark)"; exit 77; }
+# A pcscd that came up without vpcd's readers is waited out (P2 Q7); the oracle
+# then SKIPs as before if the reader is still missing.
+"$ROOT/tools/vpcd_ready.sh" "Virtual PCD 00 01" || true
 exec python3 -I "$ROOT/tests/oracles/pysim_shell.py" --keep "$ROOT/build/pysim/last"

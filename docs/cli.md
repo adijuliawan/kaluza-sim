@@ -38,9 +38,28 @@ ksim-ctl nodes                            list running nodes, their roles, addre
 - `imsi-001010000300017`, the SUPI;
 - `17`, the index in the farm;
 - `group:phones`, a topology group;
-- `all`.
+- `all`;
+- from P2 Q7, `1-100`, a range of farm indices.
 
 Group commands take `--stagger <ms>` and `--parallel <n>`, and print one block per UE separated by a blank line.
+
+**As built (P2 Q7):**
+- `--parallel N` (1..64) and `--stagger DUR` are global options: `ksim-ctl --parallel 10 --stagger 50ms ue 1-100 power on --wait 30s`. N UEs are worked on at a time, each started DUR after the one before; the blocks print in farm order once all are in, and the exit code is the worst of them.
+- `ksim-ctl metrics` prints `/v1/metrics` in the Prometheus text format (metrics v0, part of KS-CTL-005):
+  - `ksim_events_total{event,cause}`;
+  - `ksim_qfi_bytes_total` and `ksim_qfi_packets_total{qfi,direction}` at the CU-UP's N3;
+  - the histogram `ksim_hop_latency_ms{hop=kair_ul|kair_dl}`;
+  - `ksim_process_resident_bytes`, `ksim_process_threads`, `ksim_loop_lag_max_ms`.
+
+  A split run labels each line with its `role`.
+- `ksim-ctl debug stall <ms>` blocks the run's loop that long, the DU's in a split run: the watchdog's test.
+  - A timer later than the topology's `watchdog_ms` (250 by default) raises `platform.loop_lag`.
+  - The gates then ABORT with exit 7 instead of scoring rows.
+- `ksim-ctl netd …` talks to ksim-netd for scripts (`--netd PATH`, or `$KSIM_NETD`, default `/run/ksim/netd.sock`):
+  - `list`, `setup-node <ns> [--parent P --addr A/N]`, `veth <ns> <A/N>` and `teardown <ns>`, within netd's allowlist;
+  - `exec <ns> --log FILE -- <argv…>` starts a command in a namespace netd made, as the caller. The words after `--` go as they are. It prints `PID=` and does not wait.
+
+  `tools/ocudu-peer.sh run --lab` uses it to start OCUDU's roles in our namespaces on kaluza-uesim (LW2).
 
 **Global options:**
 - `--json`, or `--format=kv|json|nrcli`;

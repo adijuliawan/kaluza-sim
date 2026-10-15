@@ -22,6 +22,8 @@
 //   secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek}
 //   peer: {name: stub}                      # free-form pins for the manifest
 //   security: {allow_null: false}            # D1: the bisect switch only
+//   watchdog_ms: 250                         # P2 Q7: platform.loop_lag above this; 0 = off
+//   farm: {shards: 4}                        # P2 Q7, split only: the UE farm on 4 shards
 //   mode: split                              # P2 Q3: aio (default) or split, the roles as processes
 //   (in gnbs[0]) split: {f1c: 127.0.10.1, e1: 127.0.20.1, du: 127.0.10.2, cuup: 127.0.10.3,
 //                        cuup_e1: 127.0.20.2, streams: 16}
@@ -127,6 +129,10 @@ struct Topology {
     std::string kek_file;
     std::map<std::string, std::string> peer;
     bool allow_null = false;
+    // P2 Q7: a timer this many ms late raises platform.loop_lag (the watchdog); 0: off.
+    std::uint32_t watchdog_ms = 250;
+    // P2 Q7 (ADR 0011 point 5): the UE role's farm shards in a split run, 1..8.
+    unsigned farm_shards = 1;
     std::uint16_t ng_streams = 2;
     std::uint16_t ue_inactivity_s = 7200;   // P2 Q5: cucp: {ue_inactivity_s: N}, 1..7200
     /// NAS in clear in the Uu capture (KS-CTL-004: only when asked for; ksim

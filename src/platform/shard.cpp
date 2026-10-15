@@ -3,6 +3,8 @@
 
 #include "platform/shard.hpp"
 
+#include "platform/mutation.hpp"
+
 #include <sys/epoll.h>
 
 #include <algorithm>
@@ -79,12 +81,24 @@ void Shard::run_inbox() {
     wake_.notify();
 }
 
+void Shard::set_watchdog(Millis threshold, std::function<void(Millis)> on_lag) {
+    watchdog_ms_ = threshold;
+    on_lag_ = std::move(on_lag);
+}
+
 void Shard::run_timers() {
     const Millis now = clock_.now_ms();
     if (auto due = wheel_.next_deadline(); due && *due <= now) {
         const Millis lag = now - *due;
         if (lag > max_lag_.load(std::memory_order_relaxed)) {
             max_lag_.store(lag, std::memory_order_relaxed);
+        }
+        // P2 Q7: a timer this late means the loop was blocked; told once a second at most.
+        if (watchdog_ms_ > 0 && lag > watchdog_ms_ && on_lag_ && !KSIM_MUTANT("watchdog_silent") &&
+            (!lag_reported_ || now - last_lag_report_ >= 1'000)) {
+            lag_reported_ = true;
+            last_lag_report_ = now;
+            on_lag_(lag);
         }
     }
     timers_fired_.fetch_add(wheel_.advance(now), std::memory_order_relaxed);

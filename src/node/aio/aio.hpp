@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -27,6 +28,7 @@
 #include <vector>
 
 #include "node/aio/capture.hpp"
+#include "node/aio/metrics.hpp"
 #include "node/aio/run_dir.hpp"
 #include "node/aio/topology.hpp"
 #include "node/ue/device.hpp"
@@ -63,6 +65,18 @@ struct AioStats {
     std::uint64_t kair_errors = 0;   // frames that did not encode or decode
 };
 
+/// P2 Q7: one farm shard of a split run's UE role, its KAIR end and its UEs (ADR 0011
+/// point 5). Lane 0 is the node's own shard; UE i lives on lane i mod lanes.
+struct FarmLane {
+    Shard* shard = nullptr;
+    std::unique_ptr<Shard> owned;                  // lanes 1..
+    std::unique_ptr<IChannel> kair;
+    std::optional<TimerId> retry;
+    std::vector<std::size_t> ues;                  // farm index - 1
+    std::unique_ptr<net::netd::Client> netd;       // lanes 1.. with UEs in namespaces: a connection each
+    std::unique_ptr<NetdUeNet> ue_net;
+};
+
 class AllInOne {
 public:
     /// Builds every node and UE on a new shard and starts them: NG-C connects,
@@ -79,21 +93,21 @@ public:
     const Topology& topology() const noexcept { return topo_; }
     const std::string& run_dir() const noexcept { return run_dir_; }
     Capture* capture() noexcept { return capture_.get(); }
+    const Metrics& metrics() const noexcept { return metrics_; }   // P2 Q7
     Millis max_lag_ms() const noexcept { return shard_->max_lag_ms(); }
 
     /// Runs `fn` on the shard and returns its result, or nullopt when the
     /// shard did not run it within `timeout` (an unsound environment, exit 7).
     template <class T>
     std::optional<T> call(std::function<T()> fn, std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
-        auto p = std::make_shared<std::promise<T>>();
-        auto fut = p->get_future();
-        if (!shard_->post([p, fn = std::move(fn)]() mutable { p->set_value(fn()); })) {
-            return std::nullopt;
-        }
-        if (fut.wait_for(timeout) != std::future_status::ready) {
-            return std::nullopt;
-        }
-        return fut.get();
+        return call_on(*shard_, std::move(fn), timeout);
+    }
+    /// call() on the shard of the UE `selector` names (P2 Q7: farm shards), the node's
+    /// own when it names none (`fn` then finds no UE). Any thread.
+    template <class T>
+    std::optional<T> call_ue(const std::string& selector, std::function<T()> fn,
+                             std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
+        return call_on(shard_for(selector), std::move(fn), timeout);
     }
 
     // On the shard only.
@@ -112,9 +126,24 @@ public:
     /// The gNB's nodes stop and start again (P1 N12, ksim-ctl gnb restart).
     Result<void> restart_gnb();
     const std::vector<std::string>& groups() const noexcept { return groups_; }   // by farm index - 1
-    AioStats stats() const noexcept { return stats_; }
+    AioStats stats() const noexcept { return AioStats{kair_frames_.load(), kair_errors_.load()}; }
 
 private:
+    template <class T>
+    static std::optional<T> call_on(Shard& sh, std::function<T()> fn, std::chrono::milliseconds timeout) {
+        auto p = std::make_shared<std::promise<T>>();
+        auto fut = p->get_future();
+        if (!sh.post([p, fn = std::move(fn)]() mutable { p->set_value(fn()); })) {
+            return std::nullopt;
+        }
+        if (fut.wait_for(timeout) != std::future_status::ready) {
+            return std::nullopt;
+        }
+        return fut.get();
+    }
+    Shard& shard_for(const std::string& selector);
+    Result<void> start_lanes(std::string& why);   // P2 Q7, the UE role
+    void stop_lanes();
     AllInOne(Topology t, std::string run_dir);
     Result<void> build(std::string& why);   // on the shard
     Result<void> build_gnb(std::string& why);
@@ -127,18 +156,20 @@ private:
     Result<void> build_farm(std::vector<FarmCard> cards, const std::map<const UeGroup*, Persona>& personas,
                             std::string& why);
     void kair_accept(std::unique_ptr<IChannel> c);   // P2 Q3: the DU's end of KAIR
-    void kair_connect();                             // P2 Q3: the farm's end
+    void kair_connect(std::size_t lane);             // P2 Q3: the farm's end; Q7: one per lane
     std::unique_ptr<uicc::IApduTransport> external_reader(const UeGroup& g, std::string& why);   // P2 Q1
     Result<void> mid_leg(const std::string& netns, const Endpoint& at, std::string& why);   // P2 Q6
     void connect_gnb();
     void teardown_gnb();
     void teardown();                         // on the shard
     void du_to_air(const air::Frame& f);
+    void observe_kair(Metrics::Hop h, const air::Frame& f);
     void ue_to_air(std::size_t i, const air::Frame& f);
 
     Topology topo_;
     std::string run_dir_;
     MonotonicClock clock_;
+    Metrics metrics_;   // P2 Q7: outlives the event ring whose listener feeds it
     EventRing events_;
     std::unique_ptr<EventFile> event_file_;
     std::unique_ptr<Capture> capture_;
@@ -168,8 +199,8 @@ private:
     std::unique_ptr<net::SeqpacketListener> kair_listen_;   // the DU's KAIR
     std::vector<std::unique_ptr<IChannel>> kair_peers_;     // one per farm shard
     std::map<std::uint32_t, IChannel*> kair_route_;         // radio ID to the farm it spoke from
-    std::unique_ptr<IChannel> kair_;                        // the farm's KAIR
-    std::optional<TimerId> kair_retry_;
+    std::vector<FarmLane> lanes_;                           // the UE role's farm shards (P2 Q7)
+    std::vector<std::pair<std::string, std::size_t>> roster_;   // supi, lane: fixed once built (any thread)
     std::unique_ptr<MemNet> f1u_net_;
     std::unique_ptr<IDatagram> cuup_f1u_;
     std::unique_ptr<IDatagram> du_f1u_;
@@ -187,7 +218,8 @@ private:
     static constexpr Millis kRestartOffAir = 2'000;
     Millis air_off_until_ = 0;   // the cell is off the air before this (gnb restart)
     std::vector<std::string> groups_;
-    AioStats stats_;
+    std::atomic<std::uint64_t> kair_frames_{0};   // P2 Q7: counted on several shards
+    std::atomic<std::uint64_t> kair_errors_{0};
 };
 
 } // namespace ksim::node

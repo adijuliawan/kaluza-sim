@@ -3,7 +3,8 @@
 //
 // ksim-ctl v0 (P1 N8; cli.md): the run's control API from a shell.
 //
-//   ksim-ctl [--run D | --socket S] [--json | --format kv|json|nrcli] [--timeout DUR] <command>
+//   ksim-ctl [--run D | --socket S] [--json | --format kv|json|nrcli] [--timeout DUR]
+//            [--parallel N] [--stagger DUR] <command>
 //   ksim-ctl [options] <imsi-… | gNB name> --exec '<command>'   (nr-cli's form, N16)
 //     nodes | info | version | capabilities | faults list | ues | stop
 //     ue <sel> status
@@ -18,18 +19,24 @@
 //     ue <sel> exec [--] <command> [args…]     (inside the UE's namespace; the command's words verbatim)
 //     ue <sel> wait <event>[,<event>…] [--fail <event>,…] [--where k=v]… [--since N | --new] [--timeout DUR]
 //     ue <sel> events [--since N] [--follow] [--filter PREFIX]
-//     wait <event> … (any subject)      events …
+//     wait <event> … (any subject)      events …      metrics (P2 Q7: Prometheus text)
 //     gnb <name> ue-list | amf-list | ue-release <ue sel> [--cause C] | restart
 //     ue <sel> service-request [--wait DUR] | sim remove|insert | airplane on|off
 //     ue <sel> sms-send <digits> <text> [--ucs2] [--srr] [--vp N] | sms-list | sms-memory full|available
 //     ue <sel> register --update
 //     ue <sel> sim info | sim read <EF> | sim trace on|off
+//     netd list | setup-node <ns> [--parent P --addr A/N] | veth <ns> <A/N> | teardown <ns>
+//          | exec <ns> --log FILE -- <argv…>      (P2 Q7: ksim-netd for scripts, --netd PATH or
+//          $KSIM_NETD, default /run/ksim/netd.sock; exec prints PID= and does not wait)
 //     stub [release --ue SUPI --psi N [--cause C] | ping-ue --ue SUPI --psi N [--seq N]
 //           | deregister --ue SUPI [--rereg] | restart | t3512 --seconds N | sms-sub --ue SUPI [--off]]
 //           (--socket <stub ctl>)
 //
-// <sel> is imsi-…, a farm index, group:<name> or all; a group prints one block
-// per UE, separated by a blank line. Output is KEY=value lines (--json: one
+// <sel> is imsi-…, a farm index, a range of them (P2 Q7: 1-100), group:<name> or
+// all; several UEs print one block each, in farm order, separated by a blank line.
+// --parallel N (P2 Q7) runs a command for N of them at a time, --stagger DUR
+// starts one every DUR. debug stall <ms> (P2 Q7) blocks the run's loop that long
+// (the DU's in a split run): the watchdog's test. Output is KEY=value lines (--json: one
 // object per UE); the exit code is cli.md §2's. The run is --run, else
 // $KSIM_RUN, else $KSIM_RUNS/latest (runs/latest).
 
@@ -37,22 +44,30 @@
 
 #include <CLI/CLI.hpp>
 
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <array>
 #include <cstdio>
 #include <exception>
 #include <httplib.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <map>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "api/http.hpp"
 #include "api/reply.hpp"
+#include "net/netd.hpp"
 
 namespace {
 
@@ -65,6 +80,8 @@ struct Ctx {
     bool json = false;
     bool nrcli = false;   // --format=nrcli: "key: value" lines as nr-cli prints them (N16)
     long timeout_ms = 30'000;
+    unsigned parallel = 1;   // P2 Q7: UEs worked on at a time
+    long stagger_ms = 0;     // P2 Q7: between two UEs' starts
 };
 
 std::optional<long> duration_ms(const std::string& s) {
@@ -178,7 +195,7 @@ struct Flags {
 Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
     static const std::vector<std::string> valued{"wait", "timeout", "where", "since", "fail", "filter", "cause",
                                                  "dnn", "sst", "sd", "psi", "count", "interval", "size", "type", "ue",
-                                                 "seq", "seconds", "vp"};
+                                                 "seq", "seconds", "vp", "log", "netd", "parent", "addr"};
     Flags f;
     for (std::size_t i = from; i < args.size(); ++i) {
         const std::string& a = args[i];
@@ -206,6 +223,27 @@ Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
 
 /// The UEs a selector names: one for imsi-… or an index, several for all and group:<name>.
 std::optional<std::vector<std::string>> resolve(const Ctx& c, const std::string& sel, Reply& err) {
+    // P2 Q7: a range of farm indices, "1-100".
+    if (const auto dash = sel.find('-'); dash != std::string::npos && sel.rfind("imsi-", 0) != 0 &&
+                                         sel.find_first_not_of("0123456789-") == std::string::npos) {
+        unsigned long lo = 0;
+        unsigned long hi = 0;
+        try {
+            lo = std::stoul(sel.substr(0, dash));
+            hi = std::stoul(sel.substr(dash + 1));
+        } catch (const std::exception&) {
+            lo = 0;
+        }
+        if (lo == 0 || hi < lo || hi - lo >= 4096) {
+            err = Reply::fail(Exit::usage, "a range is first-last farm indices, 1 or more, at most 4096 of them");
+            return std::nullopt;
+        }
+        std::vector<std::string> out;
+        for (unsigned long i = lo; i <= hi; ++i) {
+            out.push_back(std::to_string(i));
+        }
+        return out;
+    }
     if (sel != "all" && sel.rfind("group:", 0) != 0) {
         return std::vector<std::string>{sel};
     }
@@ -258,6 +296,124 @@ Reply wait_query(const Ctx& c, const Flags& f, const std::string& events, const 
     }
     q += "&timeout_ms=" + std::to_string(t);
     return call(c, "GET", q, json(), t);
+}
+
+/// "172.30.30.36/24" into its address and length.
+bool v4_net(const std::string& s, std::array<std::uint8_t, 4>& a, std::uint8_t& len) {
+    const auto slash = s.find('/');
+    if (slash == std::string::npos) {
+        return false;
+    }
+    unsigned o[4] = {};
+    char tail = 0;
+    if (std::sscanf(s.substr(0, slash).c_str(), "%u.%u.%u.%u%c", &o[0], &o[1], &o[2], &o[3], &tail) != 4) {
+        return false;
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (o[i] > 255) {
+            return false;
+        }
+        a[static_cast<std::size_t>(i)] = static_cast<std::uint8_t>(o[i]);
+    }
+    const int n = std::atoi(s.substr(slash + 1).c_str());
+    if (n < 1 || n > 32) {
+        return false;
+    }
+    len = static_cast<std::uint8_t>(n);
+    return true;
+}
+
+/// P2 Q7: ksim-netd for scripts (an interop peer's namespaces on kaluza-uesim, ADR 0012).
+int netd_command(const Flags& f) {
+    namespace nd = ksim::net::netd;
+    const char* env = std::getenv("KSIM_NETD");
+    const std::string sock = f.get("netd", env != nullptr ? env : nd::kSocketPath);
+    auto c = nd::Client::connect(sock);
+    if (!c) {
+        std::cerr << "CAUSE=no ksim-netd answers at " << sock << "\n";
+        return static_cast<int>(Exit::abort);
+    }
+    const auto& w = f.words;
+    const auto done = [&](bool ok) {
+        if (!ok) {
+            std::cerr << "CAUSE=" << c->last_error() << "\n";
+            return static_cast<int>(Exit::failed);
+        }
+        std::cout << "NETD=OK\n";
+        return 0;
+    };
+    if (!w.empty() && w[0] == "list") {
+        auto l = c->list();
+        if (!l) {
+            return done(false);
+        }
+        std::cout << "NAMESPACES=" << l->size() << "\n";
+        for (std::size_t i = 0; i < l->size(); ++i) {
+            std::cout << "NS." << (i + 1) << "=" << (*l)[i] << "\n";
+        }
+        return 0;
+    }
+    if (w.size() == 2 && w[0] == "setup-node") {
+        std::array<std::uint8_t, 4> a{};
+        std::uint8_t len = 0;
+        if (f.has("parent") && !v4_net(f.get("addr"), a, len)) {
+            std::cerr << "CAUSE=--parent needs --addr A/N\n";
+            return static_cast<int>(Exit::usage);
+        }
+        return done(static_cast<bool>(c->setup_node(w[1], f.get("parent"), a, len)));
+    }
+    if (w.size() == 3 && w[0] == "veth") {
+        std::array<std::uint8_t, 4> a{};
+        std::uint8_t len = 0;
+        if (!v4_net(w[2], a, len)) {
+            std::cerr << "CAUSE=veth <ns> A/N\n";
+            return static_cast<int>(Exit::usage);
+        }
+        return done(static_cast<bool>(c->veth(w[1], a, len)));
+    }
+    if (w.size() == 2 && w[0] == "teardown") {
+        return done(static_cast<bool>(c->teardown(w[1])));
+    }
+    if (w.size() >= 3 && w[0] == "exec") {
+        // The command's output goes to --log; netd's helper waits for it, we do not.
+        const std::string log = f.get("log", "/dev/null");
+        const int in = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
+        const int out = ::open(log.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600);
+        int st[2] = {-1, -1};
+        if (in < 0 || out < 0 || ::pipe2(st, O_CLOEXEC) != 0) {
+            std::cerr << "CAUSE=cannot open " << log << "\n";
+            return static_cast<int>(Exit::failed);
+        }
+        std::vector<std::string> argv(w.begin() + 2, w.end());
+        auto pid = c->exec(w[1], argv, {in, out, out, st[1]});
+        ::close(in);
+        ::close(out);
+        ::close(st[1]);
+        ::close(st[0]);   // the status goes unread: the peer runs on
+        if (!pid) {
+            std::cerr << "CAUSE=" << c->last_error() << "\n";
+            return static_cast<int>(Exit::failed);
+        }
+        std::cout << "PID=" << *pid << "\n";
+        return 0;
+    }
+    std::cerr << "CAUSE=netd list | setup-node <ns> [--parent P --addr A/N] | veth <ns> <A/N> | teardown <ns> | "
+                 "exec <ns> --log FILE -- <argv…>\n";
+    return static_cast<int>(Exit::usage);
+}
+
+/// P2 Q7: /v1/metrics as the run gives it (the Prometheus text format).
+int metrics(const Ctx& c) {
+    httplib::Client cli(ksim::api::socket_target(c.socket));
+    cli.set_address_family(AF_UNIX);
+    cli.set_read_timeout(std::chrono::milliseconds(c.timeout_ms));
+    auto res = cli.Get("/v1/metrics");
+    if (!res) {
+        std::cerr << "CAUSE=no run answers at " << c.socket << "\n";
+        return static_cast<int>(Exit::unknown);
+    }
+    std::cout << res->body;
+    return 0;
 }
 
 int events(const Ctx& c, const Flags& f, const std::string& subject) {
@@ -528,6 +684,15 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
     if (args.size() >= 3 && args[0] == "ue" && args[2] == "exec") {
         return exec_command(c, args[1], std::vector<std::string>(args.begin() + 3, args.end()));
     }
+    if (args.size() >= 3 && args[0] == "netd" && args[1] == "exec") {
+        // P2 Q7: netd exec <ns> [--log F] -- <argv…>: the words after -- go as they are.
+        const auto dash = std::find(args.begin(), args.end(), std::string("--"));
+        Flags f = parse_flags(std::vector<std::string>(args.begin(), dash), 1);
+        if (dash != args.end()) {
+            f.words.insert(f.words.end(), dash + 1, args.end());
+        }
+        return netd_command(f);
+    }
     const std::string& verb = args[0];
     const Flags f = parse_flags(args, 1);
     Reply r;
@@ -565,6 +730,10 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
         }
     } else if (verb == "events") {
         return events(c, f, "");
+    } else if (verb == "metrics") {
+        return metrics(c);
+    } else if (verb == "netd") {
+        return netd_command(f);
     } else if (verb == "gnb" || verb == "cucp") {
         if (f.words.size() >= 2 && (f.words[1] == "ue-list" || f.words[1] == "amf-list")) {
             r = call(c, "GET", "/v1/gnb/" + encode(f.words[0]) + "/" + f.words[1]);
@@ -589,6 +758,15 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
             r = call(c, "POST", "/v1/du/" + encode(f.words[0]) + "/restart");
         } else {
             r = Reply::fail(Exit::usage, "du <name> ue-list|restart");
+        }
+    } else if (verb == "debug") {
+        // P2 Q7: the watchdog's test (row ksim-p2.loop-lag-abort).
+        if (f.words.size() >= 2 && f.words[0] == "stall") {
+            json body = json::object();
+            body["ms"] = f.words[1];
+            r = call(c, "POST", "/v1/debug/stall", body);
+        } else {
+            r = Reply::fail(Exit::usage, "debug stall <ms>");
         }
     } else if (verb == "cuup") {
         if (f.words.size() >= 2 && f.words[1] == "bearers") {
@@ -617,14 +795,39 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
                 if (!ues) {
                     r = err;
                 } else {
+                    // P2 Q7: --parallel N workers, each UE started --stagger after the one before;
+                    // the answers print in farm order once all are in.
+                    std::vector<Reply> answers(ues->size());
+                    const std::size_t workers = std::min<std::size_t>(std::max(1U, c.parallel), ues->size());
+                    std::atomic<std::size_t> next{0};
+                    const auto t0 = std::chrono::steady_clock::now();
+                    auto work = [&] {
+                        for (std::size_t i = next++; i < ues->size(); i = next++) {
+                            if (c.stagger_ms > 0) {
+                                std::this_thread::sleep_until(t0 + std::chrono::milliseconds(c.stagger_ms * static_cast<long>(i)));
+                            }
+                            answers[i] = ue_command(c, (*ues)[i], rest);
+                        }
+                    };
+                    if (workers == 1) {
+                        work();
+                    } else {
+                        std::vector<std::thread> pool;
+                        pool.reserve(workers);
+                        for (std::size_t w = 0; w < workers; ++w) {
+                            pool.emplace_back(work);
+                        }
+                        for (auto& t : pool) {
+                            t.join();
+                        }
+                    }
                     int worst = 0;
-                    for (std::size_t i = 0; i < ues->size(); ++i) {
-                        Reply one = ue_command(c, (*ues)[i], rest);
+                    for (std::size_t i = 0; i < answers.size(); ++i) {
                         if (i > 0 && !c.json) {
                             std::cout << "\n";
                         }
-                        print(c, one);
-                        worst = std::max(worst, static_cast<int>(one.exit));
+                        print(c, answers[i]);
+                        worst = std::max(worst, static_cast<int>(answers[i].exit));
                     }
                     return worst;
                 }
@@ -653,7 +856,18 @@ static int run_main(int argc, char** argv) {
     std::string format = "kv";
     app.add_option("--format", format, "kv, json or nrcli")->check(CLI::IsMember({"kv", "json", "nrcli"}));
     app.add_option("--timeout", timeout, "how long to wait for an answer (30s, 500ms, 2m)");
+    std::string stagger;
+    app.add_option("--parallel", c.parallel, "UEs worked on at a time (a UE range, group: or all)")->check(CLI::Range(1, 64));
+    app.add_option("--stagger", stagger, "between two UEs' starts (100ms)");
     CLI11_PARSE(app, argc, argv);
+    if (!stagger.empty()) {
+        if (auto s = duration_ms(stagger)) {
+            c.stagger_ms = *s;
+        } else {
+            std::cerr << "CAUSE=--stagger takes a duration\n";
+            return static_cast<int>(Exit::usage);
+        }
+    }
     c.json = c.json || format == "json";
     c.nrcli = format == "nrcli";
     if (auto t = duration_ms(timeout)) {

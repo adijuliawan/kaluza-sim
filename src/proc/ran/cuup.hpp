@@ -48,6 +48,14 @@ struct CuUpConfig {
     std::uint16_t gtpu_port = 2152;
 };
 
+/// P2 Q7 (metrics v0): N3's traffic of one QFI.
+struct QfiTraffic {
+    std::uint64_t ul_bytes = 0;
+    std::uint64_t dl_bytes = 0;
+    std::uint64_t ul_packets = 0;
+    std::uint64_t dl_packets = 0;
+};
+
 struct CuUpStats {
     std::uint64_t contexts_setup = 0;
     std::uint64_t dl_packets = 0;      // N3 to F1-U
@@ -68,6 +76,8 @@ public:
     bool e1_ready() const noexcept { return e1_ready_; }
     std::size_t contexts() const noexcept { return ctx_.size(); }
     const CuUpStats& stats() const noexcept { return stats_; }
+    /// N3's traffic per QFI (P2 Q7, metrics v0).
+    const std::map<std::uint8_t, QfiTraffic>& per_qfi() const noexcept { return per_qfi_; }
     /// The DU's last DL DATA DELIVERY STATUS, any DRB (P2 Q4).
     const std::optional<entity::gtpu::DeliveryStatus>& last_ddds() const noexcept { return last_ddds_; }
     entity::gtpu::Endpoint& n3() noexcept { return n3_; }
@@ -137,6 +147,7 @@ private:
     std::uint32_t next_ue_ = 1;
     CuUpStats stats_;
     std::optional<entity::gtpu::DeliveryStatus> last_ddds_;
+    std::map<std::uint8_t, QfiTraffic> per_qfi_;
 };
 
 } // namespace ksim::proc::ran

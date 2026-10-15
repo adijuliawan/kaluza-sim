@@ -100,16 +100,34 @@ if [ "$CORE" != stub ]; then
 fi
 
 echo "-- the DU's process restarted under UE $SPLIT_UE1"
-since=$(ctl du "$GNB-du" restart | kv EVENT_SEQ)
+# A role's restart is refused while the one before is still starting its process
+# ("the gNB is restarting"), which a cell back up does not wait for. Each restart
+# below is retried until taken, and its sequence comes from info: a refused reply has
+# none, and the waits would then match the events from before (P2 Q7: the mutant
+# f1_no_reassociation survived that way in a loaded CI run).
+restart_role() {   # $1 = du|cucp, $2 = its name in a message
+    _n="$GNB"; [ "$1" = du ] && _n="$GNB-du"
+    _i=0
+    until ctl "$1" "$_n" restart >/dev/null 2>&1; do
+        _i=$((_i + 1)); [ "$_i" -gt 75 ] && abort "the $2 did not restart"
+        sleep 0.2
+    done
+}
+since=$(ctl info | kv EVENT_SEQ)
+[ -n "$since" ] || abort "the run gave no event sequence"
+restart_role du "DU"
 lost=$(ctl wait ran.f1.lost --since "$since" --timeout 15s | kv EVENT)
 cause=$(ctl wait ran.ue.release_request --since "$since" --timeout 15s | kv CAUSE)
 released=$(ctl wait ran.ue.released --since "$since" --timeout 15s | kv EVENT)
 row ksim-p2.f1-loss-release '^lost=ran.f1.lost cause=radio-connection-with-ue-lost released=ran.ue.released$' \
     "lost=$lost cause=$cause released=$released"
-ctl wait ran.f1.setup --where cell_active=1 --since "$since" --timeout 30s >/dev/null || echo "   the DU's cell did not come back"
+ctl wait ran.f1.setup --where cell_active=1 --since "$since" --timeout 30s >/dev/null ||
+    abort "the DU's cell did not come back after its restart"
 
 echo "-- the CU-CP's process restarted"
-since=$(ctl cucp "$GNB" restart | kv EVENT_SEQ)
+since=$(ctl info | kv EVENT_SEQ)
+[ -n "$since" ] || abort "the run gave no event sequence"
+restart_role cucp "CU-CP"
 again=$(ctl wait ran.f1.setup --where cell_active=1 --since "$since" --timeout 30s | kv EVENT)
 ng=$(ctl wait ran.ng.setup --since "$since" --timeout 30s | kv EVENT)
 row ksim-p2.f1-reassociation '^f1setup=ran.f1.setup cell_active=1 ngsetup=ran.ng.setup$' \

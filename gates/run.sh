@@ -64,7 +64,8 @@ switch_off_left() {
     done
 }
 stop_peers() {
-    "$ROOT/tools/ocudu-peer.sh" stop > "$peer_dir/stop.out" 2>&1 || echo "CLEANUP: an OCUDU process is left" >&2
+    # shellcheck disable=SC2086
+    "$ROOT/tools/ocudu-peer.sh" stop ${lab:-} > "$peer_dir/stop.out" 2>&1 || echo "CLEANUP: an OCUDU process is left" >&2
     # The peer's NGAP and E1AP captures hold K_gNB and the UP keys in clear:
     # redacted, or without the oracle venv removed (tools/peer_redact.py).
     if [ -x "$ROOT/.venv/bin/python" ] &&
@@ -121,6 +122,17 @@ case "$peer_line" in *"cuup: ocudu"*) peer_cuup=1 ;; esac
 lab=""; [ "${KSIM_LAB:-0}" = 1 ] && lab="--lab"
 wait_e1() {   # $1 = listen|established, $2 = what failed
     _i=0
+    if [ -n "$lab" ]; then
+        # P2 Q7 (LW2, C3 only): OCUDU's roles are in namespaces of ours, out of ss's
+        # sight, so their consoles tell.
+        _f="$peer_dir/ocudu-cucp.out"; _l='^E1: Listening for new connections'
+        [ "$1" = established ] && { _f="$peer_dir/ocudu-cuup.out"; _l='^E1: Connection to CU-CP completed'; }
+        until grep -q "$_l" "$_f" 2>/dev/null; do
+            _i=$((_i + 1)); [ "$_i" -gt 150 ] && { echo "$2" >&2; return 1; }
+            sleep 0.1
+        done
+        return 0
+    fi
     if [ "$1" = listen ]; then
         until ss -Sln 2>/dev/null | grep -q ':38462'; do
             _i=$((_i + 1)); [ "$_i" -gt 100 ] && { echo "$2" >&2; return 1; }

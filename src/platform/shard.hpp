@@ -64,6 +64,9 @@ public:
     std::uint64_t timers_fired() const noexcept { return timers_fired_.load(std::memory_order_relaxed); }
     /// The largest delay between a timer's deadline and its firing (loop lag), ms.
     Millis max_lag_ms() const noexcept { return max_lag_.load(std::memory_order_relaxed); }
+    /// P2 Q7, the watchdog: `on_lag(lag_ms)` runs on the shard when a timer fires more
+    /// than `threshold` ms late, at most once a second. Set before the shard runs work.
+    void set_watchdog(Millis threshold, std::function<void(Millis)> on_lag);
 
 private:
     void loop();
@@ -83,6 +86,10 @@ private:
     std::atomic<std::uint64_t> tasks_run_{0};
     std::atomic<std::uint64_t> timers_fired_{0};
     std::atomic<Millis> max_lag_{0};
+    Millis watchdog_ms_ = 0;                 // 0: off
+    std::function<void(Millis)> on_lag_;
+    Millis last_lag_report_ = 0;
+    bool lag_reported_ = false;
     std::thread thread_;
 };
 

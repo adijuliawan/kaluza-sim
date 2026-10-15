@@ -137,7 +137,7 @@ ExecOut run_exec(AllInOne& aio, const std::string& sel, const std::vector<std::s
         std::uint32_t pid = 0;
     };
     const std::vector<int> pass{in[0], out[1], err[1], st[1]};
-    auto started = aio.call<Started>([&aio, sel, argv, pass]() -> Started {
+    auto started = aio.call_ue<Started>(sel, [&aio, sel, argv, pass]() -> Started {
         UeDevice* ue = aio.ue(sel);
         if (ue == nullptr) {
             return {Exit::unknown, "no such UE", "", 0};
@@ -261,7 +261,7 @@ Reply run_ue_command(AllInOne& aio, const Request& req, const UeCommand& cmd) {
         std::string cause;
         std::string subject;
     };
-    auto out = aio.call<Out>([&aio, sel, run = cmd.run]() -> Out {
+    auto out = aio.call_ue<Out>(sel, [&aio, sel, run = cmd.run]() -> Out {
         UeDevice* ue = aio.ue(sel);
         if (ue == nullptr) {
             return {Exit::unknown, "no such UE", ""};
@@ -410,7 +410,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
     });
     server.get("/v1/ue/:sel/status", [&aio](const Request& req) {
         const std::string sel = req.params.at("sel");
-        auto s = aio.call<Reply>([&aio, sel] {
+        auto s = aio.call_ue<Reply>(sel, [&aio, sel] {
             UeDevice* ue = aio.ue(sel);
             if (ue == nullptr) {
                 return Reply::fail(Exit::unknown, "no such UE");
@@ -466,7 +466,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
     // ---- the card (N14): info, read, trace ----
     server.get("/v1/ue/:sel/sim", [&aio](const Request& req) {
         const std::string sel = req.params.at("sel");
-        auto s = aio.call<Reply>([&aio, sel] {
+        auto s = aio.call_ue<Reply>(sel, [&aio, sel] {
             UeDevice* ue = aio.ue(sel);
             if (ue == nullptr) {
                 return Reply::fail(Exit::unknown, "no such UE");
@@ -498,7 +498,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         if (ef.empty()) {
             return Reply::fail(Exit::usage, "sim read <EF name, FID or FID path>");
         }
-        auto s = aio.call<Reply>([&aio, sel, ef] {
+        auto s = aio.call_ue<Reply>(sel, [&aio, sel, ef] {
             UeDevice* ue = aio.ue(sel);
             if (ue == nullptr) {
                 return Reply::fail(Exit::unknown, "no such UE");
@@ -568,7 +568,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
     });
     server.get("/v1/ue/:sel/sms", [&aio](const Request& req) {
         const std::string sel = req.params.at("sel");
-        auto s = aio.call<Reply>([&aio, sel] {
+        auto s = aio.call_ue<Reply>(sel, [&aio, sel] {
             UeDevice* ue = aio.ue(sel);
             if (ue == nullptr) {
                 return Reply::fail(Exit::unknown, "no such UE");
@@ -662,7 +662,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
     // ---- 5GSM and the inject-mode ping (P1 N10) ----
     server.get("/v1/ue/:sel/ps", [&aio](const Request& req) {
         const std::string sel = req.params.at("sel");
-        auto s = aio.call<Reply>([&aio, sel] {
+        auto s = aio.call_ue<Reply>(sel, [&aio, sel] {
             UeDevice* ue = aio.ue(sel);
             if (ue == nullptr) {
                 return Reply::fail(Exit::unknown, "no such UE");
@@ -736,7 +736,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         p.size = static_cast<std::size_t>(std::min<std::uint64_t>(number(req.arg("size"), 56), 8952));
         // With the TUN data plane the namespace's own ping goes (iputils, as the user).
         const std::string sel = req.params.at("sel");
-        auto mode = aio.call<std::pair<bool, std::string>>([&aio, sel, psi = p.psi]() -> std::pair<bool, std::string> {
+        auto mode = aio.call_ue<std::pair<bool, std::string>>(sel, [&aio, sel, psi = p.psi]() -> std::pair<bool, std::string> {
             UeDevice* ue = aio.ue(sel);
             if (ue == nullptr || !ue->netns_mode()) {
                 return {false, ""};
@@ -829,7 +829,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
     });
     server.get("/v1/ue/:sel/ifaces", [&aio](const Request& req) {
         const std::string sel = req.params.at("sel");
-        auto s = aio.call<Reply>([&aio, sel] {
+        auto s = aio.call_ue<Reply>(sel, [&aio, sel] {
             UeDevice* ue = aio.ue(sel);
             if (ue == nullptr) {
                 return Reply::fail(Exit::unknown, "no such UE");
@@ -1013,7 +1013,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             });
             return s ? *s : unsound();
         }
-        auto s = aio.call<Reply>([&aio, sel, cause] {
+        auto s = aio.call_ue<Reply>(sel, [&aio, sel, cause] {
             // The UE by its farm selector, found at the CU-CP by its C-RNTI.
             UeDevice* ue = aio.ue(sel);
             if (ue == nullptr) {
@@ -1097,6 +1097,42 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             r.set("INACTIVITY_REPORTS", static_cast<std::int64_t>(aio.cuup().stats().inactivity_reports));
             return r;
         });
+        return s ? *s : unsound();
+    });
+    // P2 Q7, metrics v0 (KS-CTL-005 in part): the Prometheus text format. The CU-UP's
+    // counters and the loop lag are read on the shard.
+    server.stream("/v1/metrics", [&aio](const Request&, const api::Server::Write& write) {
+        auto text = aio.call<std::string>([&aio] {
+            std::map<std::uint8_t, QfiCounters> per_qfi;
+            if (aio.hosts_cuup()) {
+                for (const auto& [qfi, q] : aio.cuup().per_qfi()) {
+                    per_qfi[qfi] = QfiCounters{q.ul_bytes, q.dl_bytes, q.ul_packets, q.dl_packets};
+                }
+            }
+            return aio.metrics().render(per_qfi, aio.max_lag_ms());
+        });
+        (void)write(text ? *text : std::string("# the run's loop did not answer\n"));
+    });
+    // P2 Q7: blocks this process's loop for ms (at most 5000), so the watchdog has
+    // something to see (row ksim-p2.loop-lag-abort). The answer comes after.
+    server.post("/v1/debug/stall", [&aio](const Request& req) {
+        long ms = 0;
+        try {
+            ms = std::stol(req.arg("ms"));
+        } catch (const std::exception&) {
+            ms = -1;
+        }
+        if (ms < 1 || ms > 5'000) {
+            return Reply::fail(Exit::usage, "debug stall takes 1..5000 ms");
+        }
+        auto s = aio.call<Reply>(
+            [ms] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+                Reply r;
+                r.set("STALLED_MS", static_cast<std::int64_t>(ms));
+                return r;
+            },
+            std::chrono::milliseconds(ms + 5'000));
         return s ? *s : unsound();
     });
     server.post("/v1/stop", [&stop](const Request&) {

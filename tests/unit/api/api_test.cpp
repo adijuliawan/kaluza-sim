@@ -7,10 +7,14 @@
 
 #include <gtest/gtest.h>
 
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
+#include <cstring>
 #include <filesystem>
 #include <thread>
+#include <vector>
 
 #include <httplib.h>
 
@@ -137,6 +141,35 @@ TEST(Server, ServesRoutesOnAUnixSocketAndRefusesWhatItCannotRead) {
     EXPECT_EQ(bad->status, 400);
     s.stop();
     EXPECT_FALSE(s.listen_tcp("10.0.0.1", 9400));   // loopback only
+    std::filesystem::remove_all(dir);
+}
+
+// KS-PLAT-D8: a burst of connects, as ksim-ctl --parallel 64 makes, all get in. With
+// httplib's backlog of 5 a non-blocking AF_UNIX connect past it is EAGAIN, a failed call.
+TEST(Server, ABurstOfConnectsFindsRoomInTheBacklog) {
+    const std::string dir = temp_dir();
+    Server s;
+    s.get("/v1/info", [](const Request&) { return Reply{}; });
+    ASSERT_TRUE(s.listen_unix(dir + "/ctl.sock"));
+    sockaddr_un sa{};
+    sa.sun_family = AF_UNIX;
+    const std::string path = dir + "/ctl.sock";
+    std::memcpy(sa.sun_path, path.c_str(), path.size() + 1);
+    std::vector<int> fds;
+    int refused = 0;
+    for (int i = 0; i < 64; ++i) {
+        const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        ASSERT_GE(fd, 0);
+        if (::connect(fd, reinterpret_cast<const sockaddr*>(&sa), sizeof sa) != 0) {   // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast): the sockets API
+            ++refused;
+        }
+        fds.push_back(fd);
+    }
+    for (const int fd : fds) {
+        ::close(fd);
+    }
+    EXPECT_EQ(refused, 0);
+    s.stop();
     std::filesystem::remove_all(dir);
 }
 

@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# OCUDU's CU-CP as kaluza-sim's peer on kaluza-uesim (P2 Q7, LW2; ADR 0012 point 4):
+# in our namespace ksim-ocucp, N2 from 172.30.30.36 (its ipvlan on ens19) to
+# kaluza-core's AMF, F1-C and E1 on its ksim-mid leg 10.250.0.1, where our split
+# CU-CP would listen (topologies/ocudu-c3-lab.yaml). gNB ID 0x1A1 (kaluza-core-df:
+# no collision); TAC 1, 001/01, the lab's slice 1-000001. Only in an agreed window.
+gnb_id: 417
+gnb_id_bit_length: 22
+ran_node_name: ocudu-cucp
+
+cu_cp:
+  amf:
+    addrs: @AMF_ADDR@
+    port: @AMF_PORT@
+    bind_addrs: 172.30.30.36
+    sctp_nodelay: true
+    supported_tracking_areas:
+      - tac: 1
+        plmn_list:
+          - plmn: "00101"
+            tai_slice_support_list:
+              - sst: 1
+                sd: 1
+  inactivity_timer: 15
+  security:
+    nea_pref_list: nea2,nea1,nea0
+    nia_pref_list: nia2,nia1
+  e1ap:
+    bind_addrs: 10.250.0.1
+  f1ap:
+    bind_addrs: 10.250.0.1
+
+log:
+  filename: @RUN_DIR@/ocudu-cucp.log
+  all_level: warning
+
+pcap:
+  ngap_enable: true
+  ngap_filename: @RUN_DIR@/ocudu-cucp-ngap.pcap
+  f1ap_enable: true
+  f1ap_filename: @RUN_DIR@/ocudu-cucp-f1ap.pcap
+  e1ap_enable: true
+  e1ap_filename: @RUN_DIR@/ocudu-cucp-e1ap.pcap

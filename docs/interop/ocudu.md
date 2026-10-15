@@ -123,6 +123,15 @@ Each alone blocks all user data.
 
 - O-2's CU-UP name `ocuup_0` reaches our CU-CP intact: our asn1c decoder does not check PrintableString's alphabet. TS 37.483 10.3.4 would ignore the IE (criticality ignore), and the name is only for humans, so nothing differs.
 
+## C3 with 100 UEs (P2 Q7, 2026-10-16)
+
+`topologies/ocudu-c3-stub-100.yaml` has imsi-001010000300000..099 on 4 farm shards, against `ksim-corestub`. Each run had the C3 gate, the P1 registration and session gates, and the scale gate (`ksim-p2-scale.sh`, 10 UEs at a time).
+- Over 3 runs, every row passed. 100 UEs registered with one session each through OCUDU's CU-CP and CU-UP in 0.9–1.1 s (KS-PLAT-T52). Hook 58 runs the scale gate as `c3-100`.
+- Nothing new from OCUDU. Two things of ours turned up:
+  - KS-PLAT-D8: the control socket's backlog. A burst of `ksim-ctl --parallel` calls lost one.
+  - The C3 gate left its UE on after deregistering, and the next gate's power-on was refused. The gate now switches the UE off (`--abrupt`).
+- The lab run (LW2) uses `topologies/ocudu-c3-lab.yaml` and `tools/ocudu-peer.sh run --lab`. OCUDU's roles run in our namespaces `ksim-ocucp` (.36) and `ksim-ocuup` (.37), from `topologies/peers/ocudu/*-lab.yml.in` ([`lab.md`](../lab.md) §6).
+
 ## Evidence
 
 - `build/ocudu/last/` holds the hook's last runs (`c3/`, `c4/`, `c5/`): the summary, our

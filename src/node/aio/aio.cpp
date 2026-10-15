@@ -74,7 +74,10 @@ std::unique_ptr<AllInOne> AllInOne::start(const Topology& t, const std::string& 
         return nullptr;
     }
     a->event_file_ = std::move(*ef);
-    a->events_.on_emit([f = a->event_file_.get()](const Event& e) { f->write(e); });
+    a->events_.on_emit([f = a->event_file_.get(), m = &a->metrics_](const Event& e) {
+        f->write(e);
+        m->count_event(e);   // P2 Q7: metrics v0
+    });
     auto cap = Capture::open(run_dir);
     if (!cap) {
         why = cap.error().what;
@@ -82,6 +85,14 @@ std::unique_ptr<AllInOne> AllInOne::start(const Topology& t, const std::string& 
     }
     a->capture_ = std::move(*cap);
     a->shard_ = std::make_unique<Shard>(0, kInbox, a->clock_);
+    // P2 Q7, the watchdog (ADR 0011 point 6): the gates ABORT on platform.loop_lag (exit 7).
+    if (a->topo_.watchdog_ms > 0) {
+        a->shard_->set_watchdog(a->topo_.watchdog_ms, [raw = a.get()](Millis lag) {
+            raw->events_.emit("platform.loop_lag", std::string("run:") + role_name(raw->topo_.role),
+                              {{"shard", "0"}, {"lag_ms", std::to_string(lag)},
+                               {"threshold_ms", std::to_string(raw->topo_.watchdog_ms)}});
+        });
+    }
     a->shard_->start();
     auto built = a->call<std::string>(
         [raw = a.get()] {
@@ -283,10 +294,20 @@ Result<void> AllInOne::build(std::string& why) {
             return r;
         }
         if (hosts_ues()) {
+            if (auto r = start_lanes(why); !r) {
+                return r;
+            }
             if (auto r = build_farm(std::move(cards), personas, why); !r) {
                 return r;
             }
-            kair_connect();
+            for (std::size_t k = 0; k < lanes_.size(); ++k) {
+                if (lanes_[k].owned) {
+                    lanes_[k].owned->start();   // its UEs were built while it was not running
+                    (void)lanes_[k].shard->post([this, k] { kair_connect(k); });
+                } else {
+                    kair_connect(k);
+                }
+            }
         }
         connect_gnb();
         return {};
@@ -300,10 +321,11 @@ Result<void> AllInOne::build(std::string& why) {
     du_air_->set_handler([this](ByteView payload, const Endpoint&) {
         auto f = air::decode(payload);
         if (!f) {
-            ++stats_.kair_errors;
+            ++kair_errors_;
             return;
         }
-        ++stats_.kair_frames;
+        ++kair_frames_;
+        observe_kair(Metrics::Hop::kair_ul, *f);
         if (du_ && shard_->now() >= air_off_until_) {
             du_->on_frame(*f);
         }
@@ -351,6 +373,14 @@ Result<void> AllInOne::build_farm(std::vector<FarmCard> cards, const std::map<co
         if (ue_net_) {
             uc.netns = "ksim-ue-" + std::to_string(i + 1);
         }
+        // P2 Q7: in the UE role each UE lives on its lane's shard; all in one on the node's.
+        const std::size_t lane = lanes_.empty() ? 0 : i % lanes_.size();
+        Shard& sh = lanes_.empty() ? *shard_ : *lanes_[lane].shard;
+        IUeNet* ue_net = lanes_.empty() || lane == 0 ? static_cast<IUeNet*>(ue_net_.get()) : lanes_[lane].ue_net.get();
+        if (!lanes_.empty()) {
+            lanes_[lane].ues.push_back(i);
+        }
+        roster_.emplace_back(c.imsi, lane);
         UeTaps taps;
         taps.rrc = [cap](std::string_view ch, ByteView pdu, const std::string& supi) { cap->rrc(ch, pdu, supi); };
         if (topo_.plain_nas) {
@@ -359,8 +389,8 @@ Result<void> AllInOne::build_farm(std::vector<FarmCard> cards, const std::map<co
         taps.sim = [cap](std::uint8_t sub, ByteView payload, const std::string& supi) { cap->sim(sub, payload, supi); };
         auto to_air = [this, i](const air::Frame& f) { ue_to_air(i, f); };
         if (c.card) {
-            ues_.push_back(std::make_unique<UeDevice>(*shard_, events_, std::move(uc), std::move(c.card), std::move(to_air),
-                                                      taps, ue_net_.get()));
+            ues_.push_back(std::make_unique<UeDevice>(sh, events_, std::move(uc), std::move(c.card), std::move(to_air),
+                                                      taps, ue_net));
         } else {
             auto reader = external_reader(*c.g, why);
             if (!reader) {
@@ -374,10 +404,11 @@ Result<void> AllInOne::build_farm(std::vector<FarmCard> cards, const std::map<co
             dgram->set_handler([this, i](ByteView payload, const Endpoint&) {
                 auto f = air::decode(payload);
                 if (!f) {
-                    ++stats_.kair_errors;
+                    ++kair_errors_;
                     return;
                 }
-                ++stats_.kair_frames;
+                ++kair_frames_;
+                observe_kair(Metrics::Hop::kair_dl, *f);
                 ues_[i]->on_frame(*f);
             });
             ue_air_.push_back(std::move(dgram));
@@ -692,7 +723,7 @@ void AllInOne::du_to_air(const air::Frame& f) {
     }
     auto wire = air::encode(f);
     if (!wire) {
-        ++stats_.kair_errors;
+        ++kair_errors_;
         return;
     }
     if (topo_.role == Role::du) {
@@ -719,12 +750,13 @@ void AllInOne::du_to_air(const air::Frame& f) {
 void AllInOne::ue_to_air(std::size_t i, const air::Frame& f) {
     auto wire = air::encode(f);
     if (!wire) {
-        ++stats_.kair_errors;
+        ++kair_errors_;
         return;
     }
     if (topo_.role == Role::ue) {
-        if (kair_ && kair_->open()) {
-            (void)kair_->send(*wire);   // out of range of the cell while the DU is away
+        auto& l = lanes_[i % lanes_.size()];   // on that lane's shard
+        if (l.kair && l.kair->open()) {
+            (void)l.kair->send(*wire);   // out of range of the cell while the DU is away
         }
         return;
     }
@@ -737,10 +769,11 @@ void AllInOne::kair_accept(std::unique_ptr<IChannel> c) {
         [this, raw](ByteView m) {
             auto f = air::decode(m);
             if (!f) {
-                ++stats_.kair_errors;
+                ++kair_errors_;
                 return;
             }
-            ++stats_.kair_frames;
+            ++kair_frames_;
+            observe_kair(Metrics::Hop::kair_ul, *f);
             kair_route_[f->radio_id] = raw;   // where this UE's downlink goes
             if (du_) {
                 du_->on_frame(*f);
@@ -759,46 +792,125 @@ void AllInOne::kair_accept(std::unique_ptr<IChannel> c) {
     events_.emit("ran.du.kair.subscribe", "gnb:" + topo_.gnb_name + "-du", {{"farms", std::to_string(kair_peers_.size())}});
 }
 
-void AllInOne::kair_connect() {
-    // P2 Q3: the farm's end of KAIR. While the DU is not there (not started yet, restarting) the
-    // farm hears no cell; it tries again every 200 ms.
-    kair_retry_.reset();
-    auto c = net::seqpacket_connect(shard_->reactor(), topo_.kair_socket);
+void AllInOne::kair_connect(std::size_t lane) {
+    // P2 Q3: the farm's end of KAIR; P2 Q7: one per lane, on its shard. While the DU is not
+    // there (not started yet, restarting) the lane hears no cell; it tries again every 200 ms.
+    FarmLane& l = lanes_[lane];
+    l.retry.reset();
+    auto c = net::seqpacket_connect(l.shard->reactor(), topo_.kair_socket);
     if (!c) {
-        kair_retry_ = shard_->start_timer(200, [this] { kair_connect(); });
+        l.retry = l.shard->start_timer(200, [this, lane] { kair_connect(lane); });
         return;
     }
-    kair_ = std::move(*c);
-    kair_->set_handlers(
-        [this](ByteView m) {
+    l.kair = std::move(*c);
+    l.kair->set_handlers(
+        [this, lane](ByteView m) {
             auto f = air::decode(m);
             if (!f) {
-                ++stats_.kair_errors;
+                ++kair_errors_;
                 return;
             }
-            ++stats_.kair_frames;
-            for (std::size_t i = 0; i < ues_.size(); ++i) {
+            ++kair_frames_;
+            observe_kair(Metrics::Hop::kair_dl, *f);
+            for (const std::size_t i : lanes_[lane].ues) {
                 if (f->radio_id == 0 || f->radio_id == radio_ids_[i]) {
                     ues_[i]->on_frame(*f);
                 }
             }
         },
-        [this] {
-            (void)shard_->post([this] {
-                kair_.reset();
+        [this, lane] {
+            FarmLane& gone = lanes_[lane];
+            (void)gone.shard->post([this, lane] {
+                FarmLane& x = lanes_[lane];
+                x.kair.reset();
                 if (!stopped_) {
-                    kair_retry_ = shard_->start_timer(200, [this] { kair_connect(); });
+                    x.retry = x.shard->start_timer(200, [this, lane] { kair_connect(lane); });
                 }
             });
         });
 }
 
-void AllInOne::teardown() {
-    if (kair_retry_) {
-        shard_->stop_timer(*kair_retry_);
-        kair_retry_.reset();
+Result<void> AllInOne::start_lanes(std::string& why) {
+    // P2 Q7 (ADR 0011 point 5): the UE role's farm shards. Built here, on the node's shard;
+    // started once their UEs are (build), so nothing runs on them before.
+    const std::size_t n = std::max<std::size_t>(1, topo_.farm_shards);
+    lanes_.resize(n);
+    lanes_[0].shard = shard_.get();
+    for (std::size_t k = 1; k < n; ++k) {
+        lanes_[k].owned = std::make_unique<Shard>(static_cast<unsigned>(k), kInbox, clock_);
+        lanes_[k].shard = lanes_[k].owned.get();
+        if (topo_.watchdog_ms > 0) {
+            lanes_[k].owned->set_watchdog(topo_.watchdog_ms, [this, k](Millis lag) {
+                events_.emit("platform.loop_lag", std::string("run:") + role_name(topo_.role),
+                             {{"shard", std::to_string(k)}, {"lag_ms", std::to_string(lag)},
+                              {"threshold_ms", std::to_string(topo_.watchdog_ms)}});
+            });
+        }
+        if (ue_net_) {   // the UEs in namespaces: each lane its own netd connection and reactor
+            auto c = net::netd::Client::connect(topo_.netd.socket);
+            if (!c) {
+                why = "ksim-netd (farm shard " + std::to_string(k) + "): " + std::string(c.error().what);
+                return c.error();
+            }
+            lanes_[k].netd = std::make_unique<net::netd::Client>(std::move(*c));
+            lanes_[k].ue_net = std::make_unique<NetdUeNet>(*lanes_[k].netd, lanes_[k].shard->reactor());
+        }
     }
-    kair_.reset();
+    return {};
+}
+
+void AllInOne::stop_lanes() {
+    // Each lane's UEs and KAIR end die on its shard, then the shard stops (on the node's shard).
+    for (std::size_t k = 0; k < lanes_.size(); ++k) {
+        FarmLane& l = lanes_[k];
+        auto down = [this, &l] {
+            if (l.retry) {
+                l.shard->stop_timer(*l.retry);
+                l.retry.reset();
+            }
+            l.kair.reset();
+            for (const std::size_t i : l.ues) {
+                ues_[i].reset();
+            }
+            l.ue_net.reset();
+            l.netd.reset();
+            return true;
+        };
+        if (!l.owned) {
+            (void)down();
+            continue;
+        }
+        (void)call_on<bool>(*l.shard, down, std::chrono::seconds(10));
+        l.owned->stop();
+        l.owned->join();
+    }
+    lanes_.clear();
+}
+
+Shard& AllInOne::shard_for(const std::string& selector) {
+    if (lanes_.size() <= 1) {
+        return *shard_;
+    }
+    std::string s = selector.rfind("imsi-", 0) == 0 ? selector.substr(5) : selector;
+    if (s.size() == 15) {
+        for (const auto& [supi, lane] : roster_) {
+            if (supi == s) {
+                return *lanes_[lane].shard;
+            }
+        }
+        return *shard_;
+    }
+    if (!s.empty() && s.size() <= 6 && s.find_first_not_of("0123456789") == std::string::npos) {
+        const std::size_t idx = std::stoul(s);
+        if (idx >= 1 && idx <= roster_.size()) {
+            return *lanes_[roster_[idx - 1].second].shard;
+        }
+    }
+    return *shard_;
+}
+
+void AllInOne::teardown() {
+    stop_lanes();   // P2 Q7: the farm shards' UEs and KAIR ends, each on its shard
     kair_route_.clear();
     kair_peers_.clear();
     kair_listen_.reset();
@@ -827,6 +939,11 @@ Result<void> AllInOne::mid_leg(const std::string& netns, const Endpoint& at, std
         return r.error();
     }
     return {};
+}
+
+void AllInOne::observe_kair(Metrics::Hop h, const air::Frame& f) {
+    const auto sent = static_cast<Millis>(f.tx_time_ns / 1'000'000);
+    metrics_.observe(h, shard_->now() - sent);   // one host, one CLOCK_MONOTONIC
 }
 
 void AllInOne::stop() {

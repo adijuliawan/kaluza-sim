@@ -12,7 +12,8 @@
 #   5. the canary over the run directory, the gates' ksim-ctl output and
 #      ksim-sim's output (derive, a kaluza dry run) included.
 # The run directory (no keys in it) is kept as build/component/last; the split run (P2 Q3) as
-# build/component/split-last; the split E1 run (P2 Q5) as build/component/e1-last.
+# build/component/split-last; the split E1 run (P2 Q5) as build/component/e1-last; the 100-UE
+# run's rows (P2 Q7) in build/component/scale-last.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 B="$ROOT/build/dev/apps"
@@ -68,6 +69,7 @@ echo "-- the split run"
 KSIM_RUNS="$T/runs-split" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
     KSIM_SIM_TRACE=1 KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE="$ROOT/topologies/split-stub.yaml" \
     sh "$ROOT/gates/run.sh" stub "$ROOT"/gates/verification/ksim-p1-*.sh "$ROOT/gates/verification/ksim-p2-split.sh" \
+    "$ROOT/gates/verification/ksim-p2-ops.sh" \
     > "$T/split.out" 2>&1 || rc=1
 cat "$T/split.out"
 SRUN="$(sed -n 's/^RUN_DIR=//p' "$T/split.out")"
@@ -83,6 +85,27 @@ if [[ -n "$SRUN" && -d "$SRUN" ]]; then
     find "$ROOT/build/component/split-last" -name kair.sock -delete
 else
     echo "COMPONENT: no split run directory"; rc=1
+fi
+
+# P2 Q7: the operations gate (watchdog, metrics) all in one, scored against the P2 rows.
+echo "-- the aio P2 run"
+KSIM_RUNS="$T/runs-ops" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
+    KSIM_PHASE=p2 sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p2-ops.sh" > "$T/ops.out" 2>&1 || rc=1
+cat "$T/ops.out"
+
+# P2 Q7: 100 UEs in split mode, the farm on 4 shards (topologies/split-stub-100.yaml).
+echo "-- the 100-UE split run"
+"$B/ksim-sim/ksim-sim" range derive --block 001010000300000/100 --master "$T/keys/master.key" --kek "$T/keys/kek.key" \
+    --out "$T/cards100" > /dev/null || rc=1
+STUB_BLOCK=001010000300000/100 KSIM_RUNS="$T/runs-100" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" \
+    KSIM_SEALED="$T/cards100" KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE="$ROOT/topologies/split-stub-100.yaml" \
+    sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p2-scale.sh" > "$T/scale.out" 2>&1 || rc=1
+cat "$T/scale.out"
+SCRUN="$(sed -n 's/^RUN_DIR=//p' "$T/scale.out")"
+if [[ -n "$SCRUN" && -d "$SCRUN" ]]; then
+    rm -rf "$ROOT/build/component/scale-last"
+    mkdir -p "$ROOT/build/component/scale-last"
+    cp "$SCRUN/rows.tsv" "$SCRUN"/scale-*.out "$ROOT/build/component/scale-last/" 2>/dev/null
 fi
 
 # P2 Q5: the E1 gate in split mode (topologies/split-stub-e1.yaml, a 15 s UE

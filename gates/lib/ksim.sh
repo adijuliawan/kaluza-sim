@@ -35,6 +35,19 @@ abort() { printf '\nABORT: %s\n' "$1" >&2; exit 3; }
 
 ctl() { "$KSIM_CTL" --run "$RUN" "$@"; }
 
+# P2 Q7, the watchdog: rows are not scored on a run whose loop lagged since the gate
+# began (platform.loop_lag; cli.md exit 7, the environment is unsound).
+KSIM_GATE_SEQ=$(ctl info 2>/dev/null | sed -n 's/^EVENT_SEQ=//p' | head -n 1)
+: "${KSIM_GATE_SEQ:=0}"
+lag_guard() {
+    if _lag=$(ctl wait platform.loop_lag --since "$KSIM_GATE_SEQ" --timeout 1ms 2>/dev/null) &&
+        printf '%s\n' "$_lag" | grep -q '^EVENT=platform.loop_lag$'; then
+        printf '\nABORT: the run lagged (%s ms late, threshold %s ms): its rows are not scored\n' \
+            "$(printf '%s\n' "$_lag" | sed -n 's/^LAG_MS=//p')" "$(printf '%s\n' "$_lag" | sed -n 's/^THRESHOLD_MS=//p')" >&2
+        exit 7
+    fi
+}
+
 # kv KEY: the first KEY=value of the text on stdin.
 kv() { sed -n "s/^$1=//p" | head -n 1; }
 
@@ -90,6 +103,7 @@ row_modes() {
 # a FAIL is not looked up in the allow-lists (the gate saw it fail for another reason).
 row() {
     _id="$1"; _want="$2"; _got="$3"
+    lag_guard
     _text=$(row_text "$_id") || abort "row $_id is not in $(basename "$ROWS_SET")"
     _modes=$(row_modes "$_id")
     if [ -n "$_modes" ] && [ "$_modes" != - ]; then
@@ -129,6 +143,7 @@ release_all() {
 
 # summary NAME: prints the totals; the gate's exit status is 0 with no FAIL.
 summary() {
+    lag_guard
     printf '\n== %s: %d passed, %d failed, %d skipped, %d allowed ==\n' "$1" "$pass" "$fail" "$skip" "$allowed"
     [ "$fail" -eq 0 ]
 }

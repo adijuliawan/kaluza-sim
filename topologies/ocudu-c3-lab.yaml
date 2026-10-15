@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# C3 against kaluza-core in the lab (P2 Q7, LW2; ADR 0012 point 4): our UE farm
+# and DU, OCUDU's ocucp and ocuup, on kaluza-uesim with KSIM_LAB=1, in a window
+# agreed with the kaluza-core session. OCUDU's roles run in namespaces of ours
+# (tools/ocudu-peer.sh run --lab, from topologies/peers/ocudu/*-lab.yml.in):
+#   ocucp  ksim-ocucp: 172.30.30.36/24 on ens19 (N2 to the AMF at .1:38412) and
+#          the ksim-mid leg 10.250.0.1/24 (F1-C 38472, E1 38462);
+#   ocuup  ksim-ocuup: 172.30.30.37/24 (N3 to the V-UPF at .2) and 10.250.0.3/24
+#          (E1, F1-U);
+#   DU     ksim-du: its leg 10.250.0.2/24 only, made by our run;
+#   UEs    the farm in the root namespace, each UE in ksim-ue-<n>.
+# 100 UEs, imsi-001010000300000..099 (W0's import), on 4 farm shards.
+plmn: "00101"
+seed: 42
+mode: split
+amf: [{addr: 172.30.30.1, port: 38412}]
+gnbs:
+  - id: {value: 0x1A1, bits: 22}
+    name: ocudu-gnb
+    peers: {cucp: ocudu, cuup: ocudu}
+    dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
+    split: {f1c: 10.250.0.1, e1: 10.250.0.1, du: 10.250.0.2, cuup: 10.250.0.3, cuup_e1: 10.250.0.3, streams: 16}
+ues:
+  - {group: s22, count: 50, range: "001010000300000", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+     imeisv_tac: "86000000", persona: ../personas/s22plus.yaml}
+  - {group: op9, count: 50, range: "001010000300050", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+     imeisv_tac: "86000000", persona: ../personas/oneplus9pro.yaml}
+secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
+peer: {name: kaluza-core}
+netd: {du_netns: ksim-du, parent: ens19, prefix: 24, mid: true, mid_prefix: 24}
+farm: {shards: 4}

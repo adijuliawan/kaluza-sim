@@ -1,0 +1,35 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# OCUDU's CU-UP as kaluza-sim's peer on kaluza-uesim (P2 Q7, LW2; ADR 0012 point 4):
+# in our namespace ksim-ocuup, E1 and F1-U on its ksim-mid leg 10.250.0.3 (E1 to
+# OCUDU's CU-CP at 10.250.0.1), N3 from 172.30.30.37 (its ipvlan on ens19) to the
+# V-UPF the session names. Only in an agreed window.
+gnb_id: 417
+gnb_id_bit_length: 22
+
+cu_up:
+  plmn_list:
+    - "00101"
+  e1ap:
+    gateways:
+      - bind_addrs: 10.250.0.3
+        addrs: 10.250.0.1
+  ngu:
+    socket:
+      - bind_addr: 172.30.30.37
+  f1u:
+    socket:
+      - bind_addr: 10.250.0.3
+
+log:
+  filename: @RUN_DIR@/ocudu-cuup.log
+  all_level: warning
+
+pcap:
+  e1ap_enable: true
+  e1ap_filename: @RUN_DIR@/ocudu-cuup-e1ap.pcap
+  f1u_enable: true
+  f1u_filename: @RUN_DIR@/ocudu-cuup-f1u.pcap
+  n3_enable: true
+  n3_filename: @RUN_DIR@/ocudu-cuup-n3.pcap

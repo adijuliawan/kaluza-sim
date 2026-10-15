@@ -69,6 +69,7 @@ for b in "${BINS[@]}"; do cp "$(bin_path "$b")" "$STAGE/$REL/bin/"; done
 if (( PEERS )); then
     mkdir -p "$STAGE/$REL/peers/ocudu-$PIN"
     cp "$PEER_DIR/build/apps/cu_cp/ocucp" "$PEER_DIR/build/apps/cu_up/ocuup" "$PEER_DIR/PIN" "$STAGE/$REL/peers/ocudu-$PIN/"
+    cp "$ROOT/tools/ocudu-peer.sh" "$STAGE/$REL/tools/"   # gates/run.sh starts the peers with it (P2 Q7, LW2)
 fi
 cp -r "$ROOT/topologies" "$ROOT/cards" "$ROOT/personas" "$ROOT/gates" "$STAGE/$REL/"
 cp -r "$ROOT/tools/systemd" "$STAGE/$REL/tools/"

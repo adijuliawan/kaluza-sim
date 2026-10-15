@@ -26,6 +26,7 @@
      - gc of bridges, veths and DN namespaces.
      - *As built (P2 Q6):* ops `bridge`, `veth`, `setup_dn`, `dn_tun`, enabled by `--mid <net>` (refused off kaluza-uesim, as `--parent`) and `--dn <net>` (both hosts); `exec` goes to any namespace netd made, still as the caller and never root. The split roles on kaluza-uesim each set up their own namespace and mid leg (topology `netd: {mid: true}`); a split topology with node namespaces but no `mid` is refused, so on the dev PC the roles stay in the root namespace and only the UEs get namespaces.
   5. **Shards:** the UE farm runs several shards, with UEs pinned by index and one KAIR socket per shard. The CU-CP and the DU stay on one shard. The ID layout `[shard:4][gen:4][index:24]` is kept, and the SCTP I/O thread waits until a measurement asks for it.
+     - *As built (P2 Q7):* topology `farm: {shards: N}` (1..8, split runs only, no pcsc: or bridge: cards). UE i lives on lane i mod N with its lane's KAIR connection and, with netd, its lane's own netd connection; the control API posts a UE's verbs to its lane (`call_ue`). 100 UEs on 4 lanes register with a session each in under a second on the dev PC, with no TSan report.
   6. **Moved into P2 from ADR 0009 point 6:**
      - metrics v0 on `/metrics` (Prometheus text): procedure counters with causes, per-QFI bytes, per-hop latency histograms, RSS and threads. Part of KS-CTL-005; the TS 28.552 labels come later;
      - the loop-lag watchdog: a `platform.loop_lag` event above a threshold, and gates ABORT with exit 7 (`cli.md` §2).

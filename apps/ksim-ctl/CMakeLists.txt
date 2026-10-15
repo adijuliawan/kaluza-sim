@@ -2,4 +2,4 @@
 # SPDX-License-Identifier: LicenseRef-kaluza-sim-private
 
 add_executable(ksim-ctl main.cpp)
-target_link_libraries(ksim-ctl PRIVATE ksim::api ksim::buildinfo CLI11::CLI11 ksim::warnings)
+target_link_libraries(ksim-ctl PRIVATE ksim::api ksim::net ksim::buildinfo CLI11::CLI11 ksim::warnings)

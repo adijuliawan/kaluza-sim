@@ -3,6 +3,7 @@
 
 #include "node/aio/topology.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 
@@ -52,7 +53,7 @@ std::string resolve_path(const std::string& p, const std::string& base_dir) {
 Result<Topology> load_topology(const std::string& file, std::string& why) {
     try {
         const Yaml y = Yaml::load_file(file);
-        y.only({"plmn", "seed", "amf", "gnbs", "ues", "secrets", "peer", "security", "netd", "mode"});
+        y.only({"plmn", "seed", "amf", "gnbs", "ues", "secrets", "peer", "security", "netd", "mode", "watchdog_ms", "farm"});
         const std::string base = std::filesystem::path(file).parent_path().string();
         Topology t;
         t.file = file;
@@ -260,7 +261,9 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             t.netd.mid = n.get<bool>("mid", false);
             t.netd.mid_prefix = n.get<std::uint8_t>("mid_prefix", 24);
             if (t.netd.netns.rfind("ksim-", 0) != 0 || t.netd.cuup_netns.rfind("ksim-", 0) != 0 ||
-                t.netd.cuup_netns == t.netd.netns || t.ng_bind.family != Endpoint::Family::v4 || t.netd.prefix > 32) {
+                t.netd.cuup_netns == t.netd.netns || (t.peer_cucp.empty() && t.ng_bind.family != Endpoint::Family::v4) ||
+                t.netd.prefix > 32) {
+                // A peer CU-CP (P2 Q7, LW2) has its N2 address in its own config.
                 n.fail("netd needs a ksim- namespace, an IPv4 ng_bind and a prefix up to 32");
             }
             // P2 Q6: split roles in namespaces of their own reach each other over ksim-mid only.
@@ -278,6 +281,17 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
                     n.fail("with mid, a ksim- DU namespace of its own, a mid prefix 8..30, the CU-CP's F1-C and E1 "
                            "on one address (its leg) and the CU-UP's F1-U and E1 on one (its leg)");
                 }
+            }
+        }
+        t.watchdog_ms = y.get<std::uint32_t>("watchdog_ms", t.watchdog_ms);
+        if (y.has("farm")) {
+            y.at("farm").only({"shards"});
+            t.farm_shards = y.at("farm").get<unsigned>("shards", 1);
+            const bool readers = std::any_of(t.ues.begin(), t.ues.end(), [](const UeGroup& ug) {
+                return !ug.card_pcsc.empty() || !ug.card_bridge.empty();
+            });
+            if (t.farm_shards < 1 || t.farm_shards > 8 || (t.farm_shards > 1 && (t.mode != Mode::split || readers))) {
+                y.at("farm").fail("1..8 shards; more than one in a split run only, and none with a pcsc: or bridge: card");
             }
         }
         if (y.has("security")) {

@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <set>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -471,6 +472,7 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
     to("GET", "/v1/gnb/:name/ue-list", "cucp");
     to("GET", "/v1/gnb/:name/amf-list", "cucp");
     to("GET", "/v1/du/:name/ue-list", "du");
+    to("POST", "/v1/debug/stall", "du");   // P2 Q7: the DU's loop has timers that come due
     to("GET", "/v1/cuup/:name/bearers", "cuup");
     server.get("/v1/faults", [](const Request&) {
         Reply r;
@@ -651,6 +653,39 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
             return out;
         });
     }
+    // P2 Q7: every role's metrics, each line labelled with its role; HELP and TYPE once.
+    server.stream("/v1/metrics", [this](const Request&, const api::Server::Write& write) {
+        std::string out;
+        std::set<std::string> said;
+        for (const auto& c : children_) {
+            httplib::Client cli(api::socket_target(c->ctl));
+            cli.set_address_family(AF_UNIX);
+            cli.set_read_timeout(std::chrono::seconds(10));
+            auto res = cli.Get("/v1/metrics");
+            if (!res) {
+                continue;
+            }
+            std::istringstream in(res->body);
+            for (std::string line; std::getline(in, line);) {
+                if (line.empty()) {
+                    continue;
+                }
+                if (line[0] == '#') {
+                    if (said.insert(line).second) {
+                        out += line + "\n";
+                    }
+                    continue;
+                }
+                const std::string role = "role=\"" + c->role + "\"";
+                if (const auto b = line.find('{'); b != std::string::npos) {
+                    out += line.substr(0, b + 1) + role + "," + line.substr(b + 1) + "\n";
+                } else if (const auto sp = line.find(' '); sp != std::string::npos) {
+                    out += line.substr(0, sp) + "{" + role + "}" + line.substr(sp) + "\n";
+                }
+            }
+        }
+        (void)write(out);
+    });
     server.post("/v1/stop", [&stop](const Request&) {
         stop.store(true);
         Reply r;

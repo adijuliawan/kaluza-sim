@@ -50,7 +50,9 @@ start_card() {
         --vpcd "$VPCD" > "$T/card.out" 2>&1 &
     pids+=($!)
     # pcscd's driver polls the ATR; once it has, the reader holds a card (a dry run opens it).
-    for _ in $(seq 1 100); do
+    # Right after hook 55's soft card left the same reader, vpcd takes longer than 10 s
+    # to take a new one (P2 Q7), so up to 30 s.
+    for _ in $(seq 1 300); do
         "$SIM" burn --pcsc "$READER" --imsi "$IMSI" --master "$T/keys/master.key" --adm1 /dev/null --kek "$T/keys/kek.key" \
             --dry-run >/dev/null 2>&1 && return 0
         sleep 0.1
@@ -87,6 +89,7 @@ gate() {   # $1 = label, then env assignments for the gate
 row_of() { awk -F'\t' -v r="$2" '$1 == r {print $2}' "$OUT/$1.rows.tsv" 2>/dev/null | head -n 1; }
 
 rc=0
+"$ROOT/tools/vpcd_ready.sh" "$READER" || { echo "PCSC=FAIL (pcscd has no $READER)"; exit 1; }
 start_card || { echo "PCSC=FAIL (the soft card never showed on $READER)"; exit 1; }
 
 echo "-- 1. the burn"

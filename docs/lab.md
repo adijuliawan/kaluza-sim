@@ -142,6 +142,19 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
   - **P2's windows** (the P2 plan, 2026-10-15; each agreed with the active kaluza-core session with a start and an end):
     - **LW1** (Q7): split mode on the VM (`ksim-mid`, .30/.31), the P1 row set, then 100 UEs (imsi-…0000..099), 10 attaches in parallel, one `internet` session each, low-rate pings; netd v3 and the packages of D7 installed in its setup.
     - **LW2** (Q7): OCUDU `ocucp` at .36 and `ocuup` at .37 in our namespaces (ADR 0012), with our DU and up to 100 UEs.
+    - **How LW1 and LW2 run (as built in Q7):**
+      1. Setup: `tools/deploy-uesim.sh --window-agreed --peers` (with `--secrets` when the cards changed). Install netd v3 on the VM with the printed steps (D6). `apt install` exactly what `PEER_LDD=MISSING` names, plus iperf3 (D7), each recorded below.
+      2. On the VM, from `~/ksim/current`, run `KSIM_LAB=1 KSIM_BIN=~/ksim/current/bin KSIM_PHASE=p2 gates/run.sh kaluza <gates>`, with the topology in `KSIM_TOPOLOGY_FILE`:
+         - LW1: `split-lab.yaml` with the P1 gates and `ksim-p2-split.sh`, then `split-lab-100.yaml` with `ksim-p2-scale.sh`;
+         - LW2: `ocudu-c3-lab.yaml` with `ksim-p2-ocudu.sh`, the P1 gates that apply in C3, and `ksim-p2-scale.sh`.
+      3. In LW2, `gates/run.sh` starts OCUDU through `tools/ocudu-peer.sh run --lab`. Each role runs in a namespace of ours made through `ksim-ctl netd`:
+         - `ksim-ocucp`: 172.30.30.36 on `ens19`, and 10.250.0.1 on `ksim-mid`;
+         - `ksim-ocuup`: 172.30.30.37, and 10.250.0.3;
+         - netd's `exec` starts each role as amadeus, from `topologies/peers/ocudu/*-lab.yml.in`.
+
+         The run waits on OCUDU's console for E1, since its sockets are out of `ss`'s sight. `stop --lab` tears the namespaces down.
+      4. The VM has no pycrate venv, so `peer_redact.py` can't run there. The peer's NGAP and E1AP captures are then removed, never kept or copied off in clear (`PEER_REDACTED=removed`).
+      5. Afterwards check: `ip netns list` shows no `ksim-` namespace; `pgrep -f peers/ocudu` shows nothing; `ip link show ksim-mid` shows no leg left. Then tell the core session the end time.
     - **LW3** (Q15): the throughput set inside the VM against the scripted core on 127.0.0.x. Nothing crosses `ens19` or the trunk, but it needs the VM free of core sets.
     - **LW4** (Q14): the real card imsi-001010000300100 through the dev-PC bridge (§7).
     - **LW5** (Q14): the full P2 row set in split mode.
