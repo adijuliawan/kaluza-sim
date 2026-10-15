@@ -52,7 +52,9 @@ echo "-- captures"
 [[ "$(sed -n 's/^PCAP_SIM_FRAMES=//p' "$T/pcap.out")" -gt 0 ]] 2>/dev/null || { echo "COMPONENT: no SIM trace"; rc=1; }
 
 echo "-- canary"
-"$PY" -I "$ROOT/tools/secret_canary.py" --run-dir "$RUN" --master "$T/keys/master.key" --block "$BLOCK" || rc=1
+"$PY" -I "$ROOT/tools/secret_canary.py" --run-dir "$RUN" --master "$T/keys/master.key" --block "$BLOCK" | tee "$T/canary.out" || rc=1
+# What tools/p1_exit.py reads back (N16): the capture check and the canary's verdicts.
+grep -E '^(PCAP_[A-Z_]+|PYCRATE_FAILED|CANARY_RUN)=' "$T/pcap.out" "$T/canary.out" | sed 's/^[^:]*://' > "$RUN/checks.txt"
 
 mkdir -p "$ROOT/build/component"
 rm -rf "$ROOT/build/component/last"

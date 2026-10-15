@@ -4,7 +4,7 @@
 - It keeps **nr-cli's verbs and its `<node> --exec '<cmd>'` form**, so moving a gate off UERANSIM changes the binary and the node name, not the logic.
 - New commands cover the device, the SIM, radio and mobility, the data plane, events and the RAN nodes.
 
-**As built through P1 N14:**
+**As built through P1 N16:**
 - **Verbs:**
   - `nodes`, `info`, `version`, `capabilities`, `faults list`, `ues`, `stop`;
   - `ue <sel> status|power on|power off --switch-off|--abrupt|register|deregister normal|switch-off|wait|events` (N8, `--abrupt` N12);
@@ -20,7 +20,8 @@
   - `validate <image> [--access]`;
   - `export [--test-keys | --sealed D --kek F] [--imsi I]`;
   - `import --fsdump F [--template Y] --out Y`.
-- **Unbuilt verbs** answer exit 5 and name the milestone that brings them. The `--exec` form and `--format=nrcli` come with N16.
+- **nr-cli's form (N16):** `ksim-ctl [options] <imsi-…|gNB> --exec '<command>'` runs the command for that UE or gNB (`IPv4` taken as `ipv4`), and `--format=nrcli` prints `key: value` lines, keys in lower case with dashes. The registration gate reads the RM state this way.
+- **Unbuilt verbs** answer exit 5 and name the milestone that brings them.
 - **Routes:** in [`src/api/openapi.yaml`](../src/api/openapi.yaml).
 
 ## 1. Forms

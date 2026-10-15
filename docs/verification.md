@@ -57,11 +57,16 @@ P1's rows are `gates/rows/p1.tsv` ([ADR 0009](adr/0009-p1-runtime-shape.md)): ka
 
 | Core | Requirement |
 |---|---|
-| The scripted stub | every row PASS |
+| The scripted stub | every row PASS; a TUN row the inject-mode stub run SKIPs counts when it PASSes in netns mode on a real core |
 | Open5GS | every row PASS, or ALLOWED by an entry of `gates/allow/open5gs.tsv` (the SMS rows: the fork has no SMS over NAS); nothing unaccounted |
 | kaluza-core | every row PASS, or accounted for by a KF finding acknowledged by the core session |
 
-It also requires every mutant killed (exactly one row failing per mutant), every readable EF read by pySim-shell, no malformed frame in the run pcaps, no canary hit, and at least one KF handed over or the user's explicit acceptance of none. Rows only a core-side change can trigger (network-requested release or modification, configuration update, network deregistration) run on the stub and Open5GS: kaluza-sim has no trigger on kaluza-core in P1 (the user, 2026-10-15).
+It also requires every mutant killed, every readable EF read by pySim-shell, no malformed frame in the run pcaps, no canary hit, and at least one KF handed over or the user's explicit acceptance of none. Rows only a core-side change can trigger (network-requested release or modification, configuration update, network deregistration) run on the stub and Open5GS: kaluza-sim has no trigger on kaluza-core in P1 (the user, 2026-10-15).
+
+**As built (P1 N16):**
+- **Mutants:** `tools/mutants.sh` runs each mutant of `tests/mutants.tsv` against the gate that scores its row, with `ksim` from the mutants preset under `KSIM_MUTANT` and the stub from the dev preset. A mutant is killed when its own row FAILs. Rows that depend on the mutated step fail with it and are listed, not counted against it (KS-PLAT-B30): the plan's "exactly one row failing" is read that way.
+- **The exit check:** `tools/p1_exit.sh` takes each row's newest result per real core across its runs (`runs/open5gs-*`, `runs/lab/kaluza-*`). It reads the component run's `checks.txt`, `build/mutants-run/last` and `build/pysim/last`, and prints `P1_EXIT=PASS|PENDING|FAIL`.
+- **CI:** hooks 68 (mutants) and 90 (`--stub-only`) run in `ci full`.
 
 ## 4. Parity crosswalk (P4)
 

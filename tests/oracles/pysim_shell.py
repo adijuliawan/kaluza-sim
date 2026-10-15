@@ -129,10 +129,19 @@ def main() -> int:
         rc = run(args, env, tmp)
         if args.keep:
             Path(args.keep).mkdir(parents=True, exist_ok=True)
+            (Path(args.keep) / "summary.txt").write_text("\n".join(SUMMARY) + "\n")
             for f in tmp.iterdir():
                 if f.is_file():
                     (Path(args.keep) / f.name).write_bytes(f.read_bytes())
         return rc
+
+
+SUMMARY: list[str] = []
+
+
+def say(line: str) -> None:
+    print(line)
+    SUMMARY.append(line)
 
 
 def run(args, env: dict, tmp: Path) -> int:
@@ -216,9 +225,9 @@ def run(args, env: dict, tmp: Path) -> int:
                 ok += 1
             else:
                 fails.append(f"{name} ({path}): READ denied but pySim got {sw or 'its contents'}")
-    print(f"PYSIM_EF_READ={ok}/{modelled}")
-    print(f"PYSIM_EF_UNMODELLED={len(unmodelled)}{' ' + ' '.join(unmodelled) if unmodelled else ''}")
-    print(f"SERVE_APDUS={s1.get('APDUS', '?')} SERVE_TRACED={s1.get('TRACED', '?')}")
+    say(f"PYSIM_EF_READ={ok}/{modelled}")
+    say(f"PYSIM_EF_UNMODELLED={len(unmodelled)}{' ' + ' '.join(unmodelled) if unmodelled else ''}")
+    say(f"SERVE_APDUS={s1.get('APDUS', '?')} SERVE_TRACED={s1.get('TRACED', '?')}")
 
     # pySim-trace: every EF read decoded at its own path, nothing unknown.
     if trace_on:
@@ -229,12 +238,12 @@ def run(args, env: dict, tmp: Path) -> int:
         want = {n for n, (p, rd) in expect.items() if rd == "granted" and n in d1}
         seen = {p.lower() for p in read_paths}
         missing = sorted(want - seen)
-        print(f"PYSIM_TRACE_READS={len(want) - len(missing)}/{len(want)} PYSIM_TRACE_UNKNOWN={unknown} "
+        say(f"PYSIM_TRACE_READS={len(want) - len(missing)}/{len(want)} PYSIM_TRACE_UNKNOWN={unknown} "
               f"PYSIM_TRACE_EXCEPTIONS={tbs}")
         if missing or unknown or tbs:
             fails.append(f"pySim-trace: missing {missing}, unknown {unknown}, exceptions {tbs}")
     else:
-        print("PYSIM_TRACE=SKIP (UDP 4729 is taken)")
+        say("PYSIM_TRACE=SKIP (UDP 4729 is taken)")
 
     # tshark on the same records; the canary on the trace.
     pcap = (tmp / "sim.pcapng").read_bytes() if (tmp / "sim.pcapng").exists() else b""
@@ -244,7 +253,7 @@ def run(args, env: dict, tmp: Path) -> int:
                        capture_output=True, timeout=120)
     bad = len(m.stdout.splitlines())
     hits = sum(pcap.count(bytes.fromhex(k)) for k in (TEST_K, TEST_OPC))
-    print(f"TSHARK_SIM_FRAMES={frames} TSHARK_SIM_MALFORMED={bad} TRACE_KEY_HITS={hits}")
+    say(f"TSHARK_SIM_FRAMES={frames} TSHARK_SIM_MALFORMED={bad} TRACE_KEY_HITS={hits}")
     if frames == 0 or bad or hits:
         fails.append(f"tshark: {frames} frames, {bad} malformed; key hits {hits}")
 
@@ -255,13 +264,13 @@ def run(args, env: dict, tmp: Path) -> int:
                              args.template, "--out", str(out_img)], capture_output=True, text=True)
         va = subprocess.run([args.ksim_sim, "validate", str(out_img)], capture_output=True, text=True)
         imported = re.search(r"IMPORTED=(\d+)", im.stdout)
-        print(f"IMPORT={imported.group(1) if imported else '?'} IMPORT_VALID={'1' if va.returncode == 0 else '0'}")
+        say(f"IMPORT={imported.group(1) if imported else '?'} IMPORT_VALID={'1' if va.returncode == 0 else '0'}")
         if im.returncode != 0 or va.returncode != 0 or not imported or int(imported.group(1)) == 0:
             fails.append(f"import: {im.stdout.strip()} {im.stderr.strip()} / {va.stdout.strip()}")
 
     for f in fails:
         print(f"PROBLEM={f}")
-    print(f"PYSIM={'PASS' if not fails else 'FAIL'}")
+    say(f"PYSIM={'PASS' if not fails else 'FAIL'}")
     return 0 if not fails else 1
 
 

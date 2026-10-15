@@ -3,7 +3,8 @@
 //
 // ksim-ctl v0 (P1 N8; cli.md): the run's control API from a shell.
 //
-//   ksim-ctl [--run D | --socket S] [--json] [--timeout DUR] <command>
+//   ksim-ctl [--run D | --socket S] [--json | --format kv|json|nrcli] [--timeout DUR] <command>
+//   ksim-ctl [options] <imsi-… | gNB name> --exec '<command>'   (nr-cli's form, N16)
 //     nodes | info | version | capabilities | faults list | ues | stop
 //     ue <sel> status
 //     ue <sel> power on|off [--switch-off] [--wait DUR]
@@ -41,10 +42,12 @@
 #include <httplib.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <iostream>
 #include <map>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -60,6 +63,7 @@ using ksim::api::Reply;
 struct Ctx {
     std::string socket;
     bool json = false;
+    bool nrcli = false;   // --format=nrcli: "key: value" lines as nr-cli prints them (N16)
     long timeout_ms = 30'000;
 };
 
@@ -125,9 +129,39 @@ Reply call(const Ctx& c, const std::string& method, const std::string& path, con
 void print(const Ctx& c, const Reply& r) {
     if (c.json) {
         std::cout << r.kv.dump() << "\n";
+    } else if (c.nrcli) {
+        // nr-cli's shape: YAML-like "key: value", keys in lower case with dashes.
+        std::istringstream in(ksim::api::kv_lines(r.kv));
+        for (std::string line; std::getline(in, line);) {
+            const auto eq = line.find('=');
+            if (eq == std::string::npos) {
+                std::cout << line << "\n";
+                continue;
+            }
+            std::string k = line.substr(0, eq);
+            std::transform(k.begin(), k.end(), k.begin(), [](unsigned char ch) {
+                return ch == '_' || ch == '.' ? '-' : static_cast<char>(std::tolower(ch));
+            });
+            std::cout << k << ": " << line.substr(eq + 1) << "\n";
+        }
     } else {
         std::cout << ksim::api::kv_lines(r.kv);
     }
+}
+
+/// nr-cli's form, `<node> --exec '<command>'` (cli.md §5): an imsi-… node is a
+/// UE, any other a gNB; the command's words follow. nr-cli writes IPv4 where
+/// ksim-ctl takes ipv4.
+std::vector<std::string> from_exec(const std::string& node, const std::string& command) {
+    std::vector<std::string> out{node.rfind("imsi-", 0) == 0 ? "ue" : "gnb", node};
+    std::istringstream in(command);
+    for (std::string w; in >> w;) {
+        if (out.size() >= 3 && out.back() == "ps-establish") {
+            std::transform(w.begin(), w.end(), w.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        }
+        out.push_back(w);
+    }
+    return out;
 }
 
 /// Flags after the command words: --name value, --name=value, or a bare --flag.
@@ -480,10 +514,16 @@ int exec_command(const Ctx& c, const std::string& ue, std::vector<std::string> w
     return static_cast<int>(r.exit);
 }
 
-int run(const Ctx& c, const std::vector<std::string>& args) {
-    if (args.empty()) {
+int run(const Ctx& c, const std::vector<std::string>& in_args) {
+    if (in_args.empty()) {
         std::cerr << "usage: ksim-ctl [--run D] [--json] <command> (see cli.md)\n";
         return static_cast<int>(Exit::usage);
+    }
+    std::vector<std::string> args = in_args;
+    if (args.size() == 3 && args[1] == "--exec") {
+        args = from_exec(args[0], args[2]);
+    } else if (args.size() == 2 && args[1].rfind("--exec=", 0) == 0) {
+        args = from_exec(args[0], args[1].substr(7));
     }
     if (args.size() >= 3 && args[0] == "ue" && args[2] == "exec") {
         return exec_command(c, args[1], std::vector<std::string>(args.begin() + 3, args.end()));
@@ -592,8 +632,12 @@ static int run_main(int argc, char** argv) {
     app.add_option("--run", run_dir, "the run directory");
     app.add_option("--socket", socket, "the control socket (instead of --run)");
     app.add_flag("--json", c.json, "print JSON");
+    std::string format = "kv";
+    app.add_option("--format", format, "kv, json or nrcli")->check(CLI::IsMember({"kv", "json", "nrcli"}));
     app.add_option("--timeout", timeout, "how long to wait for an answer (30s, 500ms, 2m)");
     CLI11_PARSE(app, argc, argv);
+    c.json = c.json || format == "json";
+    c.nrcli = format == "nrcli";
     if (auto t = duration_ms(timeout)) {
         c.timeout_ms = *t;
     } else {

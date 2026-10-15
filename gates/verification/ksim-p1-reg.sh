@@ -28,9 +28,11 @@ echo "-- initial registration (UE 1)"
 reg=$(ctl ue 1 power on --wait 30s)
 complete=$(ctl ue 1 wait nas.reg.complete --timeout 5s | kv EVENT)
 guti=$(printf '%s\n' "$reg" | kv GUTI)
-row amf-ueransim.006 '^ACCEPT complete=nas.reg.complete guti=.+' \
-    "$(printf '%s\n' "$reg" | kv RESULT) complete=$complete guti=$guti"
 supi=$(printf '%s\n' "$reg" | kv UE)
+# The RM state as the reference gate reads it, through nr-cli's form (N16).
+rm=$("$KSIM_CTL" --run "$RUN" --format=nrcli "$supi" --exec 'status' | sed -n 's/^rm-state: //p')
+row amf-ueransim.006 '^ACCEPT complete=nas.reg.complete guti=[^ ]+ rm-state=RM-REGISTERED$' \
+    "$(printf '%s\n' "$reg" | kv RESULT) complete=$complete guti=$guti rm-state=$rm"
 msin=$(printf '%s' "$supi" | sed 's/^imsi-.....//')   # MCC and a 2-digit MNC (the sim ranges)
 
 smc=$(ctl ue 1 wait nas.smc.complete --timeout 5s)
