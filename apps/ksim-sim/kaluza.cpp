@@ -91,7 +91,17 @@ std::string form_encode(const std::string& v) {
 std::unique_ptr<httplib::SSLClient> client(const Url& u, const KaluzaApi& api, bool mtls) {
     std::unique_ptr<httplib::SSLClient> c;
     if (mtls) {
-        c = std::make_unique<httplib::SSLClient>(u.host, u.port, api.cred_dir + "/tls-chain.pem", api.cred_dir + "/tls.key");
+        const std::string chain = api.cred_dir + "/tls-chain.pem";
+        c = std::make_unique<httplib::SSLClient>(u.host, u.port, chain, api.cred_dir + "/tls.key");
+        // cpp-httplib loads only the file's first certificate (SSL_CTX_use_certificate_file),
+        // so the issuing CA never went on the wire and the UDR found no path to its trust
+        // anchor (W0, 2026-10-15). The whole chain, leaf first, goes in the same context.
+        SSL_CTX* ctx = c->ssl_context();
+        if (ctx == nullptr || SSL_CTX_use_certificate_chain_file(ctx, chain.c_str()) != 1 ||
+            SSL_CTX_check_private_key(ctx) != 1) {
+            std::cerr << "ksim-sim: the client certificate chain does not load or does not match the key\n";
+            return nullptr;
+        }
     } else {
         c = std::make_unique<httplib::SSLClient>(u.host, u.port);
     }
@@ -124,6 +134,10 @@ std::optional<std::string> token(const KaluzaApi& api) {
                        "&client_secret=" + form_encode(*secret);
     wipe(*secret);
     auto c = client(*u, api, api.token_mtls);
+    if (!c) {
+        wipe(body);
+        return std::nullopt;
+    }
     auto res = c->Post(u->path, body, "application/x-www-form-urlencoded");
     wipe(body);
     if (!res || res->status != 200) {
@@ -190,6 +204,10 @@ int kaluza_provision(const std::string& first, unsigned count, const std::string
     }
     std::cout << "BATCH_SALT=" << to_hex(*salt) << "\n";
     auto c = client(*u, api, true);
+    if (!c) {
+        wipe(*tok);
+        return 1;
+    }
     httplib::Headers h{{"Authorization", "Bearer " + *tok}};
     unsigned created = 0;
     unsigned existing = 0;
@@ -241,6 +259,11 @@ int kaluza_provision(const std::string& first, unsigned count, const std::string
             ++failed;
             std::cout << "STOPPED_AT=imsi-" << imsi << (status == 0 ? " (no answer: TLS or the connection)" : "")
                       << "\n";
+            if (!res) {
+                // What went wrong, never a header or a body: httplib's error and OpenSSL's verify result.
+                std::cout << "TRANSPORT=" << httplib::to_string(res.error())
+                          << " VERIFY=" << c->get_openssl_verify_result() << "\n";
+            }
             break;
         }
     }
@@ -265,6 +288,10 @@ int kaluza_deprovision(const std::string& first, unsigned count, const KaluzaApi
         return 1;
     }
     auto c = client(*u, api, true);
+    if (!c) {
+        wipe(*tok);
+        return 1;
+    }
     httplib::Headers h{{"Authorization", "Bearer " + *tok}};
     unsigned failed = 0;
     unsigned done = 0;
