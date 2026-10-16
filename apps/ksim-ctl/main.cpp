@@ -430,8 +430,16 @@ int events(const Ctx& c, const Flags& f, const std::string& subject) {
     if (!subject.empty()) {
         q += "&subject=" + encode(subject);
     }
-    auto res = cli.Get(q, [](const char* data, std::size_t n) {
-        std::cout.write(data, static_cast<std::streamsize>(n));
+    // Whole lines, the stream's keepalives (blank lines, KS-PLAT-D14) left out.
+    std::string buf;
+    auto res = cli.Get(q, [&buf](const char* data, std::size_t n) {
+        buf.append(data, n);
+        for (std::size_t nl = buf.find('\n'); nl != std::string::npos; nl = buf.find('\n')) {
+            if (nl > 0) {
+                std::cout.write(buf.data(), static_cast<std::streamsize>(nl + 1));
+            }
+            buf.erase(0, nl + 1);
+        }
         std::cout.flush();
         return true;
     });

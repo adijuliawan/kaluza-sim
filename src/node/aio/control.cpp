@@ -22,6 +22,7 @@
 #include <optional>
 #include <thread>
 
+#include "api/events_stream.hpp"
 #include "api/wait.hpp"
 #include "proc/ran/cucp.hpp"
 #include "proc/ran/cuup.hpp"
@@ -930,18 +931,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         auto keep = [&](const Event& e) {
             return (subject.empty() || e.subject == subject) && (prefix.empty() || e.name.rfind(prefix, 0) == 0);
         };
-        for (;;) {
-            for (const auto& e : aio.events().since(since, 1024)) {
-                since = e.seq;
-                if (keep(e) && !write(to_ndjson(e) + "\n")) {
-                    return;
-                }
-            }
-            if (!follow || stop.load()) {
-                return;
-            }
-            (void)aio.events().wait(since, [](const Event&) { return true; }, std::chrono::milliseconds(1000));
-        }
+        api::stream_events(aio.events(), since, keep, follow, stop, write);   // a blank line each quiet second
     });
     server.get("/v1/gnb/:name/ue-list", [&aio, &t](const Request& req) {
         if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {

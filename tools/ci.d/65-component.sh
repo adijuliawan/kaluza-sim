@@ -108,6 +108,15 @@ if [[ -n "$SCRUN" && -d "$SCRUN" ]]; then
     cp "$SCRUN/rows.tsv" "$SCRUN"/scale-*.out "$ROOT/build/component/scale-last/" 2>/dev/null
 fi
 
+# P2 Q7 (KS-PLAT-D14): a split run left quiet past the ~80 s that once filled a role's
+# server threads with followers that had left still answers (tools/quiet_split_check.sh).
+echo "-- the quiet split run"
+KSIM_RUNS="$T/runs-quiet" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
+    KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE="$ROOT/topologies/split-stub.yaml" \
+    sh "$ROOT/gates/run.sh" stub "$ROOT/tools/quiet_split_check.sh" > "$T/quiet.out" 2>&1 || rc=1
+grep -E '^QUIET_' "$T/quiet.out"
+grep -q '^QUIET_SPLIT=PASS' "$T/quiet.out" || rc=1
+
 # P2 Q5: the E1 gate in split mode (topologies/split-stub-e1.yaml, a 15 s UE
 # Inactivity Timer): the CU-UP's inactivity report and the release it leads to.
 echo "-- the split E1 run"

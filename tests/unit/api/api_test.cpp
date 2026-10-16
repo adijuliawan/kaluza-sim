@@ -11,6 +11,8 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <thread>
@@ -18,6 +20,7 @@
 
 #include <httplib.h>
 
+#include "api/events_stream.hpp"
 #include "api/http.hpp"
 #include "api/reply.hpp"
 #include "api/wait.hpp"
@@ -169,6 +172,43 @@ TEST(Server, ABurstOfConnectsFindsRoomInTheBacklog) {
         ::close(fd);
     }
     EXPECT_EQ(refused, 0);
+    s.stop();
+    std::filesystem::remove_all(dir);
+}
+
+// KS-PLAT-D14 (LW1a): followers that give up on a quiet node, as the supervisor's relay
+// does every 5 s of silence, free their server threads. Without the stream's blank
+// line each quiet beat, each one held a thread until the next event; with 16 held,
+// the node answered nothing.
+TEST(Server, FollowersThatLeaveAQuietStreamFreeTheirThreads) {
+    const std::string dir = temp_dir();
+    MonotonicClock clock;
+    EventRing ring(64, clock);   // quiet: no event comes
+    std::atomic<bool> stop{false};
+    Server s;
+    s.stream("/v1/events", [&](const Request& req, const Server::Write& write) {
+        stream_events(ring, 0, [](const Event&) { return true; }, req.arg("follow") == "1", stop, write,
+                      std::chrono::milliseconds(100));
+    });
+    s.get("/v1/info", [](const Request&) { return Reply{}; });
+    ASSERT_TRUE(s.listen_unix(dir + "/ctl.sock"));
+    for (int i = 0; i < 24; ++i) {   // more followers than the server has threads
+        httplib::Client c(dir + "/ctl.sock");
+        c.set_address_family(AF_UNIX);
+        c.set_read_timeout(std::chrono::milliseconds(300));   // silence: the follower gives up
+        const auto start = std::chrono::steady_clock::now();
+        (void)c.Get("/v1/events?follow=1&since=0", [start](const char*, std::size_t) {
+            return std::chrono::steady_clock::now() - start < std::chrono::milliseconds(300);   // keepalives: so does it
+        });
+    }
+    httplib::Client c(dir + "/ctl.sock");
+    c.set_address_family(AF_UNIX);
+    c.set_read_timeout(std::chrono::seconds(3));
+    const auto t0 = std::chrono::steady_clock::now();
+    auto res = c.Get("/v1/info");
+    EXPECT_TRUE(res) << "the node answered nothing once 24 followers had left";
+    EXPECT_LT(std::chrono::steady_clock::now() - t0, std::chrono::seconds(2));
+    stop = true;
     s.stop();
     std::filesystem::remove_all(dir);
 }

@@ -29,6 +29,7 @@
 #include <thread>
 #include <vector>
 
+#include "api/events_stream.hpp"
 #include "api/http.hpp"
 #include "api/reply.hpp"
 #include "api/wait.hpp"
@@ -332,13 +333,18 @@ void Supervisor::relay(Child& c) {
         httplib::Client cli(api::socket_target(c.ctl));
         cli.set_address_family(AF_UNIX);
         cli.set_connection_timeout(std::chrono::seconds(2));
-        cli.set_read_timeout(std::chrono::seconds(5));   // a quiet role: reconnect and go on after `since`
+        // A role's stream sends a blank line each quiet second (KS-PLAT-D14), so 5 s with
+        // nothing at all is a role in trouble: reconnect and go on after `since`.
+        cli.set_read_timeout(std::chrono::seconds(5));
         std::string buf;
         (void)cli.Get("/v1/events?follow=1&since=" + std::to_string(since), [&](const char* data, std::size_t n) {
             buf.append(data, n);
             for (std::size_t nl = buf.find('\n'); nl != std::string::npos; nl = buf.find('\n')) {
                 const std::string line = buf.substr(0, nl);
                 buf.erase(0, nl + 1);
+                if (line.empty()) {
+                    continue;   // the stream's keepalive
+                }
                 try {
                     const json j = json::parse(line);
                     Event e;
@@ -581,19 +587,12 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
         const std::string subject = req.arg("subject");
         const std::string prefix = req.arg("filter");
         const bool follow = req.arg("follow") == "1";
-        for (;;) {
-            for (const auto& e : events_.since(since, 1024)) {
-                since = e.seq;
-                if ((subject.empty() || e.subject == subject) && (prefix.empty() || e.name.rfind(prefix, 0) == 0) &&
-                    !write(to_ndjson(e) + "\n")) {
-                    return;
-                }
-            }
-            if (!follow || stop.load()) {
-                return;
-            }
-            (void)events_.wait(since, [](const Event&) { return true; }, std::chrono::milliseconds(1000));
-        }
+        api::stream_events(
+            events_, since,
+            [&](const Event& e) {
+                return (subject.empty() || e.subject == subject) && (prefix.empty() || e.name.rfind(prefix, 0) == 0);
+            },
+            follow, stop, write);
     });
     server.post("/v1/gnb/:name/ue-release", [this, &ue, cucp](const Request& req) {
         if (req.params.at("name") != t_.gnb_name) {

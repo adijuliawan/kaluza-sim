@@ -167,6 +167,10 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
       - Calls to the run then went unanswered one by one. From 09:02 it answered nothing, until the gate timeout at 09:35 (KS-PLAT-T53, D12).
       - One UE (…0008) was left registered with a session. It was re-registered and deregistered at 09:40 with kaluza-core-df's agreement.
       - The window was closed early. LW1b and LW2 move to the next window, after B49's diagnostics.
+    - **LW1a again (2026-10-16 11:01–11:17 KST, release 081050959efb):** the same stall. Its cause was found on the VM, and it is ours (KS-PLAT-D14).
+      - Each role's event stream held a server thread for every supervisor follower that had left.
+      - After about 80 quiet seconds a role answered nothing. Each held 82 to 206 connections on its ctl.sock.
+      - …0008 was again left registered and was again cleaned up (11:19:50, accepted). kaluza-core-92 found nothing of ours left on the core.
     - **LW3** (Q15): the throughput set inside the VM against the scripted core on 127.0.0.x. Nothing crosses `ens19` or the trunk, but it needs the VM free of core sets.
     - **LW4** (Q14): the real card imsi-001010000300100 through the dev-PC bridge (§7).
     - **LW5** (Q14): the full P2 row set in split mode.

@@ -6,6 +6,7 @@
 # platform and codec only; the routes themselves are bound in node/.
 
 add_library(ksim_api STATIC
+    events_stream.cpp
     reply.cpp
     wait.cpp
     http.cpp)
