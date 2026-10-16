@@ -123,7 +123,10 @@ run)
         "$KSIM_CTL" netd teardown "$ns" >/dev/null 2>&1 || true   # one a run that died left
         "$KSIM_CTL" netd setup-node "$ns" --parent ens19 --addr "$(lab_addr "$role")" >/dev/null || exit 1
         "$KSIM_CTL" netd veth "$ns" "$(lab_mid "$role")" >/dev/null || { "$KSIM_CTL" netd teardown "$ns" >/dev/null 2>&1; exit 1; }
-        "$KSIM_CTL" netd exec "$ns" --log "$run_dir/ocudu-$role.out" -- "$bin" -c "$cfg" | sed -n 's/^PID=/PID=/p'
+        # Line-buffered: OCUDU's console to a file is otherwise written only at its exit, and
+        # gates/run.sh waits on its "E1: Listening" lines in the lab (LW2, 2026-10-16).
+        "$KSIM_CTL" netd exec "$ns" --log "$run_dir/ocudu-$role.out" -- stdbuf -oL -eL "$bin" -c "$cfg" |
+            sed -n 's/^PID=/PID=/p'
         echo "NETNS=$ns"
     else
         "$bin" -c "$cfg" > "$run_dir/ocudu-$role.out" 2>&1 &
