@@ -85,7 +85,7 @@ Both run against `ksim-corestub` with the E1 gate (`ksim-p2-e1.sh`) and the P1 s
 
 | Row | What the C4/C5 runs showed |
 |---|---|
-| KS-PLAT-D7 | Building the PDCP timers into E1: asn1c's JER decoder dropped a member written out of ASN.1 order without an error (runtime patch 0008 makes it fail) |
+| KS-PLAT-D10 | Building the PDCP timers into E1: asn1c's JER decoder dropped a member written out of ASN.1 order without an error (runtime patch 0008 makes it fail) |
 | KS-E1AP-B3 | Our CU-CP gave the CU-UP no DL discard timer. E1 makes it optional, but it is the one the UE gets in RRC; now sent |
 
 ### Spec ambiguity
@@ -128,7 +128,7 @@ Each alone blocks all user data.
 `topologies/ocudu-c3-stub-100.yaml` has imsi-001010000300000..099 on 4 farm shards, against `ksim-corestub`. Each run had the C3 gate, the P1 registration and session gates, and the scale gate (`ksim-p2-scale.sh`, 10 UEs at a time).
 - Over 3 runs, every row passed. 100 UEs registered with one session each through OCUDU's CU-CP and CU-UP in 0.9–1.1 s (KS-PLAT-T52). Hook 58 runs the scale gate as `c3-100`.
 - Nothing new from OCUDU. Two things of ours turned up:
-  - KS-PLAT-D8: the control socket's backlog. A burst of `ksim-ctl --parallel` calls lost one.
+  - KS-PLAT-D11: the control socket's backlog. A burst of `ksim-ctl --parallel` calls lost one.
   - The C3 gate left its UE on after deregistering, and the next gate's power-on was refused. The gate now switches the UE off (`--abrupt`).
 - The lab run (LW2) uses `topologies/ocudu-c3-lab.yaml` and `tools/ocudu-peer.sh run --lab`. OCUDU's roles run in our namespaces `ksim-ocucp` (.36) and `ksim-ocuup` (.37), from `topologies/peers/ocudu/*-lab.yml.in` ([`lab.md`](../lab.md) §6).
 

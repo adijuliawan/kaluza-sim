@@ -62,6 +62,7 @@
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -269,6 +270,9 @@ public:
     Result<Fd> dn_tun(const std::string& netns, const DnTunSpec& t);
     /// netd's message for the last request that did not succeed.
     const std::string& last_error() const noexcept { return last_; }
+    /// P2 Q7: how long a call waits for netd's answer; past it the call fails and the
+    /// connection is closed (a late answer would be taken for the next request's).
+    static constexpr std::chrono::seconds kAnswerTimeout{15};
 
 private:
     explicit Client(Fd fd) : fd_(std::move(fd)) {}

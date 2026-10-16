@@ -61,6 +61,11 @@ struct Fcp {
     std::optional<std::uint8_t> sfi() const;
     /// Key references ('83') in the PIN status template DO ('C6').
     std::vector<std::uint8_t> pin_key_references() const;
+    /// 9.5.2: whether the PIN with key reference `ref` is enabled, from PS_DO ('90'):
+    /// b8 of its first octet is the first key reference listed, b7 the next. nullopt
+    /// without 'C6', without PS_DO, or with `ref` not listed. (P2 Q7: a sysmoISIM
+    /// answers VERIFY's status with 63Cx for a disabled PIN1 too.)
+    std::optional<bool> pin_enabled(std::uint8_t ref) const;
 };
 
 Result<Fcp> decode_fcp(ByteView in);

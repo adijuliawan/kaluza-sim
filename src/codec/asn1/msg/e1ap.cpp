@@ -180,7 +180,7 @@ json drb_to_setup(const DrbToSetup& d, const char* flows_field) {
         flows.push_back(flow(f));
     }
     const std::string sn = d.sn_bits == 12 ? "s-12" : "s-18";
-    // In ASN.1 order: asn1c's JER decoder reads members in that order only (KS-PLAT-D7).
+    // In ASN.1 order: asn1c's JER decoder reads members in that order only (KS-PLAT-D10).
     json pdcp = {{"pDCP-SN-Size-UL", sn}, {"pDCP-SN-Size-DL", sn}, {"rLC-Mode", "rlc-am"}};
     if (d.t_reordering_ms) {
         pdcp["t-ReorderingTimer"] = {{"t-Reordering", "ms" + std::to_string(*d.t_reordering_ms)}};

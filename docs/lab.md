@@ -155,6 +155,18 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
          The run waits on OCUDU's console for E1, since its sockets are out of `ss`'s sight. `stop --lab` tears the namespaces down.
       4. The VM has no pycrate venv, so `peer_redact.py` can't run there. The peer's NGAP and E1AP captures are then removed, never kept or copied off in clear (`PEER_REDACTED=removed`).
       5. Afterwards check: `ip netns list` shows no `ksim-` namespace; `pgrep -f peers/ocudu` shows nothing; `ip link show ksim-mid` shows no leg left. Then tell the core session the end time.
+      6. After a run, `grep KSIM_LOOP_STUCK <run>/*.out`. Each line names a role's loop that stopped, with its syscall and descriptor and a backtrace (KS-PLAT-B49).
+    - **What is installed on kaluza-uesim for P2 (D6, D7):**
+
+      | Date (KST) | What | By |
+      |---|---|---|
+      | 2026-10-16 08:53 | ksim-netd v3 from release 545129cb1e88 (`--mid 10.250.0.0/24 --dn 10.60.0.0/24`), unit `ksim-netd.service` | me, in LW1's setup |
+      | 2026-10-16 08:53 | `libmbedcrypto16` 3.6.5-0.1ubuntu2 and `libyaml-cpp0.8` 0.8.0+dfsg-9 (apt), exactly what ldd named for ocucp/ocuup; `libsctp1` and `iperf3` 3.20-2 were already there | me, in LW1's setup |
+    - **LW1a (2026-10-16 08:53–09:35 KST):** the first split run against kaluza-core, from release 545129cb1e88.
+      - The P1 data plane, registration and session gates passed, and idle 13 of 14.
+      - Calls to the run then went unanswered one by one. From 09:02 it answered nothing, until the gate timeout at 09:35 (KS-PLAT-T53, D12).
+      - One UE (…0008) was left registered with a session. It was re-registered and deregistered at 09:40 with kaluza-core-df's agreement.
+      - The window was closed early. LW1b and LW2 move to the next window, after B49's diagnostics.
     - **LW3** (Q15): the throughput set inside the VM against the scripted core on 127.0.0.x. Nothing crosses `ens19` or the trunk, but it needs the VM free of core sets.
     - **LW4** (Q14): the real card imsi-001010000300100 through the dev-PC bridge (§7).
     - **LW5** (Q14): the full P2 row set in split mode.

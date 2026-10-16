@@ -36,7 +36,16 @@ psi=$(printf '%s\n' "$est" | kv PSI); ip=$(printf '%s\n' "$est" | kv IP)
 
 echo "-- the gNB restarted"
 seq=$(ctl info | kv EVENT_SEQ)
-ctl gnb "$GNB" restart >/dev/null || abort "gnb restart refused"
+# Said why when refused (P2 Q7: in LW1a it was refused with nothing to go on); one
+# refused while a restart is still under way is asked again.
+_i=0
+until out=$(ctl gnb "$GNB" restart 2>&1); do
+    case "$(printf '%s\n' "$out" | kv CAUSE)" in
+        *restarting*) _i=$((_i + 1)); [ "$_i" -gt 75 ] && abort "gnb restart refused: still restarting" ;;
+        *) abort "gnb restart refused: $(printf '%s\n' "$out" | kv CAUSE)" ;;
+    esac
+    sleep 0.2
+done
 ng=$(ctl wait ran.ng.setup --since "$seq" --timeout 30s | kv EVENT)
 row amf-ueransim.032 '^ran.ng.setup$' "$ng"
 # The UE lost the cell (radio link failure) and recovers by a mobility registration

@@ -247,6 +247,11 @@ def documents(rows: list[dict] | None = None, built_rows: list[dict] | None = No
     homeless = sorted({r["area"] for r in rows} - set(AREAS))
     if homeless:
         raise RegisterError(f"rows.tsv has rows of areas with no register: {homeless}")
+    # P2 Q7: an ID is one row (KS-PLAT-D8 was given twice and the registers took both).
+    ids = [r["id"] for r in rows]
+    twice = sorted({i for i in ids if ids.count(i) > 1})
+    if twice:
+        raise RegisterError(f"rows.tsv gives these IDs to more than one row: {twice}")
     versions = spec_versions()
     docs = {COMP / area / "README.md": register(area, reqs, rows, built, versions) for area in AREAS}
     docs[COMP / "deviations.md"] = deviations(rows)
@@ -263,7 +268,8 @@ def on_disk(p: Path) -> str | None:
 
 def self_test() -> int:
     """Must-fail cases: a hand-edited register, a built requirement that does
-    not exist and a row of an area with no register are each caught."""
+    not exist, a row of an area with no register and an ID given to two rows
+    are each caught."""
     docs = documents()
     results = []
     first = next(iter(docs))
@@ -282,6 +288,12 @@ def self_test() -> int:
         results.append(("a row of an area with no register fails", False))
     except RegisterError:
         results.append(("a row of an area with no register fails", True))
+    try:
+        first_row = tsv(COMP / "rows.tsv")[0]
+        documents(rows=tsv(COMP / "rows.tsv") + [dict(first_row)])
+        results.append(("an ID given to two rows fails", False))
+    except RegisterError:
+        results.append(("an ID given to two rows fails", True))
     for name, ok in results:
         print(f"REGISTERS_SELFTEST {'CAUGHT' if ok else 'MISSED'} {name}")
     ok = all(c for _, c in results)

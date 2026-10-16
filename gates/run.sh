@@ -51,6 +51,12 @@ stub_pid=""; ksim_pid=""
 # included (W1, 2026-10-15).
 switch_off_left() {
     _n=$("$KSIM_CTL" --run "$RUN" ues 2>/dev/null | sed -n 's/^UES=//p')
+    if [ -z "$_n" ]; then
+        # P2 Q7 (LW1a): a run that no longer answers cannot switch its UEs off; on a real
+        # core they stay registered, so whoever runs this hears it.
+        echo "CLEANUP: the run did not answer; UEs may be left registered on $core" >&2
+        return
+    fi
     _i=1
     while [ "$_i" -le "${_n:-0}" ]; do
         if [ "$("$KSIM_CTL" --run "$RUN" ue "$_i" status 2>/dev/null | sed -n 's/^RM_STATE=//p')" = RM-REGISTERED ]; then
@@ -84,7 +90,19 @@ cleanup() {
     if [ -n "$peer_dir" ] && [ "$peer_cuup" = 1 ] && [ "$peer_cucp" = 0 ]; then
         stop_peers; peers_stopped=1
     fi
-    [ -n "$ksim_pid" ] && { "$KSIM_CTL" --run "$RUN" stop >/dev/null 2>&1; wait "$ksim_pid" 2>/dev/null; }
+    if [ -n "$ksim_pid" ]; then
+        "$KSIM_CTL" --run "$RUN" stop >/dev/null 2>&1
+        # Bounded (P2 Q7, LW1a): a run that does not stop in 90 s is ended, its roles
+        # with it, and the namespaces it made may be left for netd's gc.
+        _w=0
+        while kill -0 "$ksim_pid" 2>/dev/null && [ "$_w" -lt 900 ]; do sleep 0.1; _w=$((_w + 1)); done
+        if kill -0 "$ksim_pid" 2>/dev/null; then
+            echo "CLEANUP: ksim did not stop in 90 s; ended (check ip netns for ksim- left)" >&2
+            pkill -TERM -P "$ksim_pid" 2>/dev/null; kill -TERM "$ksim_pid" 2>/dev/null; sleep 5
+            pkill -KILL -P "$ksim_pid" 2>/dev/null; kill -KILL "$ksim_pid" 2>/dev/null
+        fi
+        wait "$ksim_pid" 2>/dev/null
+    fi
     if [ -n "$peer_dir" ]; then
         [ "$peers_stopped" = 1 ] || stop_peers
         [ -d "$RUN" ] && mv "$peer_dir" "$RUN/peer" 2>/dev/null

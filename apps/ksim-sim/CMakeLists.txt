@@ -17,6 +17,6 @@ endif()
 
 add_executable(ksim-sim main.cpp kaluza.cpp)
 target_include_directories(ksim-sim SYSTEM PRIVATE ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
-target_compile_definitions(ksim-sim PRIVATE CPPHTTPLIB_LISTEN_BACKLOG=128)   # as ksim::api's (KS-PLAT-D8)
+target_compile_definitions(ksim-sim PRIVATE CPPHTTPLIB_LISTEN_BACKLOG=128)   # as ksim::api's (KS-PLAT-D11)
 target_link_libraries(ksim-sim PRIVATE ksim_sim_bundle ksim_sim_card ksim::uicc ksim::net ksim::crypto CLI11::CLI11
                                        nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto ksim::warnings)

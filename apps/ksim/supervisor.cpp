@@ -13,6 +13,7 @@
 #include <httplib.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -170,7 +171,11 @@ private:
     void relay(Child& c);
     void reap();
     void link_captures();
-    Reply call(const Child& c, const std::string& method, const std::string& path, const json& body = json()) const;
+    /// `wait`: how long the role may take to answer (P2 Q7: a call to a role that does not
+    /// answer holds one of the supervisor's server threads that long, so never longer than
+    /// the request itself can take).
+    Reply call(const Child& c, const std::string& method, const std::string& path, const json& body = json(),
+               std::chrono::milliseconds wait = std::chrono::seconds(45)) const;
     Reply forward(const Child& c, const Request& r) const;
     void restart_gnb();
 
@@ -271,7 +276,7 @@ void Supervisor::stop_child(Child& c) {
         return;
     }
     c.expected_exit = true;
-    (void)call(c, "POST", "/v1/stop");
+    (void)call(c, "POST", "/v1/stop", json(), std::chrono::seconds(5));   // one that does not answer is signalled
     for (int i = 0; i < 100; ++i) {   // 10 s for a graceful stop
         if (c.pid.load() <= 0) {
             return;
@@ -375,11 +380,12 @@ void Supervisor::link_captures() {
     }
 }
 
-Reply Supervisor::call(const Child& c, const std::string& method, const std::string& path, const json& body) const {
+Reply Supervisor::call(const Child& c, const std::string& method, const std::string& path, const json& body,
+                       std::chrono::milliseconds wait) const {
     httplib::Client cli(api::socket_target(c.ctl));
     cli.set_address_family(AF_UNIX);
     cli.set_connection_timeout(std::chrono::seconds(5));
-    cli.set_read_timeout(kMaxWait + std::chrono::seconds(10));
+    cli.set_read_timeout(std::min(wait, kMaxWait + std::chrono::seconds(10)));
     auto res = method == "GET" ? cli.Get(path) : cli.Post(path, body.is_null() ? "{}" : body.dump(), "application/json");
     if (!res) {
         return Reply::fail(Exit::abort, "the " + c.role + " role does not answer");
@@ -396,7 +402,15 @@ Reply Supervisor::forward(const Child& c, const Request& r) const {
         path += encode(k) + "=" + encode(v);
         sep = '&';
     }
-    return call(c, r.method, path, r.body);
+    // The request's own bound: ksim-ctl waits its --timeout (30 s by default) plus the
+    // wait_ms or timeout_ms it sends with what may block, then 5 s; the role gets 15 s past.
+    long extra = 0;
+    for (const char* k : {"wait_ms", "timeout_ms"}) {
+        if (r.has(k)) {
+            extra = std::max(extra, std::atol(r.arg(k, "0").c_str()));
+        }
+    }
+    return call(c, r.method, path, r.body, std::chrono::milliseconds(30'000 + extra) + std::chrono::seconds(15));
 }
 
 void Supervisor::restart_gnb() {

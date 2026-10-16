@@ -7,7 +7,7 @@ out of ASN.1 order) is not found there and, in an extensible SEQUENCE, is
 skipped as an unknown extension: the member is dropped without an error.
 Our builders then lose an optional member written after its successor
 (P2 Q5: E1AP PDCP-Configuration t-ReorderingTimer after discardTimer). The
-decoder now refuses such a value. Row KS-PLAT-D7. Applied by
+decoder now refuses such a value. Row KS-PLAT-D10. Applied by
 cmake/asn1c.cmake to a build-tree copy.
 
 --- a/constr_SEQUENCE_jer.c

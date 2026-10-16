@@ -144,7 +144,7 @@ TEST(Server, ServesRoutesOnAUnixSocketAndRefusesWhatItCannotRead) {
     std::filesystem::remove_all(dir);
 }
 
-// KS-PLAT-D8: a burst of connects, as ksim-ctl --parallel 64 makes, all get in. With
+// KS-PLAT-D11: a burst of connects, as ksim-ctl --parallel 64 makes, all get in. With
 // httplib's backlog of 5 a non-blocking AF_UNIX connect past it is EAGAIN, a failed call.
 TEST(Server, ABurstOfConnectsFindsRoomInTheBacklog) {
     const std::string dir = temp_dir();

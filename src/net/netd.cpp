@@ -684,10 +684,12 @@ Result<void> run_server(const std::string& path, Server& s, const volatile int& 
         ::unlink(path.c_str());
     }
     if (::bind(listener.get(), reinterpret_cast<const sockaddr*>(&a), sizeof(a)) != 0 ||
-        ::chmod(path.c_str(), 0666) != 0 || ::listen(listener.get(), 8) != 0) {
+        ::chmod(path.c_str(), 0666) != 0 || ::listen(listener.get(), 32) != 0) {
         return make_error(Errc::io, static_cast<std::uint32_t>(errno), "netd: cannot listen");
     }
-    constexpr std::size_t kMaxConns = 8;
+    // Each role holds one connection, and each farm lane past the first one more
+    // (P2 Q7): 8 was too few for farm: {shards: 8}; a connection past this is closed.
+    constexpr std::size_t kMaxConns = 32;
     std::vector<Fd> conns;
     while (stop == 0) {
         reap_children();
@@ -735,10 +737,20 @@ Result<Client> Client::connect(const std::string& path) {
     if (::connect(fd.get(), reinterpret_cast<const sockaddr*>(&a), sizeof(a)) != 0) {
         return make_error(Errc::io, static_cast<std::uint32_t>(errno), "netd: no ksim-netd answers");
     }
+    // P2 Q7 (LW1a): a netd that does not answer must not hold a role's loop for good.
+    // Every operation is done in milliseconds; past kAnswerTimeout the call fails.
+    timeval tv{};
+    tv.tv_sec = kAnswerTimeout.count();
+    (void)::setsockopt(fd.get(), SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    (void)::setsockopt(fd.get(), SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     return Client(std::move(fd));
 }
 
 Result<Reply> Client::call(const Request& r, std::optional<Fd>* fd, const std::vector<int>& pass) {
+    if (!fd_) {
+        last_ = "netd: this connection gave up on an answer before";
+        return make_error(Errc::closed, 0, "netd: the connection is closed (last_error())");
+    }
     Bytes req = encode(r);
     iovec out_iov{req.data(), req.size()};
     msghdr out{};
@@ -769,6 +781,13 @@ Result<Reply> Client::call(const Request& r, std::optional<Fd>* fd, const std::v
     m.msg_control = ctrl.data();
     m.msg_controllen = ctrl.size();
     const ssize_t n = ::recvmsg(fd_.get(), &m, MSG_CMSG_CLOEXEC);
+    if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        // A late answer would be taken for the next request's: the connection goes.
+        const int e = errno;
+        fd_ = Fd();
+        last_ = "netd: no answer in " + std::to_string(kAnswerTimeout.count()) + " s";
+        return make_error(Errc::io, static_cast<std::uint32_t>(e), "netd: no answer (last_error())");
+    }
     if (n <= 0) {
         return make_error(Errc::io, static_cast<std::uint32_t>(errno), "netd: no reply");
     }

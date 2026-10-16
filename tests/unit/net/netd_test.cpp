@@ -531,3 +531,28 @@ TEST(Netd, DnNamespacesCarryATunInTheirRangeAndExecGoesToAnyNamespaceNetdMade) {
 }
 
 } // namespace ksim::net::netd
+
+namespace ksim::net::netd {
+namespace {
+
+// P2 Q7 (LW1a): a netd that never answers fails the call instead of holding the
+// caller, and the connection goes, so a late answer is never taken for the next
+// request's. (Client::connect sets kAnswerTimeout; this end gets 100 ms.)
+TEST(Netd, ACallWithNoAnswerFailsAndClosesTheConnection) {
+    int sv[2] = {-1, -1};
+    ASSERT_EQ(::socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, sv), 0);
+    timeval tv{};
+    tv.tv_usec = 100'000;
+    ASSERT_EQ(::setsockopt(sv[0], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)), 0);
+    Client c = Client::adopt(Fd(sv[0]));
+    Fd silent(sv[1]);   // reads nothing, answers nothing
+    auto first = c.list();
+    ASSERT_FALSE(first);
+    EXPECT_NE(c.last_error().find("no answer"), std::string::npos) << c.last_error();
+    auto second = c.list();
+    ASSERT_FALSE(second);
+    EXPECT_EQ(second.error().code, Errc::closed);
+}
+
+} // namespace
+} // namespace ksim::net::netd

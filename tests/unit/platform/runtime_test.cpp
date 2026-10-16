@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 
 #include <sys/epoll.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -170,6 +171,37 @@ TEST(Shard, TasksRunOnItsThreadAndTimersFire) {
     EXPECT_LT(fired_at.load(), scheduled_at + 1000);
     EXPECT_EQ(s.timers_fired(), 1U);
     EXPECT_EQ(Shard::current(), nullptr);
+}
+
+// A loop blocked in a syscall fires no late timer, so the watchdog's lag check never
+// runs; the heartbeat's monitor names the syscall and the descriptor (LW1a, P2 Q7).
+TEST(Shard, ALoopBlockedInASyscallIsReportedWithItsDescriptor) {
+    MonotonicClock clock;
+    Shard s(5, 64, clock);
+    std::atomic<int> lags{0};
+    s.set_watchdog(250, [&](Millis) { ++lags; }, 300);
+    int p[2] = {-1, -1};
+    ASSERT_EQ(::pipe(p), 0);
+    testing::internal::CaptureStderr();
+    s.start();
+    ASSERT_TRUE(s.post([&] {
+        char c = 0;
+        (void)!::read(p[0], &c, 1);   // blocks until the test writes
+    }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1'500));
+    const char c = 'x';
+    ASSERT_EQ(::write(p[1], &c, 1), 1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    s.stop();
+    s.join();
+    const std::string err = testing::internal::GetCapturedStderr();
+    ::close(p[0]);
+    ::close(p[1]);
+    EXPECT_NE(err.find("KSIM_LOOP_STUCK shard=5 "), std::string::npos) << err;
+    EXPECT_NE(err.find("syscall=\"0 "), std::string::npos) << err;   // read(2) on x86-64
+    EXPECT_NE(err.find("fd1=pipe:["), std::string::npos) << err;
+    EXPECT_EQ(err.find("KSIM_LOOP_STUCK", err.find("KSIM_LOOP_STUCK") + 1), std::string::npos);   // once
+    EXPECT_GE(lags.load(), 1);   // and once unblocked, the late heartbeat is a lag
 }
 
 TEST(Shard, AFullInboxRefusesAndManyThreadsPost) {

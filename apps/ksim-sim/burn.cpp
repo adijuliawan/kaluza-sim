@@ -190,8 +190,14 @@ int burn(const BurnOptions& o, const Xfer& x) {
         return 1;
     }
     std::cout << "ADM1_TRIES_LEFT=" << (adm->left ? std::to_string(*adm->left) : "unknown") << "\n";
-    const bool pin1_enabled = pin1->left.has_value();
-    std::cout << "PIN1=" << (pin1_enabled ? "enabled" : (pin1->sw == 0x9000 ? "disabled" : "unknown")) << "\n";
+    // PIN1's state from ADF.USIM's PS_DO (9.5.2), when its FCP says: a sysmoISIM answers
+    // VERIFY's status with 63Cx for a disabled PIN1 too (KS-UICC-D4, the first real burn).
+    // Without a PS_DO, VERIFY's answer as before.
+    const auto adf_fcp = fcp_of(*adf);
+    const std::optional<bool> ps_pin1 = adf_fcp ? adf_fcp->pin_enabled(0x01) : std::nullopt;
+    const bool pin1_enabled = ps_pin1.value_or(pin1->left.has_value());
+    std::cout << "PIN1=" << (pin1_enabled ? "enabled" : (ps_pin1 || pin1->sw == 0x9000 ? "disabled" : "unknown"))
+              << "\n";
     if (adm->sw == 0x6983) {
         std::cerr << "ksim-sim: ADM1 is blocked on this card\n";
         return 3;

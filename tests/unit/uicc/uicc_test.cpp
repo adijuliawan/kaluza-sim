@@ -155,7 +155,24 @@ TEST(Fcp, MasterFile) {
     EXPECT_EQ(*f->file_id(), 0x3F00);
     EXPECT_EQ(*f->life_cycle(), 0x05);
     EXPECT_EQ(f->pin_key_references(), (std::vector<std::uint8_t>{0x01, 0x81, 0x0A}));
+    // PS_DO '60': b8 (PIN1, '01') clear, b7 ('81') and b6 (ADM1, '0A') set (9.5.2)
+    EXPECT_EQ(f->pin_enabled(0x01), std::optional<bool>(false));
+    EXPECT_EQ(f->pin_enabled(0x81), std::optional<bool>(true));
+    EXPECT_EQ(f->pin_enabled(0x0A), std::optional<bool>(true));
+    EXPECT_EQ(f->pin_enabled(0x02), std::nullopt);   // not listed
     EXPECT_EQ(*encode_fcp(*f), kMf);
+}
+
+// KS-UICC-D4: the PIN's state comes from PS_DO, its bits in the order of the key
+// references, a usage qualifier ('95') before a reference not counted as one.
+TEST(Fcp, PinStateFromThePsDoWithUsageQualifiers) {
+    auto f = decode_fcp(hex("6216" "82027821" "83023f00" "c60c" "900140" "950108" "830101" "830181"));
+    ASSERT_TRUE(f) << f.error().what;
+    EXPECT_EQ(f->pin_enabled(0x01), std::optional<bool>(false));
+    EXPECT_EQ(f->pin_enabled(0x81), std::optional<bool>(true));
+    auto no_c6 = decode_fcp(hex("620b" "82027821" "83023f00" "8a0105"));
+    ASSERT_TRUE(no_c6) << no_c6.error().what;
+    EXPECT_EQ(no_c6->pin_enabled(0x01), std::nullopt);
 }
 
 TEST(Fcp, ElementaryFilesAndTheirSfi) {

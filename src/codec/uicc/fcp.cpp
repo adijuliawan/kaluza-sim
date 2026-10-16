@@ -236,6 +236,39 @@ std::vector<std::uint8_t> Fcp::pin_key_references() const {
     return out;
 }
 
+std::optional<bool> Fcp::pin_enabled(std::uint8_t ref) const {
+    const Tlv* c6 = root.find(0xC6);
+    if (c6 == nullptr) {
+        return std::nullopt;
+    }
+    auto inner = c6->constructed() ? std::optional(c6->children) : std::nullopt;
+    if (!inner) {
+        if (auto parsed = decode_ber(c6->value); parsed) {
+            inner = std::move(*parsed);
+        }
+    }
+    if (!inner) {
+        return std::nullopt;
+    }
+    const Bytes* ps = nullptr;   // into *inner, which outlives it
+    std::size_t index = 0;
+    std::optional<std::size_t> at;
+    for (const Tlv& t : *inner) {
+        if (t.tag == 0x90) {
+            ps = &t.value;
+        } else if (t.tag == 0x83 && t.value.size() == 1) {
+            if (t.value[0] == ref && !at) {
+                at = index;
+            }
+            ++index;
+        }
+    }
+    if (ps == nullptr || !at || *at / 8 >= ps->size()) {
+        return std::nullopt;
+    }
+    return ((*ps)[*at / 8] & (0x80U >> (*at % 8))) != 0;
+}
+
 Result<Fcp> decode_fcp(ByteView in) {
     auto objs = decode_ber(in);
     if (!objs) {

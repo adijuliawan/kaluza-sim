@@ -66,7 +66,12 @@ public:
     Millis max_lag_ms() const noexcept { return max_lag_.load(std::memory_order_relaxed); }
     /// P2 Q7, the watchdog: `on_lag(lag_ms)` runs on the shard when a timer fires more
     /// than `threshold` ms late, at most once a second. Set before the shard runs work.
-    void set_watchdog(Millis threshold, std::function<void(Millis)> on_lag);
+    /// With it the shard also beats once a second, and a monitor thread reports a loop
+    /// that missed its beat for kStuckMs (a blocked loop fires no late timer to tell):
+    /// one KSIM_LOOP_STUCK line on stderr with the thread's syscall, kernel wait and,
+    /// for a descriptor, what it is, then the thread's backtrace (LW1a, 2026-10-16).
+    static constexpr Millis kStuckMs = 8'000;
+    void set_watchdog(Millis threshold, std::function<void(Millis)> on_lag, Millis stuck_after = kStuckMs);
 
 private:
     void loop();
@@ -90,7 +95,16 @@ private:
     std::function<void(Millis)> on_lag_;
     Millis last_lag_report_ = 0;
     bool lag_reported_ = false;
+    Millis stuck_after_ = kStuckMs;
+    std::atomic<Millis> beat_{0};            // the heartbeat's last run, by the clock
+    std::atomic<int> tid_{0};                // the loop thread's kernel id, for /proc
+    std::atomic<bool> monitor_stop_{false};
+    std::function<void()> heartbeat_;
+    void heartbeat();
+    void monitor();
+    void report_stuck(Millis for_ms) const;
     std::thread thread_;
+    std::thread monitor_;
 };
 
 } // namespace ksim
