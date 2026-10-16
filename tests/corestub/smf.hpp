@@ -54,7 +54,14 @@ struct SessionProfile {
     std::uint16_t five_qi = 9;
     std::uint32_t ambr_mbps = 1000;                // session-AMBR, both ways
     bool default_rule = true;                      // false: the accept's rules carry none (a UE check)
-    std::string up_integrity = "not-needed";       // the gNB's UP security indication
+    // The gNB's UP Security Indication (TS 38.413 9.3.1.27; P2 Q9): each "required",
+    // "preferred" or "not-needed"; "absent" for either leaves the IE out (kaluza-core's
+    // SMF today). The maximum integrity-protected data rates, when set: "bitrate64kbs"
+    // or "maximum-UE-rate".
+    std::string up_integrity = "not-needed";
+    std::string up_confidentiality = "required";
+    std::optional<std::string> up_rate_ul;
+    std::optional<std::string> up_rate_dl;
 
     static SessionProfile from_yaml(const Yaml& y);
 };

@@ -15,6 +15,9 @@
 //       cucp: {ng_bind: 127.0.0.2}           # P2 Q5: ue_inactivity_s: N (1..7200, default 7200)
 //                                            # P2 Q8: nea: [2, 1, 0], nia: [2, 1] (the defaults; 0 needs allow_null),
 //                                            #        t_reordering_ms: N (TS 38.331's values; default infinity)
+//                                            # P2 Q9: up_policy: {preferred_integrity: true, preferred_confidentiality:
+//                                            #        true, absent_integrity: false, absent_confidentiality: true,
+//                                            #        integrity_possible: true} (the defaults)
 //       cuup: {n3_bind: 127.0.0.2}          # N3 (GTP-U 2152); default: the ng_bind address
 //       dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
 //   ues:
@@ -56,6 +59,7 @@
 #include <vector>
 
 #include "node/aio/capture.hpp"
+#include "proc/ran/up_security.hpp"
 
 #include "platform/result.hpp"
 #include "platform/transport.hpp"
@@ -144,7 +148,8 @@ struct Topology {
     std::vector<std::uint8_t> nia_pref{2, 1};
     bool alg_pref_given = false;
     std::optional<int> t_reordering_ms;            // P2 Q8: cucp: {t_reordering_ms: N}; absent: infinity
-    UserPlaneCapture capture_up = UserPlaneCapture::full;   // P2 Q8: capture: {user_plane: full|headers|off}   // a listed 0 needs allow_null (the default NEA0 is skipped without it)
+    UserPlaneCapture capture_up = UserPlaneCapture::full;   // P2 Q8: capture: {user_plane: full|headers|off}
+    proc::ran::UpPolicy up_policy;                 // P2 Q9: cucp: {up_policy: {...}}   // a listed 0 needs allow_null (the default NEA0 is skipped without it)
     /// NAS in clear in the Uu capture (KS-CTL-004: only when asked for; ksim
     /// run --plain-nas). Without it the Uu capture holds RRC, and the NAS
     /// inside it as it went over the air.

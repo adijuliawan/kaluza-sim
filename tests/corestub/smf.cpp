@@ -85,7 +85,8 @@ ie::SessionAmbr ambr(std::uint32_t mbps) {
 
 SessionProfile SessionProfile::from_yaml(const Yaml& y) {
     y.only({"establishment", "reject_cause", "backoff_s", "rejects", "dnns", "pool", "dns", "dn", "mtu", "qfi", "five_qi",
-            "ambr_mbps", "default_rule", "up_integrity", "backoff_dnn", "backoff_dnn_s", "backoff_dnn_rejects"});
+            "ambr_mbps", "default_rule", "up_integrity", "up_confidentiality", "up_rate_ul", "up_rate_dl",
+            "backoff_dnn", "backoff_dnn_s", "backoff_dnn_rejects"});
     SessionProfile p;
     const std::string e = y.get<std::string>("establishment", "accept");
     if (e == "accept") {
@@ -117,6 +118,13 @@ SessionProfile SessionProfile::from_yaml(const Yaml& y) {
     p.ambr_mbps = y.get<std::uint32_t>("ambr_mbps", p.ambr_mbps);
     p.default_rule = y.get<bool>("default_rule", p.default_rule);
     p.up_integrity = y.get<std::string>("up_integrity", p.up_integrity);
+    p.up_confidentiality = y.get<std::string>("up_confidentiality", p.up_confidentiality);
+    if (y.has("up_rate_ul")) {
+        p.up_rate_ul = y.get<std::string>("up_rate_ul", "maximum-UE-rate");
+    }
+    if (y.has("up_rate_dl")) {
+        p.up_rate_dl = y.get<std::string>("up_rate_dl", "maximum-UE-rate");
+    }
     p.backoff_dnn = y.get<std::string>("backoff_dnn", p.backoff_dnn);
     p.backoff_dnn_s = y.get<int>("backoff_dnn_s", p.backoff_dnn_s);
     p.backoff_dnn_rejects = y.get<int>("backoff_dnn_rejects", p.backoff_dnn_rejects);
@@ -358,7 +366,14 @@ std::vector<SmAction> Smf::on_establishment(const std::string& supi, std::uint8_
     item.transfer.session_ambr = ngap::Ambr{std::uint64_t{p_.ambr_mbps} * 1'000'000, std::uint64_t{p_.ambr_mbps} * 1'000'000};
     item.transfer.ul = upf_ != nullptr ? upf_->tunnel(s.ul_teid) : ngap::GtpTunnel{{127, 0, 0, 1}, s.ul_teid};
     item.transfer.type = "ipv4";
-    item.transfer.security = ngap::SecurityIndication{p_.up_integrity, "required"};
+    if (p_.up_integrity != "absent" && p_.up_confidentiality != "absent") {
+        ngap::SecurityIndication si;
+        si.integrity = p_.up_integrity;
+        si.confidentiality = p_.up_confidentiality;
+        si.max_rate_ul = p_.up_rate_ul;
+        si.max_rate_dl = p_.up_rate_dl;
+        item.transfer.security = si;
+    }
     item.transfer.flows = {ngap::QosFlowRequest{p_.qfi, p_.five_qi, ngap::Arp{}}};
     s.setup = item;
     sessions_[{supi, psi}] = s;

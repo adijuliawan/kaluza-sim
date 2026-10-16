@@ -168,6 +168,11 @@ The rules are enforced by PRIVATE CMake link graphs plus `tools/guards/check_lay
   - NEA1/NIA1 run end to end at AS (on the stub and with OCUDU's CU-CP) and at NAS (the stub's `nas-alg`).
   - Each PDCP entity keys its algorithms once (`crypto/as_security.hpp`), builds and checks PDUs in one buffer, and delivers in-order PDUs without the reordering map.
   - The user plane's capture is `full`, `headers` or `off`. `ksim-bench` measures the per-packet costs, and CI bounds them.
+- P2 Q9 brought the UP security policy end to end (rows KS-NGAP-B8, D4, G5, T3).
+  - The CU-CP decides each session's integrity and ciphering from the SMF's Security Indication, or from its local policy when there is none, in which case an event says so.
+  - It refuses a "required" integrity it cannot do with the TS 38.413 cause, and reports a "preferred" in the Security Result.
+  - The decision reaches the CU-UP over E1 and the UE in its PDCP-Config (`cipheringDisabled`).
+  - The maximum integrity-protected data rates are carried but not enforced.
 
 ## 4. Codec pipelines
 

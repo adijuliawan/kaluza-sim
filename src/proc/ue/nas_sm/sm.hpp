@@ -59,6 +59,10 @@ struct SmTimerValues {
 struct SmConfig {
     std::string id;                    // the events' subject
     SmTimerValues timers;
+    // P2 Q9 (TS 24.501 9.11.4.7): the UE's maximum data rate for UP integrity, uplink and
+    // downlink, as its persona's phone sent it (0x00 64 kbit/s, 0x01 NULL, 0xFF full).
+    std::uint8_t ip_max_rate_ul = 0xFF;
+    std::uint8_t ip_max_rate_dl = 0xFF;
     Millis default_backoff = 720'000;  // §6.4.1.4.3: 12 minutes with no SM Retry Timer configured
 };
 

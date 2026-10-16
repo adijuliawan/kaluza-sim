@@ -988,6 +988,51 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         });
         return s ? *s : unsound();
     });
+    // P2 Q9: the CU-CP's local UP security policy, read and set (rows ksim-p2.up-*): each of
+    // preferred_integrity, preferred_confidentiality, absent_integrity, absent_confidentiality
+    // and integrity_possible as 0|1; the ones not given keep their value.
+    server.post("/v1/gnb/:name/up-policy", [&aio, &t](const Request& req) {
+        if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
+            return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        std::map<std::string, std::string> set;
+        for (const char* k : {"preferred_integrity", "preferred_confidentiality", "absent_integrity", "absent_confidentiality",
+                              "integrity_possible"}) {
+            if (req.has(k)) {
+                const std::string v = req.arg(k);
+                if (v != "0" && v != "1") {
+                    return Reply::fail(Exit::usage, std::string(k) + " is 0 or 1");
+                }
+                set[k] = v;
+            }
+        }
+        auto s = aio.call<Reply>([&aio, set] {
+            proc::ran::UpPolicy p = aio.cucp().up_policy();
+            for (const auto& [k, v] : set) {
+                const bool on = v == "1";
+                if (k == "preferred_integrity") {
+                    p.preferred_integrity = on;
+                } else if (k == "preferred_confidentiality") {
+                    p.preferred_confidentiality = on;
+                } else if (k == "absent_integrity") {
+                    p.absent_integrity = on;
+                } else if (k == "absent_confidentiality") {
+                    p.absent_confidentiality = on;
+                } else {
+                    p.integrity_possible = on;
+                }
+            }
+            aio.cucp().set_up_policy(p);
+            Reply r;
+            r.set("PREFERRED_INTEGRITY", p.preferred_integrity ? "1" : "0");
+            r.set("PREFERRED_CONFIDENTIALITY", p.preferred_confidentiality ? "1" : "0");
+            r.set("ABSENT_INTEGRITY", p.absent_integrity ? "1" : "0");
+            r.set("ABSENT_CONFIDENTIALITY", p.absent_confidentiality ? "1" : "0");
+            r.set("INTEGRITY_POSSIBLE", p.integrity_possible ? "1" : "0");
+            return r;
+        });
+        return s ? *s : unsound();
+    });
     server.post("/v1/gnb/:name/ue-release", [&aio, &t](const Request& req) {
         if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
             return Reply::fail(Exit::unknown, "no such gNB");

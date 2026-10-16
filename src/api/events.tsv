@@ -102,6 +102,7 @@ ran.e1.error	37.483 10	an E1AP message that did not decode, was not expected, or
 ran.cuup.bearer.setup	37.483 8.3.1	the CU-UP set up a session in a bearer context (setup or modification); cu_up_ue, psi, drbs, integrity, ciphering, t_reordering (ms of its first DRB's entity, or infinity; P2 Q8)
 ran.cuup.bearer.release	37.483 8.3.4	the CU-UP released a session (modification) or a whole bearer context (release); cu_up_ue, psi (or all)
 ran.gtpu.error_indication	29.281 7.3.1	a GTP-U ERROR INDICATION sent or taken; direction=tx|rx, teid, from
+ran.up.security	38.413 8.2.1.2	the CU-CP's UP security decision for a session (TS 33.501 6.6.1; P2 Q9): ran_ue, psi, indication=present|absent (absent: the CU-CP's default policy), asked=<integrity>/<confidentiality> or -, integrity=0|1, confidentiality=0|1, result=set-up or the refusal's cause
 ran.session.setup	38.413 8.2.1.2	PDU SESSION RESOURCE SETUP done for a session (E1, F1 and the UE's DRB); ran_ue, psi, drb, integrity
 ran.session.failure	38.413 8.2.1.2	sessions the gNB could not set up (answered as failed); ran_ue, cause
 ran.session.release	38.413 8.2.2.2	a session's resources released at the CU-CP after the UE's reconfiguration; ran_ue, psi

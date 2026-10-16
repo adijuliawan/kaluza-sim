@@ -184,7 +184,8 @@ Result<std::uint8_t> Sm::establish(const SessionRequest& r) {
     s.info.snssai = r.snssai;
     const std::uint8_t pti = next_pti();
     nas::Message m = make(kEstablishmentRequest, psi, pti);
-    (void)nas::set(m, "Integrity protection maximum data rate", ie::IntegrityProtectionMaxDataRate{}.encode());
+    (void)nas::set(m, "Integrity protection maximum data rate",
+                   ie::IntegrityProtectionMaxDataRate{cfg_.ip_max_rate_ul, cfg_.ip_max_rate_dl}.encode());
     (void)nas::set(m, "PDU session type", Bytes{ie::PduSessionType::ipv4});
     (void)nas::set(m, "SSC mode", Bytes{1});
     nas::Epco epco;

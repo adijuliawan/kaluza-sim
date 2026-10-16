@@ -69,7 +69,7 @@ echo "-- the split run"
 KSIM_RUNS="$T/runs-split" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
     KSIM_SIM_TRACE=1 KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE="$ROOT/topologies/split-stub.yaml" \
     sh "$ROOT/gates/run.sh" stub "$ROOT"/gates/verification/ksim-p1-*.sh "$ROOT/gates/verification/ksim-p2-split.sh" \
-    "$ROOT/gates/verification/ksim-p2-ops.sh" \
+    "$ROOT/gates/verification/ksim-p2-ops.sh" "$ROOT/gates/verification/ksim-p2-up.sh" \
     > "$T/split.out" 2>&1 || rc=1
 cat "$T/split.out"
 SRUN="$(sed -n 's/^RUN_DIR=//p' "$T/split.out")"
@@ -87,10 +87,12 @@ else
     echo "COMPONENT: no split run directory"; rc=1
 fi
 
-# P2 Q7: the operations gate (watchdog, metrics) all in one, scored against the P2 rows.
+# P2 Q7, Q9: the operations gate (watchdog, metrics) and the UP security policy gate all in
+# one, scored against the P2 rows.
 echo "-- the aio P2 run"
 KSIM_RUNS="$T/runs-ops" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
-    KSIM_PHASE=p2 sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p2-ops.sh" > "$T/ops.out" 2>&1 || rc=1
+    KSIM_PHASE=p2 sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p2-ops.sh" \
+    "$ROOT/gates/verification/ksim-p2-up.sh" > "$T/ops.out" 2>&1 || rc=1
 cat "$T/ops.out"
 
 # P2 Q7: 100 UEs in split mode, the farm on 4 shards (topologies/split-stub-100.yaml).

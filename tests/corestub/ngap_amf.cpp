@@ -554,7 +554,12 @@ void NgapAmf::on_message(ByteView msg) {
                            smf_.on_setup_response(supi, s.psi, s.transfer.dl);
                        }
                        for (const auto& f : m.failed) {
-                           check(false, "TS 38.413 8.2.1.2", "the gNB set up the session",
+                           // P2 Q9: TS 38.413 8.2.1.2, a "required" UP security the gNB cannot
+                           // meet is refused with its cause; any other refusal is the gNB's fault.
+                           const bool up_security = f.cause.group == "radioNetwork" &&
+                                                    (f.cause.value == "up-integrity-protection-not-possible" ||
+                                                     f.cause.value == "up-confidentiality-protection-not-possible");
+                           check(up_security, "TS 38.413 8.2.1.2", "the gNB set up the session or refused it for UP security",
                                  std::to_string(f.psi) + " " + f.cause.group + "/" + f.cause.value);
                            ue->setups.erase(std::remove(ue->setups.begin(), ue->setups.end(), f.psi), ue->setups.end());
                            smf_.on_setup_failed(supi, f.psi);

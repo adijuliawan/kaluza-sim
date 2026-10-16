@@ -137,7 +137,19 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         t.gnb_name = g.get<std::string>("name", t.gnb_name);
         // A peer CU-CP (P2 Q4) has its own N2 and N3 addresses in its config, not here.
         if (t.peer_cucp.empty() || g.has("cucp")) {
-            g.at("cucp").only({"ng_bind", "ng_streams", "ue_inactivity_s", "nea", "nia", "t_reordering_ms"});
+            g.at("cucp").only({"ng_bind", "ng_streams", "ue_inactivity_s", "nea", "nia", "t_reordering_ms", "up_policy"});
+            if (g.at("cucp").has("up_policy")) {
+                // P2 Q9: the CU-CP's local UP security policy (proc/ran/up_security.hpp, KS-NGAP-B8).
+                const Yaml u = g.at("cucp").at("up_policy");
+                u.only({"preferred_integrity", "preferred_confidentiality", "absent_integrity", "absent_confidentiality",
+                        "integrity_possible"});
+                auto& p = t.up_policy;
+                p.preferred_integrity = u.get<bool>("preferred_integrity", p.preferred_integrity);
+                p.preferred_confidentiality = u.get<bool>("preferred_confidentiality", p.preferred_confidentiality);
+                p.absent_integrity = u.get<bool>("absent_integrity", p.absent_integrity);
+                p.absent_confidentiality = u.get<bool>("absent_confidentiality", p.absent_confidentiality);
+                p.integrity_possible = u.get<bool>("integrity_possible", p.integrity_possible);
+            }
             auto bind = Endpoint::parse(g.at("cucp").at("ng_bind").as<std::string>(), 0);
             if (!bind || bind->family != t.amf.family) {
                 g.at("cucp").at("ng_bind").fail("a numeric address of the AMF's family");

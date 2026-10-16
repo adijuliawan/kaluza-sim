@@ -39,6 +39,7 @@ struct Persona {
     std::optional<Bytes> s1_ue_network_capability;
     std::optional<Bytes> ue_usage_setting;
     std::optional<Bytes> requested_nssai;
+    std::optional<Bytes> integrity_max_data_rate;   // P2 Q9: 9.11.4.7's two octets (UL, DL)
     std::vector<std::pair<std::string, Bytes>> containers;   // RAT type, UPER as the phone sent it
 
     /// The UE-NR-Capability container, if the persona has one.

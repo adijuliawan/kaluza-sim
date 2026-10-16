@@ -58,6 +58,7 @@
 #include "codec/asn1/msg/f1ap.hpp"
 #include "proc/ran/du.hpp"
 #include "codec/asn1/msg/ngap.hpp"
+#include "proc/ran/up_security.hpp"
 #include "codec/asn1/msg/rrc.hpp"
 #include "entity/pdcp/pdcp.hpp"
 #include "platform/event.hpp"
@@ -80,6 +81,7 @@ struct CuCpConfig {
     std::vector<std::uint8_t> nia_preference{2, 1};
     bool allow_null = false;            // D1: NIA0/NEA0 only as the bisect switch
     std::optional<int> t_reordering_ms;   // P2 Q8: the DRBs' t-Reordering (RRC and E1); absent: infinity
+    UpPolicy up_policy;                   // P2 Q9: "preferred" and no Security Indication (proc/ran/up_security)
     // The UE Inactivity Timer E1 Bearer Context Setup gives the CU-UP with
     // ActivityNotificationLevel "ue" (P2 Q4, KS-E1AP-D1). From Q5 the CU-UP's
     // report releases the UE, so the default is the longest the IE allows: a run's
@@ -110,6 +112,9 @@ struct CuCpUeView {
 
 class CuCp {
 public:
+    /// P2 Q9: the local UP security policy for sessions set up from now on (ksim-ctl gnb up-policy).
+    void set_up_policy(const UpPolicy& p) noexcept { cfg_.up_policy = p; }
+    const UpPolicy& up_policy() const noexcept { return cfg_.up_policy; }
     /// `e1`: the CU-UP's association (none: sessions are refused).
     CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1, IAssoc* e1 = nullptr);
     ~CuCp();
@@ -175,7 +180,9 @@ private:
             std::uint8_t drb_id = 1;
             std::optional<e1ap::SessionSetup> up;       // the CU-UP's answer (N3 DL end, F1-U UL ends)
             std::optional<f1ap::DrbSetup> du;           // the DU's answer (F1-U DL end)
-            bool integrity = false;
+            bool integrity = false;                     // P2 Q9: the UP security decision
+            bool confidentiality = true;
+            bool report = false;                        // a Security Result goes back
         };
         std::map<std::uint8_t, Session> sessions;       // set up, by PSI
         std::optional<std::uint32_t> cu_up_ue;

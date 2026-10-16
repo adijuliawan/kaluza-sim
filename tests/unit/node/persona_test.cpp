@@ -57,6 +57,21 @@ TEST(Persona, TheIntersectionKeepsOnlyWhatTheSimImplements) {
     EXPECT_EQ(to_hex(p.security().encode()), "8000");
 }
 
+// P2 Q9: the phone's Integrity protection maximum data rate (TS 24.501 9.11.4.7), its two
+// octets as sent; any other length is refused.
+TEST(Persona, TheIntegrityMaximumDataRateIsTheIesTwoOctets) {
+    const std::string f = (fs::temp_directory_path() / "ksim-rate-persona.yaml").string();
+    std::ofstream(f) << "name: rated\nnas:\n  integrity_max_data_rate: \"0000\"\n";
+    std::string why;
+    auto p = load_persona(f, why);
+    ASSERT_TRUE(p) << why;
+    ASSERT_TRUE(p->integrity_max_data_rate);
+    EXPECT_EQ(to_hex(*p->integrity_max_data_rate), "0000");   // 64 kbit/s both ways
+    std::ofstream(f) << "name: bad\nnas:\n  integrity_max_data_rate: \"ff\"\n";
+    EXPECT_FALSE(load_persona(f, why));
+    fs::remove(f);
+}
+
 TEST(Persona, ACapabilityThatDoesNotDecodeIsRefused) {
     const std::string f = (fs::temp_directory_path() / "ksim-bad-persona.yaml").string();
     std::ofstream(f) << "name: bad\nrrc:\n  ue_capability_rat_containers:\n    - {rat: nr, uper: ffffffff}\n";

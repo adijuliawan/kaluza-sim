@@ -355,6 +355,41 @@ static int run_main(int argc, char** argv) {
         out.set("T3512_S", static_cast<std::int64_t>(secs));
         return out;
     });
+    server.post("/v1/stub/up-policy", [&s](const ksim::api::Request& req) {
+        // P2 Q9: the UP Security Indication the SMF sends with the next sessions (TS 38.413
+        // 9.3.1.27): required, preferred, not-needed, or absent (no IE).
+        const auto ok = [](const std::string& v) {
+            return v == "required" || v == "preferred" || v == "not-needed" || v == "absent";
+        };
+        const auto rate_ok = [](const std::string& v) { return v.empty() || v == "bitrate64kbs" || v == "maximum-UE-rate"; };
+        const std::string in = req.arg("integrity", "not-needed");
+        const std::string cp = req.arg("confidentiality", "required");
+        const std::string ul = req.arg("rate-ul");
+        const std::string dl = req.arg("rate-dl");
+        if (!ok(in) || !ok(cp) || !rate_ok(ul) || !rate_ok(dl)) {
+            return Reply::fail(Exit::usage, "up-policy --integrity|--confidentiality required|preferred|not-needed|absent "
+                                            "[--rate-ul|--rate-dl bitrate64kbs|maximum-UE-rate]");
+        }
+        auto r = s.call<bool>([&s, in, cp, ul, dl] {
+            for (auto* p : {&s.profile.session, s.amf ? &s.amf->smf().profile() : nullptr}) {
+                if (p == nullptr) {
+                    continue;
+                }
+                p->up_integrity = in;
+                p->up_confidentiality = cp;
+                p->up_rate_ul = ul.empty() ? std::nullopt : std::optional<std::string>(ul);
+                p->up_rate_dl = dl.empty() ? std::nullopt : std::optional<std::string>(dl);
+            }
+            return true;
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        Reply out;
+        out.set("UP_INTEGRITY", in);
+        out.set("UP_CONFIDENTIALITY", cp);
+        return out;
+    });
     server.post("/v1/stub/nas-alg", [&s, num](const ksim::api::Request& req) {
         // P2 Q8: the NAS algorithms the next SECURITY MODE COMMAND selects (TS 33.501 6.7.2);
         // 1 and 2 only: 0 is the bisect switch's, 3 (ZUC) the declared gap KS-SEC-G1.

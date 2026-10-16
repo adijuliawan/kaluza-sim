@@ -1076,17 +1076,32 @@ void CuCp::start_job(Ue& ue) {
             j.failed.push_back(ngap::SessionCause{item.psi, ngap::Cause{"radioNetwork", "unspecified"}});
             continue;
         }
+        // P2 Q9: the UP security decision (TS 33.501 6.6.1, TS 38.413 8.2.1.2; up_security.hpp).
+        const UpDecision upd = decide_up_security(item.transfer.security, cfg_.up_policy);
+        if (upd.indicated || !KSIM_MUTANT("up_absent_silent")) {   // the mutant: silent when there was none
+            const auto& si = item.transfer.security;
+            events_.emit("ran.up.security", cfg_.id,
+                         {{"ran_ue", str(ue.ran_ue)}, {"psi", str(item.psi)}, {"indication", upd.indicated ? "present" : "absent"},
+                          {"asked", si ? si->integrity + "/" + si->confidentiality : std::string("-")},
+                          {"integrity", upd.integrity ? "1" : "0"}, {"confidentiality", upd.confidentiality ? "1" : "0"},
+                          {"result", upd.refuse ? upd.refuse->value : "set-up"}});
+        }
+        if (upd.refuse) {
+            j.failed.push_back(ngap::SessionCause{item.psi, *upd.refuse});
+            continue;
+        }
         Ue::Session s;
         s.item = item;
         s.drb_id = next_drb;
-        // UP security policy: integrity when required, never when preferred (KS-NGAP-B5).
-        const auto& policy = item.transfer.security;
-        s.integrity = policy.has_value() && policy->integrity == "required";
+        s.integrity = upd.integrity;
+        s.confidentiality = upd.confidentiality;
+        s.report = upd.report;
         e1ap::SessionToSetup t;
         t.psi = item.psi;
         t.type = item.transfer.type;
         t.snssai = e1ap::Snssai{item.snssai.sst, item.snssai.sd};
-        t.security = e1ap::SecurityIndication{s.integrity ? "required" : "not-needed", "required"};
+        t.security = e1ap::SecurityIndication{s.integrity ? "required" : "not-needed",
+                                              s.confidentiality ? "required" : "not-needed"};
         t.ng_ul = e1_tunnel(item.transfer.ul);
         e1ap::DrbToSetup d;
         d.drb_id = next_drb;
@@ -1243,6 +1258,7 @@ void CuCp::job_rrc(Ue& ue) {
             d.qfis.push_back(f.qfi);
         }
         d.pdcp.integrity = s.integrity;
+        d.pdcp.ciphering_disabled = !s.confidentiality;   // P2 Q9: TS 38.331 cipheringDisabled
         d.pdcp.t_reordering_ms = cfg_.t_reordering_ms;   // P2 Q8: as the CU-UP's entity runs it (E1)
         b.drbs.push_back(std::move(d));
         if (s.item.nas) {
@@ -1307,12 +1323,14 @@ void CuCp::job_done(Ue& ue) {
         for (const auto& f : s.item.transfer.flows) {
             t.qfis.push_back(f.qfi);
         }
-        if (s.item.transfer.security) {
-            t.security = ngap::SecurityResult{s.integrity, true};
+        if (s.report) {
+            // TS 38.413 8.2.1.2: what was done with a "preferred" (9.3.1.59).
+            t.security = ngap::SecurityResult{s.integrity != KSIM_MUTANT("up_result_misreported"), s.confidentiality};
         }
         ok.push_back(ngap::SessionSetupOk{psi, std::move(t)});
         events_.emit("ran.session.setup", cfg_.id,
-                     {{"ran_ue", str(ue.ran_ue)}, {"psi", str(psi)}, {"drb", str(s.drb_id)}, {"integrity", s.integrity ? "1" : "0"}});
+                     {{"ran_ue", str(ue.ran_ue)}, {"psi", str(psi)}, {"drb", str(s.drb_id)}, {"integrity", s.integrity ? "1" : "0"},
+                      {"confidentiality", s.confidentiality ? "1" : "0"}});
         ue.sessions.emplace(psi, std::move(s));
     }
     if (j.ics) {

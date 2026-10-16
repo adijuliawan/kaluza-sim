@@ -22,6 +22,25 @@ TEST(RrcMsg, EveryBuilderEncodesAndItsJerReads) {
     }
 }
 
+// P2 Q9: a DRB whose UP confidentiality is not performed carries cipheringDisabled in
+// PDCP-Config's first extension group, after t-Reordering.
+TEST(RrcMsg, CipheringDisabledRoundTrips) {
+    RadioBearers b;
+    b.drbs.push_back(DrbAdd{});
+    b.drbs[0].pdcp.t_reordering_ms = 100;
+    b.drbs[0].pdcp.ciphering_disabled = true;
+    const Reconfiguration rc{1, b, std::nullopt, {}};
+    auto wire = encode(rc);
+    ASSERT_TRUE(wire) << wire.error().what;
+    auto d = decode_dl_dcch(*wire);
+    ASSERT_TRUE(d) << d.error().what;
+    const auto& back = std::get<Reconfiguration>(*d);
+    ASSERT_TRUE(back.bearers);
+    EXPECT_TRUE(back.bearers->drbs.at(0).pdcp.ciphering_disabled);
+    EXPECT_EQ(back.bearers->drbs.at(0).pdcp.t_reordering_ms, 100);
+    EXPECT_EQ(back, rc);
+}
+
 TEST(RrcMsg, BroadcastAndPagingRoundTrip) {
     const Mib mib{512, true, 0, false, 12, 0, false, true};
     auto m = decode_mib(*encode(mib));

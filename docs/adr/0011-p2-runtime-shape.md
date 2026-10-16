@@ -38,6 +38,9 @@
        - full flushes as it writes, since the gates read the file during the run.
        - The manifest records the policy (KS-PLAT-B51).
      - The CU-CP settings this ADR lists are topology settings as of Q8: `cucp: {nea: [..], nia: [..]}` (KS-SEC-B4) and `cucp: {t_reordering_ms: N}` (KS-RRC-B5). The UP policy for "preferred" and the flow-to-DRB mapping follow in Q9 and Q10.
+     - *As built (P2 Q9):* `cucp: {up_policy: {preferred_integrity, preferred_confidentiality, absent_integrity, absent_confidentiality, integrity_possible}}` (KS-NGAP-B8).
+       - The defaults: "preferred" is performed, and with no indication integrity is off and ciphering on. These are OCUDU's choices too.
+       - `ksim-ctl gnb <name> up-policy` changes the policy during a run.
   8. **Topology settings,** each recorded as a -B row when it lands: the CU-CP's NEA/NIA preference lists, its UP security policy for "preferred" and for an absent Security Indication, its QoS-flow-to-DRB mapping, and t-Reordering.
   9. **Throughput** is measured only on the dev PC or inside kaluza-uesim against the scripted core on 127.0.0.x, never across the lab (kaluza-core-df, 2026-10-15). The numbers are the sim's own processing over an ideal link with zero delay; the scripted UPF's CPU is reported apart.
 - **Consequences:**

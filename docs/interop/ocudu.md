@@ -140,6 +140,16 @@ OCUDU's `ocucp` (.36, gNB 0x1A1) and `ocuup` (.37) run in our namespaces on kalu
 - 100 UEs registered with a session each through OCUDU in 26.4 s (KS-PLAT-T56).
 - Nothing new from OCUDU. Its console has to be line-buffered when written to a file (KS-PLAT-D15).
 
+## The UP security policy with OCUDU's CU-CP (P2 Q9, 2026-10-16)
+
+C3 on the dev PC, with the stub's SMF sending each Security Indication (`ksim-ctl stub up-policy`). OCUDU's choices, read from our UE's RRC and OCUDU's NGAP capture:
+- **required:** integrity and ciphering performed.
+- **preferred:** both performed, and reported in the Security Result.
+- **not-needed:** neither. OCUDU sends our UE `cipheringDisabled`, which the UE honours (ping 3/3 through OCUDU's CU-UP).
+- **No indication:** integrity off, ciphering on.
+
+These are the defaults our CU-CP takes (KS-NGAP-B8, T3). Nothing differs from the spec.
+
 ## Evidence
 
 - `build/ocudu/last/` holds the hook's last runs (`c3/`, `c4/`, `c5/`): the summary, our

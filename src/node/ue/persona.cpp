@@ -82,16 +82,20 @@ Result<Persona> load_persona(const std::string& file, std::string& why) {
         if (y.has("nas")) {
             const Yaml n = y.at("nas");
             n.only({"mm_capability", "ue_security_capability", "s1_ue_network_capability", "ue_usage_setting",
-                    "requested_nssai"});
+                    "requested_nssai", "integrity_max_data_rate"});
             for (auto [key, out] : {std::pair{"mm_capability", &p.mm_capability},
                                     std::pair{"ue_security_capability", &p.ue_security_capability},
                                     std::pair{"s1_ue_network_capability", &p.s1_ue_network_capability},
                                     std::pair{"ue_usage_setting", &p.ue_usage_setting},
-                                    std::pair{"requested_nssai", &p.requested_nssai}}) {
+                                    std::pair{"requested_nssai", &p.requested_nssai},
+                                    std::pair{"integrity_max_data_rate", &p.integrity_max_data_rate}}) {
                 if (n.has(key)) {
                     *out = hex(n.at(key));
                 }
             }
+        }
+        if (p.integrity_max_data_rate && p.integrity_max_data_rate->size() != 2) {
+            y.at("nas").at("integrity_max_data_rate").fail("the IE's two octets, UL then DL (TS 24.501 9.11.4.7)");
         }
         if (y.has("rrc")) {
             const Yaml r = y.at("rrc");

@@ -183,6 +183,11 @@ struct Ambr {
 struct SecurityIndication {
     std::string integrity = "not-needed";
     std::string confidentiality = "not-needed";
+    // P2 Q9 (9.3.1.27): "bitrate64kbs" or "maximum-UE-rate"; UL present when integrity is
+    // required or preferred (the encoder then puts maximum-UE-rate when none is given),
+    // DL in the IE's extension (id 151).
+    std::optional<std::string> max_rate_ul;
+    std::optional<std::string> max_rate_dl;
     friend bool operator==(const SecurityIndication&, const SecurityIndication&) = default;
 };
 struct SecurityResult {

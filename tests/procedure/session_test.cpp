@@ -123,6 +123,93 @@ TEST(Session, Ts33501_6_7_3_Nea1AndNia1FirstCarryTheWholeUserPlane) {
     EXPECT_EQ(n.failures(), "");
 }
 
+// ---- P2 Q9: the UP security policy (TS 38.413 8.2.1.2, TS 33.501 6.6.1) ---------------
+
+namespace {
+bool ping3(Net& n) {
+    node::PingRequest p;
+    p.dst = {10, 60, 0, 1};
+    p.count = 3;
+    p.interval = 200;
+    const auto before = n.named("ue.ping.done").size();
+    if (!n.ue->ping(p) ||
+        !n.loop.run_until([&] { return n.named("ue.ping.done").size() > before; }, n.loop.now() + 5'000)) {
+        return false;
+    }
+    return *n.last("ue.ping.done")->find("received") == "3";
+}
+} // namespace
+
+TEST(Session, Ts38413_8_2_1_2_RequiredUpIntegrityRunsTheDrbWithAMacI) {
+    corestub::Profile p;
+    p.session.up_integrity = "required";
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    EXPECT_EQ(*n.last("ran.up.security")->find("integrity"), "1");
+    EXPECT_EQ(*n.last("ran.session.setup")->find("integrity"), "1");
+    EXPECT_EQ(*n.last("ran.cuup.bearer.setup")->find("integrity"), "1");
+    EXPECT_TRUE(ping3(n));   // a MAC-I both ways, or the pings would not verify
+    EXPECT_EQ(n.failures(), "");
+}
+
+TEST(Session, Ts38413_8_2_1_2_PreferredFollowsTheCuCpsPolicy) {
+    const ScopedCuCp tweak([](proc::ran::CuCpConfig& c) { c.up_policy.preferred_integrity = false; });
+    corestub::Profile p;
+    p.session.up_integrity = "preferred";
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    const Event* e = n.last("ran.up.security");
+    EXPECT_EQ(*e->find("asked"), "preferred/required");
+    EXPECT_EQ(*e->find("integrity"), "0");
+    EXPECT_TRUE(ping3(n));
+    EXPECT_EQ(n.failures(), "");
+}
+
+TEST(Session, Ts38331_CipheringDisabledWhenConfidentialityIsNotNeeded) {
+    corestub::Profile p;
+    p.session.up_confidentiality = "not-needed";
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    EXPECT_EQ(*n.last("ran.up.security")->find("confidentiality"), "0");
+    EXPECT_EQ(*n.last("ran.cuup.bearer.setup")->find("ciphering"), "0");
+    EXPECT_TRUE(ping3(n));   // the UE unciphered too (cipheringDisabled), or nothing would pass
+    EXPECT_EQ(n.failures(), "");
+}
+
+TEST(Session, Ts38413_8_2_1_2_RequiredIntegrityTheGnbCannotDoIsRefused) {
+    const ScopedCuCp tweak([](proc::ran::CuCpConfig& c) { c.up_policy.integrity_possible = false; });
+    corestub::Profile p;
+    p.session.up_integrity = "required";
+    Net n(p);
+    n.register_ue();
+    ASSERT_TRUE(n.ue->ps_establish(proc::ue::SessionRequest{0, "internet", std::nullopt}));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.count("PDUSessionResourceSetupResponse") > 0; }, n.loop.now() + 5'000));
+    const Event* e = n.last("ran.up.security");
+    ASSERT_NE(e, nullptr);
+    EXPECT_EQ(*e->find("result"), "up-integrity-protection-not-possible");
+    EXPECT_TRUE(n.named("ran.session.setup").empty());
+    EXPECT_EQ(n.amf.smf().sessions(), 0u);
+    EXPECT_EQ(n.failures(), "");   // the stub takes the refusal (KS-NGAP-B8)
+}
+
+TEST(Session, Ts33501_6_6_1_NoSecurityIndicationRunsOnTheCuCpsDefault) {
+    corestub::Profile p;
+    p.session.up_integrity = "absent";
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    const Event* e = n.last("ran.up.security");
+    ASSERT_NE(e, nullptr);
+    EXPECT_EQ(*e->find("indication"), "absent");
+    EXPECT_EQ(*e->find("integrity"), "0");
+    EXPECT_EQ(*e->find("confidentiality"), "1");
+    EXPECT_TRUE(ping3(n));
+    EXPECT_EQ(n.failures(), "");
+}
+
 // P2 Q4 (TS 38.425 5.4.2.1): the DU sends the initial DL DATA DELIVERY STATUS once the
 // DRB is up, and after DL data reports the highest PDCP SN sent to the UE, which RLC
 // AM over the ideal link delivered in sequence. The CU-UP takes it as feedback, not data.

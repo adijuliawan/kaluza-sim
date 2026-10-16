@@ -378,7 +378,9 @@ Result<void> UeRrc::add_drb(const rrc::DrbAdd& d) {
             return keys.error();
         }
         b.pdcp->set_integrity(d.pdcp.integrity, d.pdcp.integrity);
-        b.pdcp->set_ciphering(true, true);
+        // TS 38.331 PDCP-Config: cipheringDisabled, the session's UP confidentiality not
+        // performed (TS 33.501 6.6.1; P2 Q9).
+        b.pdcp->set_ciphering(!d.pdcp.ciphering_disabled, !d.pdcp.ciphering_disabled);
     }
     entity::Pdcp* pdcp = b.pdcp.get();
     b.rlc->set_upper([pdcp](Bytes p) { pdcp->on_pdu(p); });

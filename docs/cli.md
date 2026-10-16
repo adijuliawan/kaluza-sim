@@ -15,6 +15,9 @@
   - `gnb <name> ue-list|amf-list` (N8), `ue-release <ue> [--cause C]|restart` (N12);
   - `stub release|ping-ue` (N10), `stub deregister [--rereg]|t3512 --seconds N|restart` (N12) and `stub sms-sub --ue SUPI [--off]` (N13), with `--socket` on `ksim-corestub`'s control socket.
   - `stub nas-alg --ea 1|2 --ia 1|2` (P2 Q8): the NAS algorithms the stub's next SECURITY MODE COMMAND selects (row ksim-p2.nas-nea1-nia1).
+  - `stub up-policy --integrity X --confidentiality Y [--rate-ul R] [--rate-dl R]` (P2 Q9): the UP Security Indication the stub's SMF sends with the next sessions.
+    - X and Y are each `required`, `preferred`, `not-needed` or `absent` (no IE).
+    - R is `bitrate64kbs` or `maximum-UE-rate`.
 - **The run:** `--run D`, else `$KSIM_RUN`, else `$KSIM_RUNS/latest` (`runs/latest`); `--socket S` reaches any control socket, e.g. `ksim-corestub`'s, with `stub`.
 - **`ksim-sim`** (the offline card tool) has `range init|derive|provision|deprovision` (N8, N9) and, from N14:
   - `serve [--test-keys | --sealed D --kek F] [--imsi I] [--template Y] [--vpcd host:port] [--personality sysmoISIM-SJA5] [--trace-udp host:port] [--trace-pcap F] [--seconds N]`;
@@ -62,6 +65,9 @@ Group commands take `--stagger <ms>` and `--parallel <n>`, and print one block p
 
   `tools/ocudu-peer.sh run --lab` uses it to start OCUDU's roles in our namespaces on kaluza-uesim (LW2).
 - `ksim-ctl info` shows the CU-CP's AS preference as `AS_NEA` and `AS_NIA` (P2 Q8).
+- `ksim-ctl gnb <name> up-policy [--preferred-integrity 0|1] [--preferred-confidentiality 0|1] [--absent-integrity 0|1] [--absent-confidentiality 0|1] [--integrity-possible 0|1]` (P2 Q9) reads or sets the CU-CP's local UP security policy for the sessions after.
+  - The topology's `cucp: {up_policy: {...}}` sets its defaults.
+  - Each session's decision is a `ran.up.security` event.
 - `ksim-bench [--ms N] [--size BYTES] [--check <bounds.tsv>]` (P2 Q8), a separate binary: the user plane's per-packet costs in one process, as `BENCH.<case>.NS=` and `BENCH.<case>.MBITS=`.
   - It covers PDCP DRB pairs per algorithm, the AS contexts against one-shot calls, SDAP, and GTP-U N3 and NR-U.
   - With `--check` it prints `BENCH=PASS|FAIL` against the bounds. CI's hook 75 runs it from the release build.

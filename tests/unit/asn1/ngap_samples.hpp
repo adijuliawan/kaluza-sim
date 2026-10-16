@@ -65,7 +65,7 @@ inline std::vector<Sample> all() {
     st.session_ambr = Ambr{1'000'000'000, 1'000'000'000};
     st.ul = GtpTunnel{{172, 30, 50, 2}, 0x00000101};
     st.type = "ipv4";
-    st.security = SecurityIndication{"preferred", "required"};
+    st.security = SecurityIndication{"preferred", "required", "maximum-UE-rate", std::nullopt};   // UL as the encoder fills it
     st.flows = {QosFlowRequest{1, 9, Arp{8, false, true}}};
     SessionSetupItem item{1, protected_nas, Snssai{1, 0x000001}, st};
     InitialContextSetupRequest ics_s = ics;
@@ -78,6 +78,11 @@ inline std::vector<Sample> all() {
                  InitialContextSetupResponse{7, 1, {SessionSetupOk{1, rt}}, {SessionCause{2, Cause{"radioNetwork", "unspecified"}}}}});
     s.push_back({"PDUSessionResourceSetupRequest",
                  PduSessionResourceSetupRequest{7, 1, std::nullopt, {item}, Ambr{2'000'000'000, 1'000'000'000}}});
+    // P2 Q9: integrity required at 64 kbit/s both ways (the DL rate in the IE's extension).
+    SessionSetupItem rated = item;
+    rated.transfer.security = SecurityIndication{"required", "not-needed", "bitrate64kbs", "bitrate64kbs"};
+    s.push_back({"PDUSessionResourceSetupRequest.up-rates",
+                 PduSessionResourceSetupRequest{7, 1, std::nullopt, {rated}, std::nullopt}});
     s.push_back({"PDUSessionResourceSetupResponse", PduSessionResourceSetupResponse{7, 1, {SessionSetupOk{1, rt}}, {}}});
     s.push_back({"PDUSessionResourceSetupResponse.failed",
                  PduSessionResourceSetupResponse{7, 1, {}, {SessionCause{5, Cause{"radioNetwork", "multiple-PDU-session-ID-instances"}}}}});

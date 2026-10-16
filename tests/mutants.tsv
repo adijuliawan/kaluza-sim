@@ -24,3 +24,8 @@ no_ddds	ksim-p2.ocudu-ddds	the DU sends no NR-U DL DATA DELIVERY STATUS, so a CU
 no_inactivity_notification	ksim-p2.e1-inactivity	the CU-UP never sends BEARER CONTEXT INACTIVITY NOTIFICATION, so an idle UE with a session is never released for user inactivity (P2 Q5)
 watchdog_silent	ksim-p2.loop-lag-abort	the shard never reports a late timer, so a stalled loop raises no platform.loop_lag and gates score rows on an unsound run (P2 Q7)
 nia1_wrong_fresh	ksim-p2.as-nea1-nia1	the UE side's 128-NIA1 takes FRESH = BEARER without its 27-bit shift, so its MAC-I matches no network's (P2 Q8)
+up_integrity_ignored	ksim-p2.up-integrity-required	the CU-UP leaves out the UP integrity the CU-CP asked for, while the UE runs it, so no DRB PDU verifies (P2 Q9)
+up_result_misreported	ksim-p2.up-integrity-preferred	the CU-CP's Security Result says the opposite of the integrity it applied to a "preferred" (P2 Q9)
+confidentiality_forced	ksim-p2.up-confidentiality-not-needed	the CU-UP ciphers a session whose UP confidentiality is not needed, while the UE has cipheringDisabled (P2 Q9)
+up_required_accepted	ksim-p2.up-required-unmet	the CU-CP sets up a session whose required UP integrity it cannot do, instead of refusing it (P2 Q9)
+up_absent_silent	ksim-p2.up-indication-absent	the CU-CP raises no ran.up.security when the core sent no Security Indication (P2 Q9)

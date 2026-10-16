@@ -97,6 +97,7 @@ constexpr int kQosFlowAddOrModifyRequestList = 135;
 constexpr int kQosFlowSetupRequestList = 136;
 constexpr int kQosFlowToReleaseList = 137;
 constexpr int kSecurityIndication = 138;
+constexpr int kMaxIntegrityRateDl = 151;   // id-MaximumIntegrityProtectedDataRate-DL (P2 Q9)
 constexpr int kUlNguUpTnlInformation = 139;
 constexpr int kUePagingIdentity = 115;
 constexpr int kUeRadioCapability = 117;
@@ -528,7 +529,11 @@ Result<Bytes> encode_transfer(const SetupRequestTransfer& t) {
         json s = {{"integrityProtectionIndication", t.security->integrity},
                   {"confidentialityProtectionIndication", t.security->confidentiality}};
         if (t.security->integrity != "not-needed") {
-            s["maximumIntegrityProtectedDataRate-UL"] = "maximum-UE-rate";
+            s["maximumIntegrityProtectedDataRate-UL"] = t.security->max_rate_ul.value_or("maximum-UE-rate");
+        }
+        if (t.security->max_rate_dl) {
+            s["iE-Extensions"] = json::array({{{"id", kMaxIntegrityRateDl}, {"criticality", "ignore"},
+                                               {"extensionValue", {{"MaximumIntegrityProtectedDataRate", *t.security->max_rate_dl}}}}});
         }
         ies.push_back(ie(kSecurityIndication, "reject", "SecurityIndication", s));
     }
@@ -621,8 +626,21 @@ Result<SetupRequestTransfer> decode_setup_request_transfer(ByteView in) {
         t.ul = read_gtp_tunnel(ies.at(kUlNguUpTnlInformation));
         t.type = ies.at(kPduSessionType).get<std::string>();
         if (auto it = ies.find(kSecurityIndication); it != ies.end()) {
-            t.security = SecurityIndication{it->second.at("integrityProtectionIndication").get<std::string>(),
-                                            it->second.at("confidentialityProtectionIndication").get<std::string>()};
+            const json& s = it->second;
+            SecurityIndication si;
+            si.integrity = s.at("integrityProtectionIndication").get<std::string>();
+            si.confidentiality = s.at("confidentialityProtectionIndication").get<std::string>();
+            if (s.contains("maximumIntegrityProtectedDataRate-UL")) {
+                si.max_rate_ul = s.at("maximumIntegrityProtectedDataRate-UL").get<std::string>();
+            }
+            if (s.contains("iE-Extensions")) {
+                for (const auto& e : s.at("iE-Extensions")) {
+                    if (e.at("id").get<int>() == kMaxIntegrityRateDl) {
+                        si.max_rate_dl = e.at("extensionValue").at("MaximumIntegrityProtectedDataRate").get<std::string>();
+                    }
+                }
+            }
+            t.security = si;
         }
         for (const auto& f : ies.at(kQosFlowSetupRequestList)) {
             t.flows.push_back(read_qos_flow(f));

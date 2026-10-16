@@ -100,6 +100,10 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     sms_ = std::make_unique<proc::ue::Sms>(ex_, events, smc, std::move(sp));
     proc::ue::SmConfig sc;
     sc.id = subject;
+    if (cfg_.persona && cfg_.persona->integrity_max_data_rate && cfg_.persona->integrity_max_data_rate->size() == 2) {
+        sc.ip_max_rate_ul = (*cfg_.persona->integrity_max_data_rate)[0];   // P2 Q9: as the phone sent it
+        sc.ip_max_rate_dl = (*cfg_.persona->integrity_max_data_rate)[1];
+    }
     proc::ue::SmUpper su;
     su.up = [this](const proc::ue::SessionInfo& s) { session_up(s); };
     su.down = [this](std::uint8_t psi) {

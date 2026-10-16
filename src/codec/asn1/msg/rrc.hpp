@@ -100,6 +100,7 @@ struct PdcpSettings {
     bool status_report = false;
     bool out_of_order = false;
     std::optional<int> t_reordering_ms;    // absent: infinity
+    bool ciphering_disabled = false;       // P2 Q8/Q9: cipheringDisabled (the session's UP confidentiality not performed)
     friend bool operator==(const PdcpSettings&, const PdcpSettings&) = default;
 };
 

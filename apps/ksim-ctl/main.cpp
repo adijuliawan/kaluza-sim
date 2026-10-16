@@ -195,7 +195,10 @@ struct Flags {
 Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
     static const std::vector<std::string> valued{"wait", "timeout", "where", "since", "fail", "filter", "cause",
                                                  "dnn", "sst", "sd", "psi", "count", "interval", "size", "type", "ue",
-                                                 "seq", "seconds", "vp", "log", "netd", "parent", "addr", "ea", "ia"};
+                                                 "seq", "seconds", "vp", "log", "netd", "parent", "addr", "ea", "ia",
+                                                 "integrity", "confidentiality", "rate-ul", "rate-dl", "preferred-integrity",
+                                                 "preferred-confidentiality", "absent-integrity", "absent-confidentiality",
+                                                 "integrity-possible"};
     Flags f;
     for (std::size_t i = from; i < args.size(); ++i) {
         const std::string& a = args[i];
@@ -712,9 +715,10 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
         // ksim-corestub (--socket): its report, or a network-side trigger for the gates.
         if (!f.words.empty() && (f.words[0] == "release" || f.words[0] == "ping-ue" || f.words[0] == "deregister" ||
                                  f.words[0] == "restart" || f.words[0] == "t3512" || f.words[0] == "sms-sub" ||
-                                 f.words[0] == "nas-alg")) {
+                                 f.words[0] == "nas-alg" || f.words[0] == "up-policy")) {
             json body = json::object();
-            for (const char* k : {"ue", "psi", "cause", "seq", "seconds", "ea", "ia"}) {
+            for (const char* k : {"ue", "psi", "cause", "seq", "seconds", "ea", "ia", "integrity", "confidentiality",
+                                  "rate-ul", "rate-dl"}) {
                 if (f.has(k)) {
                     body[k] = f.get(k);
                 }
@@ -746,6 +750,18 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
     } else if (verb == "gnb" || verb == "cucp") {
         if (f.words.size() >= 2 && (f.words[1] == "ue-list" || f.words[1] == "amf-list")) {
             r = call(c, "GET", "/v1/gnb/" + encode(f.words[0]) + "/" + f.words[1]);
+        } else if (f.words.size() >= 2 && f.words[1] == "up-policy") {
+            // P2 Q9: the CU-CP's local UP security policy (each flag 0|1; none: just read it).
+            json body = json::object();
+            for (const char* k : {"preferred-integrity", "preferred-confidentiality", "absent-integrity", "absent-confidentiality",
+                                  "integrity-possible"}) {
+                if (f.has(k)) {
+                    std::string key = k;
+                    std::replace(key.begin(), key.end(), '-', '_');
+                    body[key] = f.get(k);
+                }
+            }
+            r = call(c, "POST", "/v1/gnb/" + encode(f.words[0]) + "/up-policy", body);
         } else if (f.words.size() >= 3 && f.words[1] == "ue-release") {
             json body = json::object();
             body["ue"] = f.words[2];

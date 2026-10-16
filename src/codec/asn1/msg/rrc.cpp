@@ -126,6 +126,11 @@ Result<json> pdcp_json(const PdcpSettings& p) {
         }
         out["t-Reordering"] = *t;
     }
+    if (p.ciphering_disabled) {
+        // PDCP-Config's first extension group (TS 38.331; asn1c's JER names it ext1), after
+        // t-Reordering in ASN.1 order (P2 Q9, UP confidentiality not performed).
+        out["ext1"] = {{"cipheringDisabled", "true"}};
+    }
     return out;
 }
 
@@ -207,6 +212,7 @@ RadioBearers read_bearers(const json& j) {
                 if (p.contains("t-Reordering")) {
                     d.pdcp.t_reordering_ms = enum_value(p.at("t-Reordering"));
                 }
+                d.pdcp.ciphering_disabled = p.contains("ext1") && p.at("ext1").contains("cipheringDisabled");
             }
             b.drbs.push_back(std::move(d));
         }

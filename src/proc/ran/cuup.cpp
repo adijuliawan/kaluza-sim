@@ -138,8 +138,11 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
     sess.ng_ul = s.ng_ul;
     // UP security policy: integrity only when required (with the CU-CP's NIA),
     // ciphering unless not needed.
-    sess.integrity = s.security.integrity == "required" && c.nia.has_value();
-    sess.ciphering = s.security.confidentiality != "not-needed";
+    // P2 Q9 mutants: the CU-UP leaving out integrity the CU-CP asked for, or ciphering a
+    // session whose confidentiality is not needed (rows ksim-p2.up-integrity-required,
+    // ksim-p2.up-confidentiality-not-needed).
+    sess.integrity = s.security.integrity == "required" && c.nia.has_value() && !KSIM_MUTANT("up_integrity_ignored");
+    sess.ciphering = s.security.confidentiality != "not-needed" || KSIM_MUTANT("confidentiality_forced");
     sess.ng_dl_teid = n3_.bind([this, alive = alive_, up_id, psi](const entity::gtpu::UserData& d, const ksim::Endpoint&) {
         if (*alive) {
             on_n3(up_id, psi, d);
