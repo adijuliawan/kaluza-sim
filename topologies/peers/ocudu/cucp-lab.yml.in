@@ -25,8 +25,8 @@ cu_cp:
                 sd: 1
   inactivity_timer: 15
   security:
-    nea_pref_list: nea2,nea1,nea0
-    nia_pref_list: nia2,nia1
+    nea_pref_list: @NEA_PREF@
+    nia_pref_list: @NIA_PREF@
   e1ap:
     bind_addrs: 10.250.0.1
   f1ap:

@@ -32,6 +32,15 @@ namespace ksim::node {
 
 namespace {
 
+/// "2,1,0" (P2 Q8: the CU-CP's algorithm preference in info).
+std::string join_algs(const std::vector<std::uint8_t>& l) {
+    std::string out;
+    for (const auto a : l) {
+        out += (out.empty() ? "" : ",") + std::to_string(a);
+    }
+    return out;
+}
+
 using api::Exit;
 using api::Reply;
 using api::Request;
@@ -375,6 +384,10 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         r.set("GNB", t.gnb_name);
         r.set("PLMN", t.mcc + t.mnc);
         r.set("AMF", t.amf.to_string());
+        if (aio.hosts_cucp()) {
+            r.set("AS_NEA", join_algs(t.nea_pref));   // P2 Q8: the CU-CP's preference, first wins
+            r.set("AS_NIA", join_algs(t.nia_pref));
+        }
         r.set("RUN_DIR", aio.run_dir());
         r.set("EVENT_SEQ", static_cast<std::int64_t>(aio.events().last_seq()));
         r.set("LOOP_LAG_MAX_MS", static_cast<std::int64_t>(aio.max_lag_ms()));

@@ -99,7 +99,7 @@ ue.ping.answered	sim	the UE answered an echo request to its address (a ping from
 ran.e1.setup	37.483 8.2.3	GNB-CU-UP E1 SETUP done (at the CU-UP: the response taken; at the CU-CP: the request answered); cu_up or cu_cp
 ran.e1.setup.failure	37.483 8.2.3.3	GNB-CU-UP E1 SETUP FAILURE taken; cause
 ran.e1.error	37.483 10	an E1AP message that did not decode, was not expected, or an ERROR INDICATION; what
-ran.cuup.bearer.setup	37.483 8.3.1	the CU-UP set up a session in a bearer context (setup or modification); cu_up_ue, psi, drbs, integrity, ciphering
+ran.cuup.bearer.setup	37.483 8.3.1	the CU-UP set up a session in a bearer context (setup or modification); cu_up_ue, psi, drbs, integrity, ciphering, t_reordering (ms of its first DRB's entity, or infinity; P2 Q8)
 ran.cuup.bearer.release	37.483 8.3.4	the CU-UP released a session (modification) or a whole bearer context (release); cu_up_ue, psi (or all)
 ran.gtpu.error_indication	29.281 7.3.1	a GTP-U ERROR INDICATION sent or taken; direction=tx|rx, teid, from
 ran.session.setup	38.413 8.2.1.2	PDU SESSION RESOURCE SETUP done for a session (E1, F1 and the UE's DRB); ran_ue, psi, drb, integrity

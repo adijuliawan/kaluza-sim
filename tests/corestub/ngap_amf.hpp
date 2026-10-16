@@ -79,6 +79,8 @@ public:
     bool deregister(const std::string& supi, bool reregistration_required);
     /// T3512 for the accepts from now on (a subscription change).
     void set_t3512(std::optional<int> seconds);
+    /// P2 Q8: the NAS algorithms the next SECURITY MODE COMMAND selects (row ksim-p2.nas-nea1-nia1).
+    void set_nas_algorithms(std::uint8_t ea, std::uint8_t ia);
     std::size_t pagings() const noexcept { return pagings_; }
     struct UeIds {
         std::uint64_t amf = 0;

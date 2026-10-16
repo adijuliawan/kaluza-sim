@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "crypto/aes.hpp"
+#include "crypto/as_security.hpp"
 #include "ocudu/security/s3g.h"  // third_party/ocudu-security: the SNOW 3G kernel and f9
 
 namespace ksim::crypto {
@@ -33,60 +34,6 @@ std::uint8_t bearer_direction(SecInput in) {
 /// The first `bits` bits of data, the rest of the last octet zeroed.
 Bytes take_bits(ByteView data, std::size_t bits) {
     Bytes out(data.begin(), data.begin() + static_cast<std::ptrdiff_t>((bits + 7) / 8));
-    if (bits % 8 != 0) {
-        out.back() &= static_cast<std::uint8_t>(0xFF00U >> (bits % 8));
-    }
-    return out;
-}
-
-void load_key_words(const SecretBytes& key, std::uint32_t k[4]) {
-    // SAGE Document 1 §3.4: K3 = CK[0..31] (the first four octets) ... K0 = CK[96..127].
-    ByteView b = key.expose();
-    for (std::size_t i = 0; i < 4; ++i) {
-        k[3 - i] = (std::uint32_t{b[4 * i]} << 24) | (std::uint32_t{b[4 * i + 1]} << 16) |
-                   (std::uint32_t{b[4 * i + 2]} << 8) | std::uint32_t{b[4 * i + 3]};
-    }
-}
-
-/// 128-EEA1: UEA2's f8 (SAGE Document 1 §3).
-Bytes eea1(const SecretBytes& key, SecInput in, ByteView data, std::size_t bits) {
-    std::uint32_t k[4];
-    load_key_words(key, k);
-    const std::uint32_t bd = (std::uint32_t{in.bearer} << 27) | (std::uint32_t{in.direction & 1U} << 26);
-    std::uint32_t iv[4] = {bd, in.count, bd, in.count};  // IV0 .. IV3 (§3.4)
-    const std::size_t words = (bits + 31) / 32;
-    std::vector<std::uint32_t> ks(words);
-    ocudu::security::S3G_STATE st{};
-    ocudu::security::s3g_initialize(&st, k, iv);
-    ocudu::security::s3g_generate_keystream(&st, static_cast<std::uint32_t>(words), ks.data());
-    OPENSSL_cleanse(st.lfsr, 16 * sizeof(std::uint32_t));  // key-dependent; the kernel frees without wiping
-    OPENSSL_cleanse(st.fsm, 3 * sizeof(std::uint32_t));
-    ocudu::security::s3g_deinitialize(&st);
-    OPENSSL_cleanse(k, sizeof k);
-    Bytes out = take_bits(data, bits);
-    for (std::size_t j = 0; j < out.size(); ++j) {
-        out[j] ^= static_cast<std::uint8_t>(ks[j / 4] >> (24 - 8 * (j % 4)));
-    }
-    if (bits % 8 != 0) {
-        out.back() &= static_cast<std::uint8_t>(0xFF00U >> (bits % 8));
-    }
-    OPENSSL_cleanse(ks.data(), ks.size() * sizeof(std::uint32_t));
-    return out;
-}
-
-/// 128-EEA2: AES-128-CTR.
-Bytes eea2(const SecretBytes& key, SecInput in, ByteView data, std::size_t bits) {
-    std::uint8_t t1[16] = {static_cast<std::uint8_t>(in.count >> 24), static_cast<std::uint8_t>(in.count >> 16),
-                           static_cast<std::uint8_t>(in.count >> 8), static_cast<std::uint8_t>(in.count),
-                           bearer_direction(in)};
-    Bytes out = take_bits(data, bits);
-    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-    int n = 0;
-    if (ctx == nullptr || EVP_EncryptInit_ex(ctx, EVP_aes_128_ctr(), nullptr, key.expose().data(), t1) != 1 ||
-        EVP_EncryptUpdate(ctx, out.data(), &n, out.data(), static_cast<int>(out.size())) != 1) {
-        std::abort();
-    }
-    EVP_CIPHER_CTX_free(ctx);
     if (bits % 8 != 0) {
         out.back() &= static_cast<std::uint8_t>(0xFF00U >> (bits % 8));
     }
@@ -154,19 +101,16 @@ Result<Bytes> nea(Nea alg, const SecretBytes& key, SecInput in, ByteView data, s
     if (in.bearer > 31) {
         return bad("NEA: BEARER is five bits");
     }
-    switch (alg) {
-    case Nea::nea0:
-        return take_bits(data, bits);
-    case Nea::nea1:
-    case Nea::nea2:
-        if (key.size() != 16) {
-            return bad("NEA: the key is 16 octets");
-        }
-        return alg == Nea::nea1 ? eea1(key, in, data, bits) : eea2(key, in, data, bits);
-    case Nea::nea3:
-        return zuc_gap();
+    // P2 Q8: through the context the PDCP entities keep, so the known-answer sets check it.
+    auto c = NeaContext::make(alg, key);
+    if (!c) {
+        return c.error();
     }
-    return bad("NEA: unknown algorithm");
+    Bytes out = take_bits(data, bits);
+    if (auto r = c->apply(in, out, bits); !r) {
+        return r.error();
+    }
+    return out;
 }
 
 Result<Mac> nia(Nia alg, const SecretBytes& key, SecInput in, ByteView msg, std::size_t bits) {
@@ -188,6 +132,14 @@ Result<Mac> nia(Nia alg, const SecretBytes& key, SecInput in, ByteView msg, std:
             // SNOW 3G f9 is defined for one bit or more; the vendored s3g_f9
             // reads past the message for an empty one (KS-SEC-D1)
             return bad("NIA1: the message is at least one bit");
+        }
+        if (bits % 8 == 0) {
+            // P2 Q8: whole octets through the context the PDCP entities keep.
+            auto c = NiaContext::make(alg, key);
+            if (!c) {
+                return c.error();
+            }
+            return c->mac(in, {msg.first(bits / 8)});
         }
         if (alg == Nia::nia1) {
             return uia2_f9(key, in.count, std::uint32_t{in.bearer} << 27, in.direction, msg, bits);  // 33.401 B.2.2

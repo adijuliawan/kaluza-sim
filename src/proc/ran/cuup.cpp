@@ -169,6 +169,9 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
         pc.drb_integrity = sess.integrity;
         pc.sdap_header_tx = d.sdap_dl;
         pc.sdap_header_rx = d.sdap_ul;
+        if (const auto t = d.t_reordering_ms; t) {
+            pc.t_reordering = Millis{*t};   // P2 Q8: the CU-CP's, from E1 (TS 37.483 9.3.1.38)
+        }
         const std::uint8_t drb_id = d.drb_id;
         drb.pdcp = std::make_unique<entity::Pdcp>(
             ex_, pc,
@@ -241,9 +244,11 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
         });
         out.drbs.push_back(e1ap::DrbSetup{d.drb_id, e1ap::GtpTunnel{cfg_.f1u_addr, drb.f1u_ul_teid}, drb.qfis});
     }
+    const auto& t_reord = s.drbs.empty() ? std::optional<int>{} : s.drbs.front().t_reordering_ms;
     events_.emit("ran.cuup.bearer.setup", cfg_.id,
                  {{"cu_up_ue", str(up_id)}, {"psi", str(psi)}, {"drbs", str(s.drbs.size())},
-                  {"integrity", sess.integrity ? "1" : "0"}, {"ciphering", sess.ciphering ? "1" : "0"}});
+                  {"integrity", sess.integrity ? "1" : "0"}, {"ciphering", sess.ciphering ? "1" : "0"},
+                  {"t_reordering", t_reord ? std::to_string(*t_reord) : "infinity"}});
     return out;
 }
 

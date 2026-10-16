@@ -76,6 +76,9 @@ gate c4 ocudu-c4-stub.yaml "$V/ksim-p2-e1.sh $V/ksim-p1-session.sh $V/ksim-p1-da
 cat "$OUT/c4.out"
 gate c5 ocudu-c5-stub.yaml "$V/ksim-p2-e1.sh $V/ksim-p1-session.sh $V/ksim-p1-dataplane.sh" || rc=1
 cat "$OUT/c5.out"
+echo "-- 2a. C3 with nea1 and nia1 first in OCUDU's lists (P2 Q8)"
+gate c3-nea1 ocudu-c3-stub.yaml "$V/ksim-p2-security.sh" OCUDU_NEA_PREF=nea1,nea2,nea0 OCUDU_NIA_PREF=nia1,nia2 || rc=1
+cat "$OUT/c3-nea1.out"
 echo "-- 2b. C3 with 100 UEs (P2 Q7)"
 "$D/ksim-sim/ksim-sim" range derive --block 001010000300000/100 --master "$T/keys/master.key" --kek "$T/keys/kek.key" \
     --out "$T/cards100" >/dev/null || rc=1
@@ -83,7 +86,7 @@ gate c3-100 ocudu-c3-stub-100.yaml "$V/ksim-p2-scale.sh" KSIM_SEALED="$T/cards10
 cat "$OUT/c3-100.out"
 
 echo "-- 3. captures and the canary"
-for label in c3 c4 c5 c3-100; do
+for label in c3 c4 c5 c3-100 c3-nea1; do
     checks "$label" || rc=1
     grep -E '^(PCAP_MALFORMED|PYCRATE_FAILED|PEER_PCAP_MALFORMED|PCAP_CHECK)=' "$OUT/$label.pcap.out" | sed "s/^/$label: /"
     grep -E '^CANARY_RUN=' "$OUT/$label.canary.out" | sed "s/^/$label: /"
@@ -127,7 +130,8 @@ e1_allowed=$(cat "$OUT/c4.rows.tsv" "$OUT/c5.rows.tsv" 2>/dev/null | awk -F'\t' 
     echo "OCUDU_C4_C5_ALLOWED=$e1_allowed"
     echo "OCUDU_C4_C5_FAIL=$e1_fail"
     grep -q $'^ksim-p2.ocudu-100\tPASS' "$OUT/c3-100.rows.tsv" 2>/dev/null && echo "OCUDU_C3_100=PASS" || echo "OCUDU_C3_100=FAIL"
-    for label in c3 c4 c5 c3-100; do
+    grep -q $'^ksim-p2.ocudu-nea1\tPASS' "$OUT/c3-nea1.rows.tsv" 2>/dev/null && echo "OCUDU_C3_NEA1=PASS" || echo "OCUDU_C3_NEA1=FAIL"
+    for label in c3 c4 c5 c3-100 c3-nea1; do
         grep -E '^(PCAP_MALFORMED|PYCRATE_FAILED|PEER_PCAP_MALFORMED)=' "$OUT/$label.pcap.out" | sed "s/^/${label^^}_/"
         grep -E '^CANARY_RUN=' "$OUT/$label.canary.out" | sed "s/^/${label^^}_/"
     done

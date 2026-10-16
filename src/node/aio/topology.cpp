@@ -53,7 +53,8 @@ std::string resolve_path(const std::string& p, const std::string& base_dir) {
 Result<Topology> load_topology(const std::string& file, std::string& why) {
     try {
         const Yaml y = Yaml::load_file(file);
-        y.only({"plmn", "seed", "amf", "gnbs", "ues", "secrets", "peer", "security", "netd", "mode", "watchdog_ms", "farm"});
+        y.only({"plmn", "seed", "amf", "gnbs", "ues", "secrets", "peer", "security", "netd", "mode", "watchdog_ms", "farm",
+                "capture"});
         const std::string base = std::filesystem::path(file).parent_path().string();
         Topology t;
         t.file = file;
@@ -136,7 +137,7 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         t.gnb_name = g.get<std::string>("name", t.gnb_name);
         // A peer CU-CP (P2 Q4) has its own N2 and N3 addresses in its config, not here.
         if (t.peer_cucp.empty() || g.has("cucp")) {
-            g.at("cucp").only({"ng_bind", "ng_streams", "ue_inactivity_s"});
+            g.at("cucp").only({"ng_bind", "ng_streams", "ue_inactivity_s", "nea", "nia", "t_reordering_ms"});
             auto bind = Endpoint::parse(g.at("cucp").at("ng_bind").as<std::string>(), 0);
             if (!bind || bind->family != t.amf.family) {
                 g.at("cucp").at("ng_bind").fail("a numeric address of the AMF's family");
@@ -146,6 +147,42 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             t.ue_inactivity_s = g.at("cucp").get<std::uint16_t>("ue_inactivity_s", t.ue_inactivity_s);
             if (t.ue_inactivity_s < 1 || t.ue_inactivity_s > 7200) {
                 g.at("cucp").at("ue_inactivity_s").fail("1..7200 s (TS 37.483 9.3.1.54)");
+            }
+            // P2 Q8: the DRBs' t-Reordering (TS 38.331 PDCP-Config's values; absent: infinity).
+            if (g.at("cucp").has("t_reordering_ms")) {
+                static constexpr int kValues[] = {0,   1,   2,   4,   5,   8,   10,   15,   20,   30,   40,   50,
+                                                  60,  80,  100, 120, 140, 160, 180,  200,  220,  240,  260,  280,
+                                                  300, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000};
+                const int v = g.at("cucp").at("t_reordering_ms").as<int>();
+                if (std::find(std::begin(kValues), std::end(kValues), v) == std::end(kValues)) {
+                    g.at("cucp").at("t_reordering_ms").fail("one of PDCP-Config's t-Reordering values (0..3000 ms, TS 38.331)");
+                }
+                t.t_reordering_ms = v;
+            }
+            // P2 Q8: the AS algorithms the CU-CP prefers, first that the UE supports wins
+            // (TS 33.501 6.7.3.1). 0 only with security: {allow_null: true}, checked below;
+            // 3 (ZUC) is the declared gap KS-SEC-G1.
+            for (const auto& [key, out] : {std::pair<const char*, std::vector<std::uint8_t>*>{"nea", &t.nea_pref},
+                                           {"nia", &t.nia_pref}}) {
+                if (!g.at("cucp").has(key)) {
+                    continue;
+                }
+                const Yaml l = g.at("cucp").at(key);
+                if (!l.is_seq() || l.size() == 0 || l.size() > 3) {
+                    l.fail("a list of 1 to 3 algorithms, e.g. [1, 2]");
+                }
+                out->clear();
+                t.alg_pref_given = true;
+                for (std::size_t i = 0; i < l.size(); ++i) {
+                    const auto a = l.at(i).as<std::uint8_t>();
+                    if (a > 2) {
+                        l.at(i).fail("0, 1 or 2 (3, ZUC, is the declared gap KS-SEC-G1)");
+                    }
+                    if (std::find(out->begin(), out->end(), a) != out->end()) {
+                        l.at(i).fail("each algorithm once");
+                    }
+                    out->push_back(a);
+                }
             }
         }
         // N3 (P1 N10): the CU-UP's address, GTP-U's port; by default the CU-CP's address.
@@ -284,6 +321,21 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             }
         }
         t.watchdog_ms = y.get<std::uint32_t>("watchdog_ms", t.watchdog_ms);
+        if (y.has("capture")) {
+            // P2 Q8 (ADR 0011): the user plane's capture, full for the gates, headers for
+            // performance runs, or off.
+            y.at("capture").only({"user_plane"});
+            const auto up = y.at("capture").get<std::string>("user_plane", "full");
+            if (up == "full") {
+                t.capture_up = UserPlaneCapture::full;
+            } else if (up == "headers") {
+                t.capture_up = UserPlaneCapture::headers;
+            } else if (up == "off") {
+                t.capture_up = UserPlaneCapture::off;
+            } else {
+                y.at("capture").at("user_plane").fail("full, headers or off");
+            }
+        }
         if (y.has("farm")) {
             y.at("farm").only({"shards"});
             t.farm_shards = y.at("farm").get<unsigned>("shards", 1);
@@ -297,6 +349,10 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         if (y.has("security")) {
             y.at("security").only({"allow_null"});
             t.allow_null = y.at("security").get<bool>("allow_null", false);
+        }
+        const auto has_null = [](const std::vector<std::uint8_t>& l) { return std::find(l.begin(), l.end(), 0) != l.end(); };
+        if (t.alg_pref_given && !t.allow_null && (has_null(t.nea_pref) || has_null(t.nia_pref))) {
+            y.at("gnbs").at(0).at("cucp").fail("NEA0 or NIA0 needs security: {allow_null: true} (the bisect switch, D1)");
         }
         return t;
     } catch (const YamlError& e) {

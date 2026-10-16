@@ -28,6 +28,7 @@
 #include <optional>
 
 #include "codec/pdcp/pdcp.hpp"
+#include "crypto/as_security.hpp"
 #include "crypto/nea.hpp"
 #include "platform/buf.hpp"
 #include "platform/executor.hpp"
@@ -102,6 +103,9 @@ private:
     std::uint8_t rx_dir() const noexcept { return cfg_.side == PdcpSide::ue ? 1 : 0; }
     std::uint8_t bearer() const noexcept { return static_cast<std::uint8_t>((cfg_.rb_id - 1) & 0x1F); }
     bool mac_present() const noexcept { return cfg_.srb || cfg_.drb_integrity; }
+    /// The MAC-I over header and data with the integrity context (mutant nia1_wrong_fresh: the
+    /// UE side's 128-NIA1 with FRESH = BEARER unshifted, row ksim-p2.as-nea1-nia1).
+    Result<crypto::Mac> mac_of(std::uint32_t count, std::uint8_t dir, ByteView header_and_data) const;
     void deliver_from(std::uint32_t count);
     void start_reordering();
     void on_reordering_expiry();
@@ -113,10 +117,10 @@ private:
     std::function<void(std::uint32_t)> integrity_failure_;
     std::shared_ptr<bool> alive_;
 
-    std::optional<crypto::Nia> nia_;
-    std::optional<crypto::Nea> nea_;
-    SecretBytes k_int_;
-    SecretBytes k_enc_;
+    // P2 Q8, the fast path: each algorithm with its key set once (crypto/as_security.hpp).
+    mutable std::optional<crypto::NiaContext> nia_;
+    std::optional<crypto::NeaContext> nea_;
+    SecretBytes k_int_;   // for the mutant only
     bool int_tx_ = false;
     bool int_rx_ = false;
     bool ciph_tx_ = false;

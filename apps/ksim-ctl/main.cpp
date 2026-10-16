@@ -195,7 +195,7 @@ struct Flags {
 Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
     static const std::vector<std::string> valued{"wait", "timeout", "where", "since", "fail", "filter", "cause",
                                                  "dnn", "sst", "sd", "psi", "count", "interval", "size", "type", "ue",
-                                                 "seq", "seconds", "vp", "log", "netd", "parent", "addr"};
+                                                 "seq", "seconds", "vp", "log", "netd", "parent", "addr", "ea", "ia"};
     Flags f;
     for (std::size_t i = from; i < args.size(); ++i) {
         const std::string& a = args[i];
@@ -711,9 +711,10 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
     } else if (verb == "stub") {
         // ksim-corestub (--socket): its report, or a network-side trigger for the gates.
         if (!f.words.empty() && (f.words[0] == "release" || f.words[0] == "ping-ue" || f.words[0] == "deregister" ||
-                                 f.words[0] == "restart" || f.words[0] == "t3512" || f.words[0] == "sms-sub")) {
+                                 f.words[0] == "restart" || f.words[0] == "t3512" || f.words[0] == "sms-sub" ||
+                                 f.words[0] == "nas-alg")) {
             json body = json::object();
-            for (const char* k : {"ue", "psi", "cause", "seq", "seconds"}) {
+            for (const char* k : {"ue", "psi", "cause", "seq", "seconds", "ea", "ia"}) {
                 if (f.has(k)) {
                     body[k] = f.get(k);
                 }

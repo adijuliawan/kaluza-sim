@@ -14,6 +14,7 @@
 
 #include "../crypto/kat_file.hpp"
 #include "entity/pdcp/pdcp.hpp"
+#include "platform/mutation.hpp"
 #include "platform/sim_loop.hpp"
 
 namespace ksim::entity {
@@ -72,6 +73,147 @@ TEST(Pdcp, Clause5_8_The128Eea2SetsCipherADrbByteForByte) {
         ++checked;
     }
     EXPECT_EQ(checked, 6);
+}
+
+// P2 Q8: 128-NEA1 through the entity, from the five SAGE UEA2 sets (128-EEA1 is UEA2,
+// TS 33.401 B.1.2, C.3), compared over the whole octets of each set's LENGTH.
+TEST(Pdcp, Clause5_8_The128Eea1SetsCipherADrbByteForByte) {
+    int checked = 0;
+    for (const auto& [name, s] : kat::load("uea2")) {
+        const Bytes plain = s.bytes("Plaintext");
+        const std::size_t whole = s.num("Length") / 8;
+        const auto count = static_cast<std::uint32_t>(s.num("Count-C"));
+        const auto bearer = static_cast<std::uint8_t>(s.num("Bearer"));
+        const bool downlink = s.num("Direction") == 1;
+        SimLoop loop;
+        Wire tx_w;
+        Wire rx_w;
+        PdcpConfig c;
+        c.srb = false;
+        c.rb_id = static_cast<std::uint8_t>(bearer + 1);
+        c.sn_tx = c.sn_rx = pdcp::SnSize::len18;
+        c.side = downlink ? PdcpSide::gnb : PdcpSide::ue;
+        Pdcp tx = make(loop, tx_w, c);
+        c.side = downlink ? PdcpSide::ue : PdcpSide::gnb;
+        Pdcp rx = make(loop, rx_w, c);
+        ASSERT_TRUE(tx.set_keys(crypto::Nia::nia0, {}, crypto::Nea::nea1, s.secret("CK")));
+        ASSERT_TRUE(rx.set_keys(crypto::Nia::nia0, {}, crypto::Nea::nea1, s.secret("CK")));
+        tx.set_ciphering(true, true);
+        rx.set_ciphering(true, true);
+        tx.set_state(count, 0, 0);
+        rx.set_state(0, count, count);
+        tx.write_sdu(plain);
+        ASSERT_EQ(tx_w.down.size(), 1u) << name;
+        const Bytes& pdu = tx_w.down[0];
+        EXPECT_EQ(to_hex(ByteView(pdu).subspan(3, whole)), to_hex(ByteView(s.bytes("Ciphertext")).subspan(0, whole)))
+            << "set " << name;
+        rx.on_pdu(pdu);
+        ASSERT_EQ(rx_w.up.size(), 1u) << name;
+        EXPECT_EQ(rx_w.up[0], plain);
+        ++checked;
+    }
+    EXPECT_EQ(checked, 5);
+}
+
+// P2 Q8: the MAC-I is 128-NIA1's or NIA2's (their known-answer sets: tests/unit/crypto Kat.*)
+// over the PDU's header and data with the entity's COUNT, BEARER and DIRECTION, from either
+// side, and the peer verifies it; with ciphering, over the deciphered octets.
+TEST(Pdcp, Clause5_9_TheMacIIsTheKatCheckedAlgorithmOverHeaderAndData) {
+    for (const auto nia : {crypto::Nia::nia1, crypto::Nia::nia2}) {
+        for (const auto side : {PdcpSide::ue, PdcpSide::gnb}) {
+            SimLoop loop;
+            Wire tx_w;
+            Wire rx_w;
+            PdcpConfig c;
+            c.rb_id = 2;   // SRB2: BEARER 1
+            c.side = side;
+            Pdcp tx = make(loop, tx_w, c);
+            c.side = side == PdcpSide::ue ? PdcpSide::gnb : PdcpSide::ue;
+            Pdcp rx = make(loop, rx_w, c);
+            const auto nea = nia == crypto::Nia::nia1 ? crypto::Nea::nea1 : crypto::Nea::nea2;
+            ASSERT_TRUE(tx.set_keys(nia, kint(), nea, kenc()));
+            ASSERT_TRUE(rx.set_keys(nia, kint(), nea, kenc()));
+            tx.set_integrity(true, true);
+            rx.set_integrity(true, true);
+            tx.set_state(77, 0, 0);
+            rx.set_state(0, 77, 77);
+            const Bytes sdu = h("0102030405060708090a0b0c0d0e0f");
+            tx.write_sdu(sdu);
+            ASSERT_EQ(tx_w.down.size(), 1u);
+            const Bytes& pdu = tx_w.down[0];
+            const ByteView body(pdu.data(), pdu.size() - 4);
+            const auto want = crypto::nia(nia, kint(), {77, 1, static_cast<std::uint8_t>(side == PdcpSide::ue ? 0 : 1)}, body);
+            ASSERT_TRUE(want);
+            EXPECT_EQ(to_hex(ByteView(pdu).subspan(pdu.size() - 4)), to_hex(ByteView(want->data(), 4)));
+            rx.on_pdu(pdu);
+            ASSERT_EQ(rx_w.up.size(), 1u);
+            EXPECT_EQ(rx_w.up[0], sdu);
+            tx.set_ciphering(true, true);
+            rx.set_ciphering(true, true);
+            tx.write_sdu(sdu);
+            rx.on_pdu(tx_w.down.back());
+            ASSERT_EQ(rx_w.up.size(), 2u);
+            EXPECT_EQ(rx_w.up[1], sdu);
+            EXPECT_EQ(rx.stats().integrity_failures, 0u);
+        }
+    }
+}
+
+// P2 Q8, mutant nia1_wrong_fresh (row ksim-p2.as-nea1-nia1): the UE side's 128-NIA1 with
+// FRESH = BEARER unshifted no longer matches the network side's, which the row then sees.
+TEST(Pdcp, Mutant_nia1_wrong_fresh_TheNetworkSideFindsTheUeMacWrong) {
+    if (!kMutationsBuild) {
+        GTEST_SKIP() << "a mutant build's test";
+    }
+    testing::MutantScope m("nia1_wrong_fresh");
+    SimLoop loop;
+    Wire ue_w;
+    Wire gnb_w;
+    PdcpConfig c;
+    c.rb_id = 2;
+    Pdcp ue = make(loop, ue_w, c);
+    c.side = PdcpSide::gnb;
+    Pdcp gnb = make(loop, gnb_w, c);
+    ASSERT_TRUE(ue.set_keys(crypto::Nia::nia1, kint(), crypto::Nea::nea1, kenc()));
+    ASSERT_TRUE(gnb.set_keys(crypto::Nia::nia1, kint(), crypto::Nea::nea1, kenc()));
+    ue.set_integrity(true, true);
+    gnb.set_integrity(true, true);
+    ue.write_sdu(h("0102030405"));
+    gnb.on_pdu(ue_w.down.at(0));
+    EXPECT_EQ(gnb.stats().integrity_failures, 1u);
+    EXPECT_TRUE(gnb_w.up.empty());
+}
+
+// P2 Q8: a PDU in order with nothing buffered is delivered straight away and leaves the
+// reordering state as §5.2.2.1 would.
+TEST(Pdcp, Clause5_2_2_1_InOrderPdusGoStraightUp) {
+    SimLoop loop;
+    Wire tx_w;
+    Wire rx_w;
+    PdcpConfig c;
+    c.srb = false;
+    c.sn_tx = c.sn_rx = pdcp::SnSize::len12;
+    c.t_reordering = Millis{50};
+    Pdcp tx = make(loop, tx_w, c);
+    c.side = PdcpSide::gnb;
+    Pdcp rx = make(loop, rx_w, c);
+    for (int i = 0; i < 3; ++i) {
+        tx.write_sdu(h("aa"));
+        rx.on_pdu(tx_w.down.back());
+    }
+    EXPECT_EQ(rx_w.up.size(), 3u);
+    EXPECT_EQ(rx.rx_deliv(), 3u);
+    EXPECT_EQ(rx.rx_next(), 3u);
+    EXPECT_FALSE(rx.t_reordering_running());
+    tx.write_sdu(h("bb"));   // COUNT 3, lost
+    tx.write_sdu(h("cc"));   // COUNT 4: waits for 3
+    rx.on_pdu(tx_w.down.back());
+    EXPECT_EQ(rx_w.up.size(), 3u);
+    EXPECT_TRUE(rx.t_reordering_running());
+    rx.on_pdu(tx_w.down[3]);
+    EXPECT_EQ(rx_w.up.size(), 5u);
+    EXPECT_EQ(rx_w.up[3], h("bb"));
+    EXPECT_FALSE(rx.t_reordering_running());
 }
 
 TEST(Pdcp, Clause5_9_AnSrbPduMatchesTheIndependentVectors) {

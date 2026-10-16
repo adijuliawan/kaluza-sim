@@ -23,3 +23,4 @@ f1_no_reassociation	ksim-p2.f1-reassociation	the DU sends no F1 SETUP REQUEST on
 no_ddds	ksim-p2.ocudu-ddds	the DU sends no NR-U DL DATA DELIVERY STATUS, so a CU-UP that waits for a desired buffer size (OCUDU's) sends no DL data (P2 Q4)
 no_inactivity_notification	ksim-p2.e1-inactivity	the CU-UP never sends BEARER CONTEXT INACTIVITY NOTIFICATION, so an idle UE with a session is never released for user inactivity (P2 Q5)
 watchdog_silent	ksim-p2.loop-lag-abort	the shard never reports a late timer, so a stalled loop raises no platform.loop_lag and gates score rows on an unsound run (P2 Q7)
+nia1_wrong_fresh	ksim-p2.as-nea1-nia1	the UE side's 128-NIA1 takes FRESH = BEARER without its 27-bit shift, so its MAC-I matches no network's (P2 Q8)

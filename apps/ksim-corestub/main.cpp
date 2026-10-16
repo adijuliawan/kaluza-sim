@@ -355,6 +355,30 @@ static int run_main(int argc, char** argv) {
         out.set("T3512_S", static_cast<std::int64_t>(secs));
         return out;
     });
+    server.post("/v1/stub/nas-alg", [&s, num](const ksim::api::Request& req) {
+        // P2 Q8: the NAS algorithms the next SECURITY MODE COMMAND selects (TS 33.501 6.7.2);
+        // 1 and 2 only: 0 is the bisect switch's, 3 (ZUC) the declared gap KS-SEC-G1.
+        const auto ea = static_cast<std::uint8_t>(num(req, "ea", 2, 2));
+        const auto ia = static_cast<std::uint8_t>(num(req, "ia", 2, 2));
+        if (ea < 1 || ia < 1) {
+            return Reply::fail(Exit::usage, "nas-alg --ea 1|2 --ia 1|2");
+        }
+        auto r = s.call<bool>([&s, ea, ia] {
+            s.profile.ea = ea;
+            s.profile.ia = ia;
+            if (s.amf) {
+                s.amf->set_nas_algorithms(ea, ia);
+            }
+            return true;
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        Reply out;
+        out.set("EA", static_cast<std::int64_t>(ea));
+        out.set("IA", static_cast<std::int64_t>(ia));
+        return out;
+    });
     server.post("/v1/stub/restart", [&s](const ksim::api::Request&) {
         // An AMF going away and back (rows amf-ueransim.063-066): AMF STATUS
         // INDICATION, then the association aborted after a moment; the UE

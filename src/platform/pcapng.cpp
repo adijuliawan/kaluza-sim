@@ -84,7 +84,8 @@ std::uint32_t PcapngWriter::add_interface(LinkType type, std::string_view name) 
     return interfaces_++;
 }
 
-Result<void> PcapngWriter::write(std::uint32_t iface, std::int64_t ts_ns, ByteView packet, std::string_view comment) {
+Result<void> PcapngWriter::write(std::uint32_t iface, std::int64_t ts_ns, ByteView packet, std::string_view comment,
+                                 std::size_t original) {
     if (iface >= interfaces_) {
         return make_error(Errc::invalid_argument, iface, "pcapng: no such interface");
     }
@@ -96,8 +97,8 @@ Result<void> PcapngWriter::write(std::uint32_t iface, std::int64_t ts_ns, ByteVi
     le32(body, iface);
     le32(body, static_cast<std::uint32_t>(ts >> 32));
     le32(body, static_cast<std::uint32_t>(ts));
-    le32(body, static_cast<std::uint32_t>(packet.size()));
-    le32(body, static_cast<std::uint32_t>(packet.size()));
+    le32(body, static_cast<std::uint32_t>(packet.size()));                                // captured
+    le32(body, static_cast<std::uint32_t>(original > packet.size() ? original : packet.size()));   // on the wire
     body.insert(body.end(), packet.begin(), packet.end());
     pad4(body);
     if (!comment.empty()) {

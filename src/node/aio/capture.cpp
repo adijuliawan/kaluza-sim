@@ -44,8 +44,9 @@ Result<void> Capture::open_file(File& out, const std::string& path, std::string_
     return {};
 }
 
-Result<std::unique_ptr<Capture>> Capture::open(const std::string& dir) {
+Result<std::unique_ptr<Capture>> Capture::open(const std::string& dir, UserPlaneCapture up) {
     std::unique_ptr<Capture> c(new Capture());   // NOLINT(cppcoreguidelines-owning-memory): private constructor
+    c->up_ = up;
     for (auto [file, name] : {std::pair{&c->ngap_, "ngap"}, std::pair{&c->f1ap_, "f1ap"}, std::pair{&c->e1ap_, "e1ap"},
                               std::pair{&c->uu_, "uu"}}) {
         auto r = open_file(*file, dir + "/" + name + ".pcapng", name);
@@ -103,7 +104,7 @@ void Capture::e1ap(bool cp_tx, ByteView pdu) {
 }
 
 void Capture::gtpu(const Endpoint& from, const Endpoint& to, ByteView pdu) {
-    if (from.family != Endpoint::Family::v4 || to.family != Endpoint::Family::v4) {
+    if (up_ == UserPlaneCapture::off || from.family != Endpoint::Family::v4 || to.family != Endpoint::Family::v4) {
         return;
     }
     pcap::Udp4 u;
@@ -117,6 +118,15 @@ void Capture::gtpu(const Endpoint& from, const Endpoint& to, ByteView pdu) {
         return;
     }
     ++stats_.gtpu;
+    if (up_ == UserPlaneCapture::headers) {
+        const ByteView head(frame->data(), std::min(frame->size(), kHeaderOctets));
+        (void)gtpu_.w->write(gtpu_.ifc, wall_ns(), head, {}, frame->size());
+        if (++unflushed_ >= 1024) {
+            unflushed_ = 0;
+            std::fflush(gtpu_.f);
+        }
+        return;
+    }
     (void)gtpu_.w->write(gtpu_.ifc, wall_ns(), *frame);
     std::fflush(gtpu_.f);
 }

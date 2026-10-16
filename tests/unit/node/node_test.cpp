@@ -86,7 +86,7 @@ TEST(Topology, TheRepositorysTopologiesLoad) {
 TEST(Topology, TheP2TopologiesLoad) {
     const std::string root = KSIM_SOURCE_DIR;
     for (const char* f : {"split-stub.yaml", "split-open5gs.yaml", "split-stub-e1.yaml", "split-lab.yaml",
-                          "ocudu-c3-stub.yaml", "ocudu-c4-stub.yaml", "ocudu-c5-stub.yaml"}) {
+                          "ocudu-c3-stub.yaml", "ocudu-c4-stub.yaml", "ocudu-c5-stub.yaml", "split-stub-nea1.yaml"}) {
         std::string why;
         auto t = load_topology(root + "/topologies/" + f, why);
         ASSERT_TRUE(t) << f << ": " << why;
@@ -125,6 +125,38 @@ TEST(Topology, SplitRolesInNamespacesNeedKsimMidAndOneAddressPerLeg) {
     split.replace(split.find("e1: 10.250.0.1"), 14, "e1: 10.250.0.9");   // the CU-CP's leg has one address
     std::string why;
     EXPECT_FALSE(load_topology(write(dir + "/s2.yaml", split + "netd: {nodes: true, mid: true}\n"), why));
+    fs::remove_all(dir);
+}
+
+// P2 Q8: the CU-CP's AS preference lists; ZUC is the declared gap and the NULL algorithms
+// need the bisect switch.
+TEST(Topology, TheCuCpsAlgorithmListsAreReadAndChecked) {
+    const std::string dir = temp_dir();
+    const std::string cucp = "cucp: {ng_bind: 127.0.0.2}";
+    auto with = [&](const std::string& lists, const std::string& extra = "") {
+        std::string s = kTopology;
+        s.replace(s.find(cucp), cucp.size(), "cucp: {ng_bind: 127.0.0.2, " + lists + "}");
+        std::string why;
+        return load_topology(write(dir + "/a.yaml", s + extra), why);
+    };
+    std::string why;
+    auto def = load_topology(write(dir + "/d.yaml", kTopology), why);
+    ASSERT_TRUE(def) << why;
+    EXPECT_EQ(def->nea_pref, (std::vector<std::uint8_t>{2, 1, 0}));   // NEA0 skipped without allow_null
+    auto one = with("nea: [1, 2], nia: [1, 2]");
+    ASSERT_TRUE(one);
+    EXPECT_EQ(one->nea_pref, (std::vector<std::uint8_t>{1, 2}));
+    EXPECT_EQ(one->nia_pref, (std::vector<std::uint8_t>{1, 2}));
+    EXPECT_FALSE(with("nea: [3, 2]"));          // ZUC: KS-SEC-G1
+    EXPECT_FALSE(with("nia: [2, 2]"));          // each once
+    EXPECT_FALSE(with("nea: []"));
+    EXPECT_FALSE(with("nea: [0, 2]"));          // NEA0 listed without the bisect switch
+    EXPECT_TRUE(with("nea: [0, 2]", "security: {allow_null: true}\n"));
+    auto tr = with("t_reordering_ms: 100");
+    ASSERT_TRUE(tr);
+    EXPECT_EQ(tr->t_reordering_ms, 100);
+    EXPECT_FALSE(def->t_reordering_ms);        // infinity
+    EXPECT_FALSE(with("t_reordering_ms: 99"));  // not one of PDCP-Config's values
     fs::remove_all(dir);
 }
 
@@ -273,6 +305,48 @@ TEST(Capture, ZeroesTheNgapSecurityKeyAndLeavesOutWhatItCannotRedact) {
         EXPECT_EQ(st.st_mode & 0777, 0600u) << f;
     }
     fs::remove_all(dir);
+}
+
+// P2 Q8 (ADR 0011): a headers-only capture keeps each GTP-U frame's first 128 octets
+// with its length on the wire; off keeps none. The Enhanced Packet Blocks of the file
+// (type 6): captured length at +20, original length at +24.
+TEST(Capture, TheUserPlanePolicyKeepsHeadersOrNothing) {
+    auto epbs = [](const Bytes& f) {
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> out;
+        auto le = [&f](std::size_t at) {
+            return std::uint32_t{f[at]} | std::uint32_t{f[at + 1]} << 8 | std::uint32_t{f[at + 2]} << 16 |
+                   std::uint32_t{f[at + 3]} << 24;
+        };
+        for (std::size_t at = 0; at + 12 <= f.size();) {
+            const std::uint32_t type = le(at);
+            const std::uint32_t len = le(at + 4);
+            if (len < 12 || at + len > f.size()) {
+                break;
+            }
+            if (type == 6) {
+                out.emplace_back(le(at + 20), le(at + 24));
+            }
+            at += len;
+        }
+        return out;
+    };
+    const Bytes payload(1400, 0x42);
+    for (const auto policy : {UserPlaneCapture::headers, UserPlaneCapture::off}) {
+        const std::string dir = temp_dir();
+        auto c = Capture::open(dir, policy);
+        ASSERT_TRUE(c);
+        (*c)->gtpu(Endpoint::v4(127, 0, 0, 2, 2152), Endpoint::v4(127, 0, 0, 1, 2152), payload);
+        (*c)->close();
+        const auto blocks = epbs(read(dir + "/gtpu.pcapng"));
+        if (policy == UserPlaneCapture::headers) {
+            ASSERT_EQ(blocks.size(), 1u);
+            EXPECT_EQ(blocks[0].first, Capture::kHeaderOctets);
+            EXPECT_EQ(blocks[0].second, 20u + 8u + 1400u);   // IPv4, UDP, the G-PDU
+        } else {
+            EXPECT_TRUE(blocks.empty());
+        }
+        fs::remove_all(dir);
+    }
 }
 
 TEST(Capture, ZeroesTheE1apUpKeysAndWritesGtpuAsIpv4Udp) {

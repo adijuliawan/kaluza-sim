@@ -9,6 +9,7 @@ add_library(ksim_crypto STATIC
     kdf.cpp
     milenage.cpp
     keys5g.cpp
+    as_security.cpp
     nea.cpp
     keccak.cpp
     tuak.cpp

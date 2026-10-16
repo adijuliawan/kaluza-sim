@@ -544,6 +544,9 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
         r.set("GNB", t_.gnb_name);
         if (cucp == nullptr) {
             r.set("PEER_CUCP", peer_of("cucp"));
+        } else {
+            copy(a, "AS_NEA");   // P2 Q8
+            copy(a, "AS_NIA");
         }
         if (child("cuup") == nullptr) {
             r.set("PEER_CUUP", peer_of("cuup"));

@@ -133,6 +133,15 @@ void NgapAmf::set_t3512(std::optional<int> seconds) {
     }
 }
 
+void NgapAmf::set_nas_algorithms(std::uint8_t ea, std::uint8_t ia) {
+    p_.ea = ea;
+    p_.ia = ia;
+    for (auto& [id, ue] : ues_) {
+        ue.nas->profile().ea = ea;
+        ue.nas->profile().ia = ia;
+    }
+}
+
 void NgapAmf::page(const std::string& supi) {
     Ue* ue = nullptr;
     for (auto it = order_.rbegin(); it != order_.rend(); ++it) {

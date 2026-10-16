@@ -16,6 +16,8 @@
 #       printing PID= and CONFIG=. Our dev-PC guard applies to the peer: an AMF
 #       in 172.30.0.0/16 is refused unless this runs on kaluza-uesim with --lab,
 #       and nothing starts while a gnb or odu process (a B220 cell) runs.
+#       The CU-CP's AS preference lists come from OCUDU_NEA_PREF and OCUDU_NIA_PREF
+#       (default nea2,nea1,nea0 and nia2,nia1; P2 Q8).
 #   tools/ocudu-peer.sh stop [--lab]
 #       stops every ocucp and ocuup started from our build (matched by their full
 #       path, so no other OCUDU on the host is touched), then checks none is left;
@@ -116,7 +118,11 @@ run)
     tmpl="$ROOT/topologies/peers/ocudu/$role.yml.in"
     [ "$lab" = 1 ] && tmpl="$ROOT/topologies/peers/ocudu/$role-lab.yml.in"
     cfg="$run_dir/ocudu-$role.yml"
-    sed -e "s|@AMF_ADDR@|$amf_addr|g" -e "s|@AMF_PORT@|$amf_port|g" -e "s|@RUN_DIR@|$run_dir|g" "$tmpl" > "$cfg"
+    # P2 Q8: the CU-CP's AS lists (row ksim-p2.ocudu-nea1 puts nea1 and nia1 first).
+    nea_pref="${OCUDU_NEA_PREF:-nea2,nea1,nea0}"; nia_pref="${OCUDU_NIA_PREF:-nia2,nia1}"
+    case "$nea_pref,$nia_pref" in *[!a-z0-9,]*) echo "OCUDU_NEA_PREF/OCUDU_NIA_PREF: nea<n>,… and nia<n>,…" >&2; exit 2 ;; esac
+    sed -e "s|@AMF_ADDR@|$amf_addr|g" -e "s|@AMF_PORT@|$amf_port|g" -e "s|@RUN_DIR@|$run_dir|g" \
+        -e "s|@NEA_PREF@|$nea_pref|g" -e "s|@NIA_PREF@|$nia_pref|g" "$tmpl" > "$cfg"
     if [ "$lab" = 1 ]; then
         # LW2: the role's own namespace with its ens19 address and ksim-mid leg, then netd's exec.
         ns=$(lab_ns "$role")

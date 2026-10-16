@@ -3,6 +3,8 @@
 
 #include "entity/pdcp/pdcp.hpp"
 
+#include "platform/mutation.hpp"
+
 #include <algorithm>
 #include <utility>
 #include <vector>
@@ -12,16 +14,6 @@ namespace ksim::entity {
 namespace {
 
 constexpr std::size_t kKeyLength = 16;   // the 128-bit algorithms (TS 33.501 Annex D)
-
-void apply_nea(crypto::Nea alg, const SecretBytes& key, crypto::SecInput in, Bytes& buf, std::size_t from) {
-    if (from >= buf.size() || alg == crypto::Nea::nea0) {
-        return;
-    }
-    auto out = crypto::nea(alg, key, in, ByteView(buf).subspan(from));
-    if (out) {
-        std::copy(out->begin(), out->end(), buf.begin() + static_cast<std::ptrdiff_t>(from));
-    }
-}
 
 } // namespace
 
@@ -46,11 +38,29 @@ Result<void> Pdcp::set_keys(crypto::Nia nia, SecretBytes k_int, crypto::Nea nea,
         (nea != crypto::Nea::nea0 && k_enc.size() != kKeyLength)) {
         return make_error(Errc::invalid_argument, 0, "PDCP: a 128-bit algorithm needs a 16-octet key");
     }
-    nia_ = nia;
-    nea_ = nea;
+    auto i = crypto::NiaContext::make(nia, k_int);
+    if (!i) {
+        return i.error();
+    }
+    auto e = crypto::NeaContext::make(nea, k_enc);
+    if (!e) {
+        return e.error();
+    }
+    nia_ = std::move(*i);
+    nea_ = std::move(*e);
     k_int_ = std::move(k_int);
-    k_enc_ = std::move(k_enc);
     return {};
+}
+
+Result<crypto::Mac> Pdcp::mac_of(std::uint32_t count, std::uint8_t dir, ByteView header_and_data) const {
+    if (!nia_) {
+        return make_error(Errc::invalid_argument, 0, "PDCP: no integrity key");
+    }
+    if (KSIM_MUTANT("nia1_wrong_fresh") && cfg_.side == PdcpSide::ue && nia_->alg() == crypto::Nia::nia1 &&
+        !header_and_data.empty()) {
+        return crypto::uia2_f9(k_int_, count, bearer(), dir, header_and_data, header_and_data.size() * 8);
+    }
+    return nia_->mac({count, bearer(), dir}, {header_and_data});
 }
 
 void Pdcp::set_integrity(bool tx, bool rx) noexcept {
@@ -67,13 +77,17 @@ void Pdcp::set_ciphering(bool tx, bool rx) noexcept {
 
 void Pdcp::write_sdu(Bytes sdu) {
     const std::uint32_t count = tx_next_;
-    Bytes pdu = pdcp::data_header(cfg_.srb, cfg_.sn_tx, count);
-    const std::size_t header = pdu.size();
+    // One buffer, sized once: header, data, MAC-I; then ciphered in place (P2 Q8).
+    const Bytes h = pdcp::data_header(cfg_.srb, cfg_.sn_tx, count);
+    const std::size_t header = h.size();
+    Bytes pdu;
+    pdu.reserve(header + sdu.size() + pdcp::kMacILength);
+    pdu.insert(pdu.end(), h.begin(), h.end());
     pdu.insert(pdu.end(), sdu.begin(), sdu.end());
     if (mac_present()) {
         crypto::Mac mac{};   // §6.3.4: zeros on an SRB without integrity
         if (int_tx_ && nia_) {
-            auto m = crypto::nia(*nia_, k_int_, {count, bearer(), tx_dir()}, pdu);
+            auto m = mac_of(count, tx_dir(), pdu);
             if (!m) {
                 ++stats_.discarded;
                 return;
@@ -82,8 +96,9 @@ void Pdcp::write_sdu(Bytes sdu) {
         }
         pdu.insert(pdu.end(), mac.begin(), mac.end());
     }
-    if (ciph_tx_ && nea_) {
-        apply_nea(*nea_, k_enc_, {count, bearer(), tx_dir()}, pdu, header + (cfg_.sdap_header_tx ? 1 : 0));
+    const std::size_t from = header + (cfg_.sdap_header_tx ? 1 : 0);
+    if (ciph_tx_ && nea_ && from < pdu.size()) {
+        (void)nea_->apply({count, bearer(), tx_dir()}, std::span<std::uint8_t>(pdu).subspan(from));
     }
     ++tx_next_;
     ++stats_.tx;
@@ -118,23 +133,26 @@ void Pdcp::on_pdu(ByteView in) {
     }
     const auto count = static_cast<std::uint32_t>((static_cast<std::uint64_t>(hfn) << n) | h->sn);
 
-    Bytes rest(in.begin() + static_cast<std::ptrdiff_t>(h->length), in.end());
-    if (ciph_rx_ && nea_) {
-        apply_nea(*nea_, k_enc_, {count, bearer(), rx_dir()}, rest, cfg_.sdap_header_rx ? 1 : 0);
+    // One copy of the PDU, deciphered in place; the MAC-I is checked over its header and
+    // data where they lie (P2 Q8).
+    Bytes pdu(in.begin(), in.end());
+    const std::size_t hl = h->length;
+    std::size_t end = pdu.size();
+    const std::size_t from = hl + (cfg_.sdap_header_rx ? 1 : 0);
+    if (ciph_rx_ && nea_ && from < end) {
+        (void)nea_->apply({count, bearer(), rx_dir()}, std::span<std::uint8_t>(pdu).subspan(from));
     }
-    Bytes data;
     if (mac_present()) {
-        if (rest.size() < pdcp::kMacILength) {
+        if (end - hl < pdcp::kMacILength) {
             ++stats_.discarded;
             return;
         }
         crypto::Mac mac_i{};
-        std::copy(rest.end() - 4, rest.end(), mac_i.begin());
-        rest.resize(rest.size() - 4);
-        Bytes body(in.begin(), in.begin() + static_cast<std::ptrdiff_t>(h->length));
-        body.insert(body.end(), rest.begin(), rest.end());
+        std::copy(pdu.end() - 4, pdu.end(), mac_i.begin());
+        end -= pdcp::kMacILength;
+        const ByteView body(pdu.data(), end);
         if (int_rx_ && nia_) {
-            auto x = crypto::nia(*nia_, k_int_, {count, bearer(), rx_dir()}, body);
+            auto x = mac_of(count, rx_dir(), body);
             if (!x || *x != mac_i) {
                 ++stats_.integrity_failures;
                 if (integrity_failure_) {
@@ -143,13 +161,27 @@ void Pdcp::on_pdu(ByteView in) {
                 return;
             }
         } else {
-            last_unprotected_ = Unprotected{std::move(body), mac_i, count};
+            last_unprotected_ = Unprotected{Bytes(body.begin(), body.end()), mac_i, count};
         }
     }
-    data = std::move(rest);
+    pdu.resize(end);
+    pdu.erase(pdu.begin(), pdu.begin() + static_cast<std::ptrdiff_t>(hl));
+    Bytes data = std::move(pdu);
 
     if (count < rx_deliv_ || buffer_.count(count) != 0) {
         ++stats_.discarded;
+        return;
+    }
+    if (!cfg_.out_of_order && count == rx_deliv_ && buffer_.empty()) {
+        // In order with nothing waiting (P2 Q8): §5.2.2.1's delivery without the buffer.
+        rx_deliv_ = count + 1;
+        rx_next_ = std::max(rx_next_, rx_deliv_);
+        ++stats_.delivered;
+        to_upper_(std::move(data));
+        if (t_reord_ && rx_deliv_ >= rx_reord_) {
+            timers_.stop_timer(*t_reord_);
+            t_reord_.reset();
+        }
         return;
     }
     if (cfg_.out_of_order) {
@@ -230,8 +262,7 @@ Result<bool> Pdcp::verify_last_unprotected() const {
     if (!last_unprotected_ || !nia_) {
         return make_error(Errc::invalid_argument, 0, "PDCP: no unprotected PDU or no integrity key");
     }
-    auto x = crypto::nia(*nia_, k_int_, {last_unprotected_->count, bearer(), rx_dir()},
-                         last_unprotected_->header_and_data);
+    auto x = mac_of(last_unprotected_->count, rx_dir(), last_unprotected_->header_and_data);
     if (!x) {
         return x.error();
     }

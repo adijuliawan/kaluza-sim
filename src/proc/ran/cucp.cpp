@@ -1092,7 +1092,8 @@ void CuCp::start_job(Ue& ue) {
         d.drb_id = next_drb;
         // The PDCP timers of the PDCP-Config the UE gets (rrc::PdcpSettings): the CU-UP's
         // entity runs with the same (P2 Q5).
-        const rrc::PdcpSettings pdcp;
+        rrc::PdcpSettings pdcp;
+        pdcp.t_reordering_ms = cfg_.t_reordering_ms;   // P2 Q8: the topology's, as the UE gets it
         d.t_reordering_ms = pdcp.t_reordering_ms;
         for (const auto& f : item.transfer.flows) {
             d.flows.push_back(e1ap::QosFlow{f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable});
@@ -1242,6 +1243,7 @@ void CuCp::job_rrc(Ue& ue) {
             d.qfis.push_back(f.qfi);
         }
         d.pdcp.integrity = s.integrity;
+        d.pdcp.t_reordering_ms = cfg_.t_reordering_ms;   // P2 Q8: as the CU-UP's entity runs it (E1)
         b.drbs.push_back(std::move(d));
         if (s.item.nas) {
             r.nas.push_back(*s.item.nas);

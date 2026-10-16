@@ -78,7 +78,7 @@ std::unique_ptr<AllInOne> AllInOne::start(const Topology& t, const std::string& 
         f->write(e);
         m->count_event(e);   // P2 Q7: metrics v0
     });
-    auto cap = Capture::open(run_dir);
+    auto cap = Capture::open(run_dir, a->topo_.capture_up);
     if (!cap) {
         why = cap.error().what;
         return nullptr;
@@ -620,6 +620,9 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         cc.gnb_id_bits = topo_.gnb_id_bits;
         cc.allow_null = topo_.allow_null;
         cc.ue_inactivity_s = topo_.ue_inactivity_s;
+        cc.nea_preference = topo_.nea_pref;   // P2 Q8
+        cc.nia_preference = topo_.nia_pref;
+        cc.t_reordering_ms = topo_.t_reordering_ms;
         cc.slices.clear();
         for (const auto& s : slices) {
             cc.slices.push_back(ngap::Snssai{s.sst, s.sd});

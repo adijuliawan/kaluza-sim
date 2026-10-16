@@ -79,6 +79,7 @@ struct CuCpConfig {
     std::vector<std::uint8_t> nea_preference{2, 1, 0};
     std::vector<std::uint8_t> nia_preference{2, 1};
     bool allow_null = false;            // D1: NIA0/NEA0 only as the bisect switch
+    std::optional<int> t_reordering_ms;   // P2 Q8: the DRBs' t-Reordering (RRC and E1); absent: infinity
     // The UE Inactivity Timer E1 Bearer Context Setup gives the CU-UP with
     // ActivityNotificationLevel "ue" (P2 Q4, KS-E1AP-D1). From Q5 the CU-UP's
     // report releases the UE, so the default is the longest the IE allows: a run's

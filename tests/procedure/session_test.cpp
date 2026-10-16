@@ -93,6 +93,36 @@ TEST(Session, APingCrossesTheWholeUserPlaneWithNea2OnTheDrb) {
     EXPECT_EQ(n.failures(), "");
 }
 
+// P2 Q8: with the CU-CP preferring 128-NEA1/NIA1 (SNOW 3G), the AS SECURITY MODE COMMAND
+// selects them and the user plane runs on NEA1; the CU-CP's t-Reordering reaches the
+// CU-UP's entity through E1 (TS 37.483 9.3.1.38) as the UE gets it in RRC.
+TEST(Session, Ts33501_6_7_3_Nea1AndNia1FirstCarryTheWholeUserPlane) {
+    const ScopedCuCp tweak([](proc::ran::CuCpConfig& c) {
+        c.nea_preference = {1, 2};
+        c.nia_preference = {1, 2};
+        c.t_reordering_ms = 100;
+    });
+    Net n;
+    n.register_ue();
+    n.establish();
+    const Event* smc = n.last("ran.as.smc");
+    ASSERT_NE(smc, nullptr);
+    EXPECT_EQ(*smc->find("alg"), "nia1/nea1");
+    const Event* bearer = n.last("ran.cuup.bearer.setup");
+    ASSERT_NE(bearer, nullptr);
+    EXPECT_EQ(*bearer->find("t_reordering"), "100");
+    node::PingRequest p;
+    p.dst = {10, 60, 0, 1};
+    p.count = 3;
+    p.interval = 200;
+    ASSERT_TRUE(n.ue->ping(p));
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("ue.ping.done").empty(); }, n.loop.now() + 5'000));
+    EXPECT_EQ(*n.last("ue.ping.done")->find("received"), "3");
+    EXPECT_TRUE(n.named("rrc.integrity_failure").empty());
+    EXPECT_TRUE(n.named("ran.rrc.integrity_failure").empty());
+    EXPECT_EQ(n.failures(), "");
+}
+
 // P2 Q4 (TS 38.425 5.4.2.1): the DU sends the initial DL DATA DELIVERY STATUS once the
 // DRB is up, and after DL data reports the highest PDCP SN sent to the UE, which RLC
 // AM over the ideal link delivered in sequence. The CU-UP takes it as feedback, not data.

@@ -33,6 +33,11 @@
 
      Fault injection stays in P3.
   7. **User-plane capture** is `full | headers | off` per topology. Gates use full; performance runs use headers, so a 30-minute run stays small.
+     - *As built (P2 Q8):* `capture: {user_plane: full|headers|off}`.
+       - headers keeps each GTP-U frame's first 128 octets with its length on the wire, and flushes every 1024 frames.
+       - full flushes as it writes, since the gates read the file during the run.
+       - The manifest records the policy (KS-PLAT-B51).
+     - The CU-CP settings this ADR lists are topology settings as of Q8: `cucp: {nea: [..], nia: [..]}` (KS-SEC-B4) and `cucp: {t_reordering_ms: N}` (KS-RRC-B5). The UP policy for "preferred" and the flow-to-DRB mapping follow in Q9 and Q10.
   8. **Topology settings,** each recorded as a -B row when it lands: the CU-CP's NEA/NIA preference lists, its UP security policy for "preferred" and for an absent Security Indication, its QoS-flow-to-DRB mapping, and t-Reordering.
   9. **Throughput** is measured only on the dev PC or inside kaluza-uesim against the scripted core on 127.0.0.x, never across the lab (kaluza-core-df, 2026-10-15). The numbers are the sim's own processing over an ideal link with zero delay; the scripted UPF's CPU is reported apart.
 - **Consequences:**

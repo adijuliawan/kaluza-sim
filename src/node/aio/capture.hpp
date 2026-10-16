@@ -44,10 +44,18 @@ struct CaptureStats {
     std::uint64_t left_out = 0;   // NGAP and E1AP PDUs that did not decode, so could not be redacted
 };
 
+/// P2 Q8 (ADR 0011): how much of the user plane (gtpu.pcapng) a run keeps. full: every
+/// frame whole, flushed as written (the gates read it while the run goes on); headers:
+/// each frame's first kHeaderOctets (outer IPv4, UDP, GTP-U and its extension headers,
+/// the inner IP and transport headers) with its length on the wire, flushed every
+/// 1024 frames (performance runs); off: none.
+enum class UserPlaneCapture : std::uint8_t { full, headers, off };
+
 class Capture {
 public:
+    static constexpr std::size_t kHeaderOctets = 128;
     /// Creates the six files in `dir` (mode 0600).
-    static Result<std::unique_ptr<Capture>> open(const std::string& dir);
+    static Result<std::unique_ptr<Capture>> open(const std::string& dir, UserPlaneCapture up = UserPlaneCapture::full);
     ~Capture();
     Capture(const Capture&) = delete;
     Capture& operator=(const Capture&) = delete;
@@ -76,6 +84,8 @@ private:
     void write(File& file, std::string_view dissector, ByteView pdu, const std::string& comment);
 
     mutable std::mutex mu_;
+    UserPlaneCapture up_ = UserPlaneCapture::full;
+    std::uint64_t unflushed_ = 0;
     File ngap_;
     File f1ap_;
     File e1ap_;

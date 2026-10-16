@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -47,9 +48,21 @@ struct ScopedInactivity {
     ScopedInactivity& operator=(const ScopedInactivity&) = delete;
 };
 
+// P2 Q8: a test's CU-CP settings (its AS preference lists, t-Reordering), for a scope.
+inline std::function<void(proc::ran::CuCpConfig&)> rig_cucp_tweak;
+struct ScopedCuCp {
+    explicit ScopedCuCp(std::function<void(proc::ran::CuCpConfig&)> f) { rig_cucp_tweak = std::move(f); }
+    ~ScopedCuCp() { rig_cucp_tweak = nullptr; }
+    ScopedCuCp(const ScopedCuCp&) = delete;
+    ScopedCuCp& operator=(const ScopedCuCp&) = delete;
+};
+
 inline proc::ran::CuCpConfig cucp_config() {
     proc::ran::CuCpConfig c;
     c.ue_inactivity_s = rig_ue_inactivity_s;
+    if (rig_cucp_tweak) {
+        rig_cucp_tweak(c);
+    }
     return c;
 }
 

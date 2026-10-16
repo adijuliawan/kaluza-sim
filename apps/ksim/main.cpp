@@ -97,6 +97,11 @@ json manifest(const ksim::node::Topology& t, const std::string& run_dir, bool la
     m["peer"] = peer;
     m["lab"] = lab;
     m["plain_nas"] = t.plain_nas;
+    // P2 Q8: what p2_exit checks (no exit run with the NULL bisect switch) and the capture kept.
+    m["security"] = {{"allow_null", t.allow_null}, {"as_nea", t.nea_pref}, {"as_nia", t.nia_pref}};
+    m["capture"] = {{"user_plane", t.capture_up == ksim::node::UserPlaneCapture::full      ? "full"
+                                   : t.capture_up == ksim::node::UserPlaneCapture::headers ? "headers"
+                                                                                           : "off"}};
     m["amf"] = t.amf.to_string();
     m["ues"] = 0;
     for (const auto& g : t.ues) {

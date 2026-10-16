@@ -42,9 +42,11 @@ public:
     /// An Interface Description Block; returns the interface id for write().
     std::uint32_t add_interface(LinkType type, std::string_view name);
 
-    /// An Enhanced Packet Block. ts_ns: nanoseconds since the Unix epoch.
+    /// An Enhanced Packet Block. ts_ns: nanoseconds since the Unix epoch. `original`:
+    /// the packet's length on the wire when `packet` is the front of it (P2 Q8, a
+    /// headers-only capture); by default the packet is whole.
     Result<void> write(std::uint32_t interface_id, std::int64_t ts_ns, ByteView packet,
-                       std::string_view comment = {});
+                       std::string_view comment = {}, std::size_t original = 0);
 
 private:
     Sink sink_;

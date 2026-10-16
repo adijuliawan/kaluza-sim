@@ -117,6 +117,15 @@ KSIM_RUNS="$T/runs-quiet" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek
 grep -E '^QUIET_' "$T/quiet.out"
 grep -q '^QUIET_SPLIT=PASS' "$T/quiet.out" || rc=1
 
+# P2 Q8: the AS and NAS security gate, NEA1 and NIA1 first at our CU-CP, aio and split.
+for topo in aio-stub-nea1 split-stub-nea1; do
+    echo "-- the security gate ($topo)"
+    KSIM_RUNS="$T/runs-$topo" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
+        KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE="$ROOT/topologies/$topo.yaml" \
+        sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p2-security.sh" > "$T/$topo.out" 2>&1 || rc=1
+    cat "$T/$topo.out"
+done
+
 # P2 Q5: the E1 gate in split mode (topologies/split-stub-e1.yaml, a 15 s UE
 # Inactivity Timer): the CU-UP's inactivity report and the release it leads to.
 echo "-- the split E1 run"
