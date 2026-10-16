@@ -17,7 +17,9 @@
 #       in 172.30.0.0/16 is refused unless this runs on kaluza-uesim with --lab,
 #       and nothing starts while a gnb or odu process (a B220 cell) runs.
 #       The CU-CP's AS preference lists come from OCUDU_NEA_PREF and OCUDU_NIA_PREF
-#       (default nea2,nea1,nea0 and nia2,nia1; P2 Q8).
+#       (default nea2,nea1,nea0 and nia2,nia1; P2 Q8). Against the Open5GS rig (P2
+#       Q13), OCUDU_N2N3_BIND=192.168.134.1 binds N2 and N3 to the dev PC's vmnet8
+#       address, and OCUDU_SLICE_SD=1 adds the SD the rig's AMF serves.
 #   tools/ocudu-peer.sh stop [--lab]
 #       stops every ocucp and ocuup started from our build (matched by their full
 #       path, so no other OCUDU on the host is touched), then checks none is left;
@@ -123,6 +125,18 @@ run)
     case "$nea_pref,$nia_pref" in *[!a-z0-9,]*) echo "OCUDU_NEA_PREF/OCUDU_NIA_PREF: nea<n>,… and nia<n>,…" >&2; exit 2 ;; esac
     sed -e "s|@AMF_ADDR@|$amf_addr|g" -e "s|@AMF_PORT@|$amf_port|g" -e "s|@RUN_DIR@|$run_dir|g" \
         -e "s|@NEA_PREF@|$nea_pref|g" -e "s|@NIA_PREF@|$nia_pref|g" "$tmpl" > "$cfg"
+    # P2 Q13: against the Open5GS rig, N2 and N3 leave from the dev PC's vmnet8 address
+    # (OCUDU_N2N3_BIND=192.168.134.1), as our own split-open5gs CU-CP and CU-UP do; F1 and
+    # E1 stay on loopback.
+    if [ -n "${OCUDU_N2N3_BIND:-}" ] && [ "$lab" != 1 ]; then
+        case "$OCUDU_N2N3_BIND" in 192.168.134.*) ;; *) echo "OCUDU_N2N3_BIND: the dev PC's vmnet8 address only" >&2; exit 2 ;; esac
+        sed -i -e "s|bind_addrs: 127.0.0.5|bind_addrs: $OCUDU_N2N3_BIND|" -e "s|bind_addr: 127.0.0.4|bind_addr: $OCUDU_N2N3_BIND|" "$cfg"
+    fi
+    # The slice's SD, for a core that serves 1-000001 only (the rig: OCUDU_SLICE_SD=1, decimal).
+    if [ -n "${OCUDU_SLICE_SD:-}" ]; then
+        case "$OCUDU_SLICE_SD" in *[!0-9]*) echo "OCUDU_SLICE_SD: a decimal SD" >&2; exit 2 ;; esac
+        sed -i "s|^\( *\)- sst: 1\$|&\n\1  sd: $OCUDU_SLICE_SD|" "$cfg"
+    fi
     if [ "$lab" = 1 ]; then
         # LW2: the role's own namespace with its ens19 address and ksim-mid leg, then netd's exec.
         ns=$(lab_ns "$role")

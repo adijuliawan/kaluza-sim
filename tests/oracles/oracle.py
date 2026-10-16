@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ksimoracle import asn, compare, pcap, roundtrip, tshark  # noqa: E402
+from ksimoracle import asn, compare, gtpu, pcap, roundtrip, tshark  # noqa: E402
 from ksimoracle.codec import Codec  # noqa: E402
 from ksimoracle.valuegen import Gen, Omit  # noqa: E402
 
@@ -426,6 +426,13 @@ def cmd_selftest(a) -> int:
         failed += 1
     if not failed:
         print("SELFTEST oracle: OK (valid PDU passes; a flipped bit and a wrong-width field fail)")
+    # P2 Q13: the GTP-U echo walk tools/pcap_check.py falls back on.
+    bad = [case for case, ok in gtpu.selftest() if not ok]
+    for case in bad:
+        print(f"SELFTEST gtpu: FAIL ({case})")
+    if not bad:
+        print(f"SELFTEST gtpu: OK ({len(gtpu.selftest())} cases: the rig's echo passes, broken copies fail)")
+    failed += len(bad)
     return 1 if failed else 0
 
 

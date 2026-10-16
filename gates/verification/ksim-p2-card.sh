@@ -45,6 +45,12 @@ fi
 echo "-- registration with the card behind $([ -n "${BRIDGE:-}" ] && echo the bridge || echo PC/SC) (UE $CARD_UE)"
 info=$(ctl ue "$CARD_UE" sim info)
 reader=$(printf '%s\n' "$info" | kv READER)
+if [ -z "${BRIDGE:-}" ] && [ "${REAL_CARD:-0}" != 1 ] && [ "${reader#pcsc:}" = "$reader" ]; then
+    # P2 Q13: a run whose UE has its card in process (a core's whole set): nothing behind PC/SC.
+    skip_row ksim-p2.pcsc-register "UE $CARD_UE's card is ${reader:-in process}, not behind PC/SC (the topology's card)"
+    summary "ksim-p2-card"
+    exit $?
+fi
 reg=$(ctl ue "$CARD_UE" power on --wait 30s)
 complete=$(ctl ue "$CARD_UE" wait nas.reg.complete --timeout 5s | kv EVENT)
 got="$reader $(printf '%s\n' "$reg" | kv RESULT) complete=$complete"

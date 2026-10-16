@@ -194,11 +194,14 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
   5. Afterwards, check that `ip netns list` shows no `ksim-` namespace. `ksim stop` tears it down; `ksim-netd`'s gc covers a run that died.
 - **The Open5GS rig (D5, ADR 0010).** A control run follows the same steps each time, all from the dev PC, inside a window agreed with the active kaluza-core session:
   1. `ksim-sim range provision --target open5gs --block … --ssh amadeus-open5gs`. The subscribers get a session per DNN, `internet,ims` by default (N17).
+     - `--pcc-gbr 1000` (P2 Q13, D2) adds a GBR PCC rule to the first DNN's session: 5QI 1, GFBR 1000 kbit/s and MFBR 2000 each way, for ICMP with 10.55.0.1. The fork's PCF puts it in the SM policy and its SMF adds the flow to the session. Only the GBR row's UE (`QOS2_UE`, 7) gets it, re-provisioned with `--replace` for a run of `ksim-p2-qos2.sh` alone with `QOS2_PCC_GBR=1`, so the other rows see plain subscribers.
   2. `tools/open5gs-rig.sh start [--session] [--t3512 N]`. It refuses when any open5gs NF already runs.
      - `--session` adds smfd, and upfd as root (`sudo -n`; the user allowed it on 2026-10-15 for upfd only). upfd makes `ogstun`, which then gets 10.55.0.1/16 and 10.56.0.1/16: our copy's pools, off kaluza-core's 10.45–10.50 (kaluza-core-df).
      - `--t3512 120` sets the periodic rows' timer in our copy.
      - With the dev PC's ksim-netd (N17; `tools/systemd/ksim-netd-devpc.service`, no parent link) the UEs run in netns mode. Each UE gets a namespace with TUNs and nothing on the host side, so no veth and no P-64 flap of vmnet8.
   3. `gates/run.sh open5gs`.
+     - Split mode: `KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE=$PWD/topologies/split-open5gs.yaml`.
+     - C3, OCUDU's CU-CP and CU-UP against the rig (P2 Q13): `KSIM_TOPOLOGY_FILE=$PWD/topologies/ocudu-c3-open5gs.yaml` with `OCUDU_N2N3_BIND=192.168.134.1` (OCUDU's N2 and N3 from vmnet8; F1 and E1 stay on loopback) and `OCUDU_SLICE_SD=1` (the rig's AMF serves 1-000001 only, and refuses an NG Setup without it).
   4. `tools/open5gs-rig.sh stop`. It stops upfd as root too, deletes `ogstun` and `ogstun-edge`, and checks that no NF and no `ogstun` are left.
   5. `ksim-sim range deprovision …`, then remove the NF logs in `~/kaluza-sim-rig/log`, since debug logs can hold the subscribers' key material. Since P2 Q3 `tools/open5gs-rig.sh stop` removes them itself once no NF is left (`LOGS_LEFT=0`).
   6. Tell the core session what was left.

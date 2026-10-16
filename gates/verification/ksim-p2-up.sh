@@ -37,7 +37,7 @@ off() {
     ctl ue "$u" power off --abrupt >/dev/null 2>&1
 }
 # session: registers the UE and sets a session up; prints the ran.up.security fields and
-# the pings received, as "indication=… integrity=… confidentiality=… cuup_i=… cuup_c=… received=…"
+# the pings received, as "indication=… asked=… integrity=… confidentiality=… cuup_i=… cuup_c=… received=…"
 session() {
     _seq=$(ctl info | kv EVENT_SEQ)
     ctl ue "$u" power on --wait 30s >/dev/null || { echo "registered=0"; return; }
@@ -46,7 +46,8 @@ session() {
     _bc=$(ctl wait ran.cuup.bearer.setup --since "$_seq" --timeout 5s)
     _rx=0
     [ -n "$_psi" ] && _rx=$(ctl ue "$u" ping "${DN_ADDR:-10.60.0.1}" --psi "$_psi" -c 3 --interval 200 | kv RECEIVED)
-    echo "indication=$(printf '%s\n' "$_up" | kv INDICATION) integrity=$(printf '%s\n' "$_up" | kv INTEGRITY)" \
+    echo "indication=$(printf '%s\n' "$_up" | kv INDICATION) asked=$(printf '%s\n' "$_up" | kv ASKED)" \
+         "integrity=$(printf '%s\n' "$_up" | kv INTEGRITY)" \
          "confidentiality=$(printf '%s\n' "$_up" | kv CONFIDENTIALITY) cuup_i=$(printf '%s\n' "$_bc" | kv INTEGRITY)" \
          "cuup_c=$(printf '%s\n' "$_bc" | kv CIPHERING) received=${_rx:-0}"
 }
@@ -105,8 +106,14 @@ echo "-- no Security Indication (UE $u)"
 on_stub && stub up-policy --integrity absent --confidentiality required >/dev/null
 off
 got=$(session)
-row ksim-p2.up-indication-absent '^indication=absent integrity=[01] confidentiality=[01] received=[1-9]$' \
-    "indication=$(field "$got" indication) integrity=$(field "$got" integrity) confidentiality=$(field "$got" confidentiality) received=$(field "$got" received)"
+if on_stub || [ "$(field "$got" indication)" = absent ]; then
+    row ksim-p2.up-indication-absent '^indication=absent integrity=[01] confidentiality=[01] received=[1-9]$' \
+        "indication=$(field "$got" indication) integrity=$(field "$got" integrity) confidentiality=$(field "$got" confidentiality) received=$(field "$got" received)"
+else
+    # P2 Q13 (D8): this core's SMF sends a Security Indication (the Open5GS rig: preferred and
+    # preferred), so there is no absent IE to score; what it sent and got is recorded.
+    skip_row ksim-p2.up-indication-absent "$CORE sends a Security Indication: $(field "$got" asked), integrity=$(field "$got" integrity) confidentiality=$(field "$got" confidentiality)"
+fi
 off
 on_stub && stub up-policy --integrity not-needed --confidentiality required >/dev/null
 

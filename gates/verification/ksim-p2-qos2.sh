@@ -19,7 +19,7 @@
 #
 #   RUN=<run dir> CORE=stub|open5gs|kaluza gates/verification/ksim-p2-qos2.sh
 #
-# UE QOS2_UE (default 7).
+# UE QOS2_UE (default 7). On open5gs, QOS2_PCC_GBR=1 when the rig provisioned its GBR PCC rule (Q13).
 
 set -u
 . "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/lib/ksim.sh"
@@ -64,10 +64,39 @@ row ksim-p2.rqos-capability '^rqos=1 smf_saw=1 session=[0-9]+$' "rqos=${rqos:-no
 off
 
 if ! on_stub; then
-    for id in ksim-p2.rqos-derived-rule ksim-p2.rqos-timer ksim-p2.unknown-qfi ksim-p2.sdap-end-marker ksim-p2.gbr-setup \
+    for id in ksim-p2.rqos-derived-rule ksim-p2.rqos-timer ksim-p2.unknown-qfi ksim-p2.sdap-end-marker \
               ksim-p2.gbr-refused ksim-p2.gbr-notify; do
         skip_row "$id" "the RQI, the QFIs and the GBR flows are the core's ($CORE): only the stub's are set by a row"
     done
+    if [ "$CORE" = open5gs ] && [ "${QOS2_PCC_GBR:-0}" = 1 ]; then
+        # P2 Q13 (D2): the rig's UE $u has a GBR PCC rule (ksim-sim range provision --pcc-gbr 1000:
+        # 5QI 1, GFBR 1000 kbit/s each way, ICMP with the DN reflector), and the fork's PCF and SMF
+        # add its GBR flow to the session, by a modification after the establishment.
+        echo "-- the core's GBR flow (UE $u, the rig's PCC rule)"
+        up
+        qos=""; drb=""; _t=0
+        while [ -n "$psi" ] && [ -z "$drb" ] && [ "$_t" -lt 20 ]; do
+            qos=$(ctl gnb "$GNB" qos "$u")
+            drb=$(printf '%s\n' "$qos" | sed -n "s/^PS\.$psi\.DRB\.\([0-9]*\)\.GFBR=.*/\1/p" | head -n 1)
+            [ -n "$drb" ] || sleep 0.5
+            _t=$((_t + 1))
+        done
+        q=$(printf '%s\n' "$qos" | kv "PS.$psi.DRB.${drb:-0}.QFIS")
+        gfbr=$(printf '%s\n' "$qos" | kv "PS.$psi.DRB.${drb:-0}.GFBR")
+        c=$(ctl ue "$u" status | kv C_RNTI)
+        du=$(ctl du "$GNB-du" ue-list | sed -n "s/^UE\.$c\.DRB\.${drb:-0}\.GFBR=//p")
+        cuup=$(ctl cuup "$GNB-cuup" bearers | sed -n "s/^DRB\.[0-9]*\.$psi\.${drb:-0}\.GFBR=//p" | head -n 1)
+        rx=0
+        [ -n "$psi" ] && rx=$(pings "$DN")
+        got="drb=${drb:-none} qfis=${q:-none} gfbr=${gfbr:-none} du=${du:-none} cuup=${cuup:-none}"
+        got="$got ue_qfi=$(ps "UL_QFI.${q:-0}" | num) received=${rx:-0}"
+        row ksim-p2.gbr-setup '^drb=[0-9]+ qfis=[0-9]+ gfbr=1000000/1000000 du=1000000/1000000 cuup=1000000/1000000 ue_qfi=([3-9]|[1-9][0-9]+) received=3$' "$got"
+        off
+    elif [ "$CORE" = open5gs ]; then
+        skip_row ksim-p2.gbr-setup "the rig's UE $u has no GBR PCC rule (provision it with --pcc-gbr 1000, then QOS2_PCC_GBR=1)"
+    else
+        skip_row ksim-p2.gbr-setup "no GBR flow on $CORE without an IMS UA or a core PCC rule (D2)"
+    fi
     summary "ksim-p2-qos2"
     exit 0
 fi

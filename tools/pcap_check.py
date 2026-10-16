@@ -22,7 +22,11 @@ Run it with the oracle venv:
     .venv/bin/python -I tools/pcap_check.py <run dir>
 
 It prints PCAP_FRAMES, PCAP_MALFORMED (tshark), PYCRATE_FAILED and
-PCAP_CHECK=PASS|FAIL, with one PCAP_BAD line per failed frame. A capture
+PCAP_CHECK=PASS|FAIL, with one PCAP_BAD line per failed frame. Two kinds of
+gtpu.pcapng frame tshark cannot read are judged again: an F1-U frame on its GTP-U
+and NR-U headers alone (P2 Q12), and an Echo Request or Response, such as the Open5GS
+rig UPF's with a Recovery Time Stamp, on TS 29.281 by ksimoracle.gtpu (P2 Q13,
+counted as PCAP_GTPU_ECHO_REJUDGED). A capture
 without frames is a failure: a run that captured nothing proves nothing.
 
 A run with an interop peer (P2 Q4, <run>/peer/ from gates/run.sh) has no NGAP
@@ -39,7 +43,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests" / "oracles"))
-from ksimoracle import asn, pcap, tshark  # noqa: E402
+from ksimoracle import asn, gtpu, pcap, tshark  # noqa: E402
 
 CAPTURES = ("ngap.pcapng", "f1ap.pcapng", "e1ap.pcapng", "uu.pcapng")
 RAW_CAPTURES = ("gtpu.pcapng",)   # raw IPv4 frames: tshark only (pycrate has no GTP-U)
@@ -85,7 +89,7 @@ def main() -> int:
         print(__doc__)
         return 2
     run = Path(sys.argv[1])
-    frames = malformed = pyfail = 0
+    frames = malformed = pyfail = rejudged = 0
     bad: list[str] = []
     peer = run / "peer"
     ours = tuple(c for c in CAPTURES if not (peer.is_dir() and c in PEER_HELD))
@@ -125,7 +129,10 @@ def main() -> int:
         # which tshark's T-PDU heuristic may take for something else: at 1 in 65536 a
         # ciphertext has 0x86dd at offset 12 and reads as an Ethernet frame. Such a frame
         # is judged again with the T-PDU not dissected, on its GTP-U and NR-U headers.
+        # P2 Q13: an Echo Request or Response tshark cannot read (a Recovery Time Stamp, IE
+        # 231, from the Open5GS rig's UPF) is judged on TS 29.281 by ksimoracle.gtpu instead.
         plain = None
+        frames_raw = None
         for i, p in enumerate(packets, start=1):
             errs = tshark.errors(p)
             f1u = any(lf.name == "gtp.ext_hdr" and "NR RAN container" in lf.show for lf in p.leaves)
@@ -133,9 +140,19 @@ def main() -> int:
                 if plain is None:
                     plain = tshark.decode(raw, prefs=["gtp.dissect_tpdu_as:none"])
                 errs = tshark.errors(plain[i - 1]) if i - 1 < len(plain) else errs
+            elif errs:
+                if frames_raw is None:
+                    frames_raw = pcap.read_pcapng_packets(raw)
+                g = gtpu.gtpu_of_ipv4(frames_raw[i - 1][1]) if i - 1 < len(frames_raw) else None
+                if g is not None and gtpu.message_type(g) in gtpu.ALLOWED:
+                    why = gtpu.path_message_problem(g)
+                    errs = [f"TS 29.281: {why}"] if why else []
+                    if not why:
+                        rejudged += 1
             if errs:
                 malformed += 1
                 bad.append(f"{cap} frame {i}: tshark: {'; '.join(errs)[:160]}")
+    print(f"PCAP_GTPU_ECHO_REJUDGED={rejudged}")
     sim_frames = 0
     f = run / SIM_CAPTURE
     if f.is_file():

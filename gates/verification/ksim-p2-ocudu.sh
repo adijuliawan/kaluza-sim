@@ -96,10 +96,24 @@ if on_stub && [ "$idle" = nas.mm.cm_idle ]; then
     paged=$(ctl wait ran.du.paging --since "$seq" --timeout 10s | kv EVENT)
     ans=$(ctl ue "$u" wait ue.ping.answered --since "$seq" --timeout 15s | kv EVENT)
     row ksim-p2.ocudu-paging '^paged=ran.du.paging answered=ue.ping.answered$' "paged=$paged answered=$ans"
-elif on_stub; then
+elif [ -n "${DN_PING:-}" ] && [ "$idle" = nas.mm.cm_idle ]; then
+    # P2 Q13: on a real core the DN host pings the UE (the rig: gates/lib/rig-dn-ping.sh), as
+    # the P1 idle rows do; the AMF pages through OCUDU's CU-CP and our DU.
+    # A UE in a namespace of its own (netd ues: true) is answered by that namespace's kernel,
+    # not the UE: then the DN host's ping says it was answered, as in the P1 idle rows.
+    seq=$(ctl info | kv EVENT_SEQ)
+    $DN_PING "$ip" >/dev/null 2>&1 &
+    dnp=$!
+    paged=$(ctl wait ran.du.paging --since "$seq" --timeout 10s | kv EVENT)
+    wait "$dnp"
+    dn_rc=$?
+    ans=$(ctl ue "$u" wait ue.ping.answered --since "$seq" --timeout 1ms | kv EVENT)
+    [ -z "$ans" ] && [ "$dn_rc" = 0 ] && ans=dn-host
+    row ksim-p2.ocudu-paging '^paged=ran.du.paging answered=(ue.ping.answered|dn-host)$' "paged=$paged answered=${ans:-none}"
+elif on_stub || [ -n "${DN_PING:-}" ]; then
     skip_row ksim-p2.ocudu-paging "the UE did not go idle"
 else
-    skip_row ksim-p2.ocudu-paging "no DN-side ping on $CORE"
+    skip_row ksim-p2.ocudu-paging "no DN-side ping on $CORE (DN_PING)"
 fi
 
 echo "-- deregistration through OCUDU"

@@ -75,7 +75,7 @@ Group commands take `--stagger <ms>` and `--parallel <n>`, and print one block p
   - The gates then ABORT with exit 7 instead of scoring rows.
 - `ksim-ctl netd …` talks to ksim-netd for scripts (`--netd PATH`, or `$KSIM_NETD`, default `/run/ksim/netd.sock`):
   - `list`, `setup-node <ns> [--parent P --addr A/N]`, `veth <ns> <A/N>` and `teardown <ns>`, within netd's allowlist;
-  - `exec <ns> --log FILE -- <argv…>` starts a command in a namespace netd made, as the caller. The words after `--` go as they are. It prints `PID=` and does not wait.
+  - `exec <ns> --log FILE -- <argv…>` starts a command in a namespace netd made, as the caller. The words after `--` go as they are. It prints `PID=` and does not wait. The PID is netd's helper, which leads the command's process group, waits on it and passes SIGTERM, SIGINT and SIGHUP on to it. `kill -- -PID` stops the group (KS-PLAT-D18).
 
   `tools/ocudu-peer.sh run --lab` uses it to start OCUDU's roles in our namespaces on kaluza-uesim (LW2).
 - `ksim-ctl info` shows the CU-CP's AS preference as `AS_NEA` and `AS_NIA` (P2 Q8).

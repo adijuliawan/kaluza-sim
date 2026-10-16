@@ -44,7 +44,12 @@ case "$mode" in
         ;;
 esac
 [ "$(ctl faults list | kv FAULTS)" = 0 ] || abort "the run has faults set"
-[ "$CORE" = stub ] && [ -n "${STUB_CTL:-}" ] || abort "the E1 gate runs against the stub"
+if [ "$CORE" != stub ] || [ -z "${STUB_CTL:-}" ]; then
+    # P2 Q13: its rows are the stub's (the inactivity trigger is the stub's UPF falling silent).
+    skip_row ksim-p2.e1-inactivity "the stub's row: on $CORE no trigger falls silent on cue"
+    summary "ksim-p2-e1"
+    exit $?
+fi
 stub() { "$KSIM_CTL" --socket "$STUB_CTL" stub "$@"; }
 : "${E1_UE:=1}"
 u=$E1_UE

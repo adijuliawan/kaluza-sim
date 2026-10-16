@@ -110,6 +110,30 @@ def read_pcapng_exported(data: bytes) -> list[tuple[int, str, bytes, str]]:
     return out
 
 
+def read_pcapng_packets(data: bytes) -> list[tuple[int, bytes]]:
+    """(link type, packet) for each Enhanced Packet Block of a pcapng file, in order
+    (P2 Q13: the raw frames behind tshark's frame numbers)."""
+    out: list[tuple[int, bytes]] = []
+    e, off = "<", 0
+    links: list[int] = []
+    while off + 12 <= len(data):
+        btype = struct.unpack("<I", data[off:off + 4])[0]
+        if btype == 0x0A0D0D0A:
+            e = "<" if data[off + 8:off + 12] == b"\x4d\x3c\x2b\x1a" else ">"
+            links = []
+        blen = struct.unpack(e + "I", data[off + 4:off + 8])[0]
+        if blen < 12 or off + blen > len(data):
+            raise ValueError(f"pcapng: a block of length {blen} at {off}")
+        body = data[off + 8:off + blen - 4]
+        if btype == 1:
+            links.append(struct.unpack(e + "H", body[:2])[0])
+        elif btype == 6:
+            ifc, _, _, cap, _ = struct.unpack(e + "IIIII", body[:20])
+            out.append((links[ifc] if ifc < len(links) else -1, body[20:20 + cap]))
+        off += blen
+    return out
+
+
 def read_exported_pdu(data: bytes) -> list[tuple[int, str, bytes]]:
     """(frame number, dissector name, payload) for each record of a classic
     pcap of DLT 252 (Exported PDU). Records of other link types are skipped."""

@@ -9,13 +9,19 @@
 // 10.60.0.0/24): a DN namespace with its TUN dn0 (10.60.0.1, the UE pool
 // 10.45.0.0/16 routed to it); an ICMP echo request from 10.45.0.2 written into
 // the TUN is answered by the namespace's kernel, out of the same TUN. No bridge
-// and no veth here: the dev PC has none (P-64).
+// and no veth here: the dev PC has none (P-64). From P2 Q13: a SIGTERM to the PID
+// exec hands back ends the command too (KS-PLAT-D18).
 //
 //   netd_smoke <netd socket>
 
+#include <fcntl.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+#include <csignal>
 
 #include <algorithm>
 #include <cstdint>
@@ -79,6 +85,34 @@ bool dn_echo(Client& c) {
     return false;
 }
 
+/// A SIGTERM to the PID exec hands back (its helper) ends the command too, and the helper
+/// reports the command's status (KS-PLAT-D18).
+bool exec_kill(Client& c) {
+    int st[2] = {-1, -1};
+    if (::pipe(st) != 0) {
+        return false;
+    }
+    const int nul = ::open("/dev/null", O_RDWR | O_CLOEXEC);
+    auto pid = c.exec("ksim-smoke", {"sleep", "30"}, {nul, nul, nul, st[1]});
+    ::close(nul);
+    ::close(st[1]);
+    if (!pid) {
+        std::printf("NETD_SMOKE: exec %s\n", c.last_error().c_str());
+        ::close(st[0]);
+        return false;
+    }
+    (void)::kill(static_cast<pid_t>(*pid), SIGTERM);
+    pollfd p{st[0], POLLIN, 0};
+    int status = 0;
+    const bool told = ::poll(&p, 1, 5000) == 1 && ::read(st[0], &status, sizeof(status)) == sizeof(status);
+    ::close(st[0]);
+    const bool ok = told && WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM;
+    if (!ok) {
+        std::printf("NETD_SMOKE: the command ran on after SIGTERM to %u (told=%d status=%#x)\n", *pid, told, status);
+    }
+    return ok;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -124,6 +158,7 @@ int main(int argc, char** argv) {
     const bool elsewhere = mine >= 0 && ::bind(mine, reinterpret_cast<sockaddr*>(&a), sizeof(a)) == 0;
     ::close(mine);
     const bool dn = dn_echo(*c);
+    const bool killed = exec_kill(*c);
     auto names = c->list();
     const bool listed = names && names->size() == 2 &&
                         std::find(names->begin(), names->end(), "ksim-smoke") != names->end() &&
@@ -131,8 +166,9 @@ int main(int argc, char** argv) {
     const bool gc = static_cast<bool>(c->gc());
     auto after = c->list();
     const bool clean = after && after->empty();
-    const bool ok = std::memcmp(got, ping, 4) == 0 && elsewhere && dn && listed && gc && clean;
-    std::printf("NETD_SMOKE=%s loop=%d other_ns=%d dn_echo=%d listed=%d gc=%d left=%zu\n", ok ? "PASS" : "FAIL",
-                std::memcmp(got, ping, 4) == 0, elsewhere, dn, listed, gc, after ? after->size() : 99U);
+    const bool ok = std::memcmp(got, ping, 4) == 0 && elsewhere && dn && killed && listed && gc && clean;
+    std::printf("NETD_SMOKE=%s loop=%d other_ns=%d dn_echo=%d exec_kill=%d listed=%d gc=%d left=%zu\n",
+                ok ? "PASS" : "FAIL", std::memcmp(got, ping, 4) == 0, elsewhere, dn, killed, listed, gc,
+                after ? after->size() : 99U);
     return ok ? 0 : 1;
 }

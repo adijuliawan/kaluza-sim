@@ -39,6 +39,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <csignal>
 #include <unistd.h>
 
 #include <algorithm>
@@ -95,6 +96,14 @@ void close_all_but(std::vector<int> keep) {
 }
 
 /// The exec helper, in the child of netd: never returns.
+/// The exec helper's command, for forward_signal (the helper is single-threaded).
+volatile pid_t g_exec_child = 0;
+extern "C" void forward_signal(int sig) {
+    if (g_exec_child > 0) {
+        (void)::kill(g_exec_child, sig);   // async-signal-safe
+    }
+}
+
 [[noreturn]] void exec_helper(int ns_fd, const std::string& netns, const std::vector<std::string>& argv, const Peer& peer,
                               const std::array<int, 4>& fds) {
     if (::setns(ns_fd, CLONE_NEWNET) != 0 || ::unshare(CLONE_NEWNS) != 0 ||
@@ -142,6 +151,16 @@ void close_all_but(std::vector<int> keep) {
     ::close(fds[0]);
     ::close(fds[1]);
     ::close(fds[2]);
+    // P2 Q13 (KS-PLAT-D18): a signal to this helper, the PID netd hands back, goes on to the
+    // command. It came with netd's own handlers, which only flag a stop: a plain kill of the
+    // PID did nothing, and the command ran on.
+    g_exec_child = child;
+    struct sigaction sa {};
+    sa.sa_handler = forward_signal;
+    ::sigemptyset(&sa.sa_mask);
+    for (int sig : {SIGTERM, SIGINT, SIGHUP}) {
+        (void)::sigaction(sig, &sa, nullptr);
+    }
     int status = 0x7F00;   // as if exit 127, when the fork failed
     if (child > 0) {
         while (::waitpid(child, &status, 0) < 0 && errno == EINTR) {

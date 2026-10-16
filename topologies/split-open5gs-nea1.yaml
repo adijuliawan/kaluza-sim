@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The AS security gate against the Open5GS fork on the rig (P2 Q13, row ksim-p2.as-nea1-nia1):
+# split-open5gs.yaml with the CU-CP preferring 128-NEA1 and 128-NIA1 (SNOW 3G). Run only under
+# the rig's conditions (lab.md section 6), after the active kaluza-core session agreed.
+plmn: "00101"
+seed: 42
+mode: split
+amf: [{addr: 192.168.134.128, port: 38412}]
+gnbs:
+  - id: {value: 0x1A0, bits: 22}
+    name: ksim-gnb1
+    cucp: {ng_bind: 192.168.134.1, nea: [1, 2], nia: [1, 2]}
+    dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
+    split: {f1c: 127.0.10.1, e1: 127.0.20.1, du: 127.0.10.2, cuup: 127.0.10.3, cuup_e1: 127.0.20.2, streams: 16}
+ues:
+  - {group: phones, count: 13, range: "001010000300001", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+     imeisv_tac: "86000000"}
+secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
+peer: {name: open5gs, repo: adijuliawan/open5gs, commit: 741c29d8d, rig: amadeus-open5gs, config: kaluza-sim-rig/etc}
+netd: {nodes: false, ues: true}

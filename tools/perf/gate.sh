@@ -154,7 +154,10 @@ PYEOF2
     wait
     ctl --parallel 10 ue "1-$PERF_UES" power off --switch-off --wait 10s >/dev/null 2>&1
 fi
+# netd exec prints its helper's PID, the leader of the command's process group: the group
+# is stopped, the helper and iperf3 together (KS-PLAT-D18).
 for f in "$RUN/iperf3-s.pids" "$RUN/iperf-c.pids"; do
-    [ -f "$f" ] && xargs kill < "$f" 2>/dev/null   # servers and clients run as this user
+    [ -f "$f" ] || continue
+    while read -r pid; do kill -TERM -- "-$pid" 2>/dev/null; done < "$f"
 done
 echo "PERF_TSV=$OUT"

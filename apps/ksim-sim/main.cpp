@@ -12,6 +12,7 @@
 //       IMSI= K_FPR= line per card, never a key
 //   ksim-sim range provision --target open5gs --block <…> --master <file> --ssh <host>
 //            [--db-config <remote yaml>] [--sst 1] [--sd 000001] [--dnn internet] [--replace]
+//            [--pcc-gbr KBPS]   (P2 Q13: open5gs, a GBR PCC rule on the first DNN's session)
 //   ksim-sim range deprovision --target open5gs --block <…> --ssh <host> [--db-config <remote yaml>]
 //   ksim-sim serve --pcsc <reader> --listen <host:port> --allow <address> [--admin]
 //       the card bridge (P2 Q1; lab.md §7): a real card lent to one remote terminal
@@ -286,16 +287,36 @@ std::vector<std::string> dnn_list(const std::string& dnns) {
 /// The fork's subscriber document (misc/db/open5gs-dbctl-pgsql subscriber_doc
 /// at 741c29d8d: Milenage with OPc, AMF 8000, one slice, 1 Gbps), one session
 /// per DNN, the first the default.
-nlohmann::json subscriber_doc(const std::string& imsi, unsigned sst, const std::string& sd, const std::string& dnns) {
+/// P2 Q13 (D2): a GBR PCC rule for the rig's GBR row: 5QI 1, the GFBR given and twice it
+/// as MFBR (kbit/s), ICMP to and from the DN reflector 10.55.0.1. Flows are written from the
+/// remote end to the UE (TS 29.212 5.4.2); the fork's SMF swaps the uplink one.
+nlohmann::json gbr_pcc_rule(unsigned kbps) {
+    using nlohmann::json;
+    const auto rate = [](unsigned v) { return json{{"value", v}, {"unit", 1}}; };   // unit 1: kbit/s
+    const std::string desc = "permit out icmp from 10.55.0.1 to any";
+    return {{"flow", json::array({{{"direction", 1}, {"description", desc}}, {{"direction", 2}, {"description", desc}}})},
+            {"qos",
+             {{"index", 1},
+              {"arp", {{"priority_level", 2}, {"pre_emption_capability", 1}, {"pre_emption_vulnerability", 2}}},
+              {"mbr", {{"downlink", rate(kbps * 2)}, {"uplink", rate(kbps * 2)}}},
+              {"gbr", {{"downlink", rate(kbps)}, {"uplink", rate(kbps)}}}}}};
+}
+
+nlohmann::json subscriber_doc(const std::string& imsi, unsigned sst, const std::string& sd, const std::string& dnns,
+                              unsigned pcc_gbr_kbps = 0) {
     using nlohmann::json;
     const json ambr = {{"downlink", {{"value", 1000000000}, {"unit", 0}}}, {"uplink", {{"value", 1000000000}, {"unit", 0}}}};
     json sessions = json::array();
     for (const auto& dnn : dnn_list(dnns)) {
+        json pcc = json::array();
+        if (pcc_gbr_kbps != 0 && sessions.empty()) {
+            pcc.push_back(gbr_pcc_rule(pcc_gbr_kbps));
+        }
         sessions.push_back({{"name", dnn},
                             {"type", 3},
                             {"qos", {{"index", 9}, {"arp", {{"priority_level", 8}, {"pre_emption_capability", 1}, {"pre_emption_vulnerability", 2}}}}},
                             {"ambr", ambr},
-                            {"pcc_rule", json::array()}});
+                            {"pcc_rule", pcc}});
     }
     json slice = {{"sst", sst}, {"default_indicator", true}, {"session", sessions}};
     if (!sd.empty()) {
@@ -312,7 +333,7 @@ nlohmann::json subscriber_doc(const std::string& imsi, unsigned sst, const std::
 }
 
 int provision(const Block& b, const std::string& master_file, const Rig& rig, unsigned sst, const std::string& sd,
-              const std::string& dnn, bool replace) {
+              const std::string& dnn, bool replace, unsigned pcc_gbr_kbps) {
     auto master = secrets::load_kek(master_file);
     if (!master) {
         std::cerr << "ksim-sim: the range master: " << master.error().what << "\n";
@@ -342,7 +363,7 @@ int provision(const Block& b, const std::string& master_file, const Rig& rig, un
         const std::string imsi = imsi_at(b.first, i);
         const auto k = secrets::derive(*master, "K", imsi);
         const auto opc = secrets::derive(*master, "OPc", imsi);
-        nlohmann::json doc = subscriber_doc(imsi, sst, sd, dnn);
+        nlohmann::json doc = subscriber_doc(imsi, sst, sd, dnn, pcc_gbr_kbps);
         // auth_method 1, 5G AKA: without it the fork's UDR picks EAP-TTLS
         // (src/udr/nudr-handler.c at 741c29d8d).
         doc["security"] = {{"k", ksim::to_hex(k.expose())}, {"op", nullptr}, {"opc", ksim::to_hex(opc.expose())},
@@ -440,6 +461,8 @@ static int run_main(int argc, char** argv) {
     prov_cmd->add_option("--sd", sd, "the slice's SD (6 hex digits)");
     prov_cmd->add_option("--dnn", dnn, "the sessions' DNNs, comma-separated (internet,ims)");
     prov_cmd->add_flag("--replace", replace, "overwrite subscribers of the block that exist");
+    unsigned pcc_gbr_kbps = 0;
+    prov_cmd->add_option("--pcc-gbr", pcc_gbr_kbps, "open5gs: a GBR PCC rule (5QI 1, this GFBR in kbit/s) on the first DNN's session");
     prov_cmd->add_flag("--dry-run", dry_run, "kaluza: print each bundle with its keys as placeholders, send nothing");
     // P1 N14: the card on a virtual reader, and the card images.
     ksim::sim::ServeOptions so;
@@ -564,7 +587,7 @@ static int run_main(int argc, char** argv) {
         return 2;
     }
     Rig rig{ssh, db_config.rfind("~/", 0) == 0 ? "\"$HOME\"/" + db_config.substr(2) : db_config};
-    return prov_cmd->parsed() ? provision(b, master, rig, sst, sd, dnn, replace) : deprovision(b, rig);
+    return prov_cmd->parsed() ? provision(b, master, rig, sst, sd, dnn, replace, pcc_gbr_kbps) : deprovision(b, rig);
 }
 
 int main(int argc, char** argv) {

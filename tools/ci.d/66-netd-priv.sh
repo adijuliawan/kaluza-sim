@@ -7,8 +7,8 @@
 # reports SKIP otherwise. It starts ksim-netd as root on a temporary socket,
 # serving this uid with no parent link (the dev PC allows none), runs
 # netd_smoke (a namespace, a socket made in it, from P2 Q6 a DN namespace whose
-# TUN answers an echo, gc), stops netd and checks
-# that no ksim- namespace is left.
+# TUN answers an echo, from P2 Q13 a SIGTERM to an exec PID ending its command, gc),
+# stops netd and checks that no ksim- namespace is left.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 [[ "${KSIM_CI_PRIV:-0}" == 1 ]] || { echo "NETD_PRIV=SKIP (opt-in: KSIM_CI_PRIV=1)"; exit 77; }
