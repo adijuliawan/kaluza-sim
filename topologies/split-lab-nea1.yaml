@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The AS security gate against kaluza-core in the lab (P2 Q14, LW5a; row ksim-p2.as-nea1-nia1):
+# split-lab.yaml with our CU-CP preferring 128-NEA1 and 128-NIA1 (SNOW 3G), so the AS SECURITY
+# MODE COMMAND selects them for SRB1, SRB2 and the DRBs. On kaluza-uesim with KSIM_LAB=1, in a
+# window agreed with the kaluza-core session.
+plmn: "00101"
+seed: 42
+mode: split
+amf: [{addr: 172.30.30.1, port: 38412}]
+gnbs:
+  - id: {value: 0x1A0, bits: 22}
+    name: ksim-gnb1
+    cucp: {ng_bind: 172.30.30.30, nea: [1, 2], nia: [1, 2]}
+    cuup: {n3_bind: 172.30.30.31}
+    dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
+    split: {f1c: 10.250.0.1, e1: 10.250.0.1, du: 10.250.0.2, cuup: 10.250.0.3, cuup_e1: 10.250.0.3, streams: 16}
+ues:
+  - {group: w0, count: 10, range: "001010000300000", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+     imeisv_tac: "86000000"}
+  - {group: sms, count: 2, range: "001010000300050", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+     imeisv_tac: "86000000"}
+  - {group: shortreg, count: 1, range: "001010000300060", card: {template: ../cards/usim-5g.yaml}, nssai: ["1-000001"],
+     imeisv_tac: "86000000"}
+secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
+peer: {name: kaluza-core}
+netd: {netns: ksim-cucp, cuup_netns: ksim-cuup, du_netns: ksim-du, parent: ens19, prefix: 24, mid: true, mid_prefix: 24}

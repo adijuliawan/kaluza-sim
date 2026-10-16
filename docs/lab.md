@@ -182,8 +182,9 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
       - Our CU-CP asked for a UE's release again when F1 went at teardown, though our DU's radio-loss request had asked already (KS-NGAP-D5). It now asks once per UE.
       - Our gNB ended NG with an ABORT (the AMF's COMM_LOST, which set off its race F-77) while the AMF's releases were still queued (KS-PLAT-D20). A stop now waits for the releases under way, then ends NG with a graceful SHUTDOWN. kaluza-core's F-77 fix (kaluza-amf:671c7c89, 2026-10-17 00:11 KST) is proved by LW5's teardowns.
     - **LW3** (Q15): the throughput set inside the VM against the scripted core on 127.0.0.x. Nothing crosses `ens19` or the trunk, but it needs the VM free of core sets.
-    - **LW4** (Q14): the real card imsi-001010000300100 through the dev-PC bridge (§7).
-    - **LW5** (Q14): the full P2 row set in split mode.
+    - **LW4** (Q14): the real card imsi-001010000300100 through the dev-PC bridge (§7), with `topologies/aio-lab-card.yaml`.
+    - **LW5** (Q14): the full P2 row set in split mode (`split-lab.yaml`; NEA1/NIA1 with `split-lab-nea1.yaml`), 100 UEs (`split-lab-100.yaml`), and C3 (`ocudu-c3-lab.yaml` for the OCUDU rows, `ocudu-c3-lab-p1.yaml` for the P1 rows: split-lab's 13 UEs, whose SMS and short-timer subscriptions the rows need).
+    - Agreed with kaluza-core-92 for 2026-10-17: LW5 and LW4 from about 09:00 KST, LW3 straight after; each starts on the core session's GO, after a green CI.
     - After each: every session released, every UE switched off, no `ksim-` or OCUDU process or namespace left.
 - **The dev-PC guard.** The real AMF listens on the dev PC itself (172.30.30.1:38412), so `ksim` refuses any peer in 172.30.0.0/16 unless it runs with `--lab` on `kaluza-uesim`, and the scripted core binds 127.0.0.x only ([ADR 0009](adr/0009-p1-runtime-shape.md), point 11). vmnet8 (192.168.134.0/24, host-only) is allowed for the Open5GS control.
 - **W0 and later lab runs (P1 N9).** Steps 1–3 run once per release or provisioning change:

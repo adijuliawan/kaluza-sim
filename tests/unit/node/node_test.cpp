@@ -86,7 +86,8 @@ TEST(Topology, TheRepositorysTopologiesLoad) {
 TEST(Topology, TheP2TopologiesLoad) {
     const std::string root = KSIM_SOURCE_DIR;
     for (const char* f : {"split-stub.yaml", "split-open5gs.yaml", "split-stub-e1.yaml", "split-lab.yaml",
-                          "ocudu-c3-stub.yaml", "ocudu-c4-stub.yaml", "ocudu-c5-stub.yaml", "split-stub-nea1.yaml"}) {
+                          "ocudu-c3-stub.yaml", "ocudu-c4-stub.yaml", "ocudu-c5-stub.yaml", "split-stub-nea1.yaml",
+                          "split-open5gs-nea1.yaml", "ocudu-c3-open5gs.yaml", "split-lab-nea1.yaml", "ocudu-c3-lab-p1.yaml"}) {
         std::string why;
         auto t = load_topology(root + "/topologies/" + f, why);
         ASSERT_TRUE(t) << f << ": " << why;
@@ -105,6 +106,29 @@ TEST(Topology, TheP2TopologiesLoad) {
     ASSERT_TRUE(c4) << why;
     EXPECT_EQ(c4->peer_cuup, "ocudu");
     EXPECT_TRUE(c4->peer_cucp.empty());
+    // P2 Q13, Q14: the rig's and the lab's runs (LW4: the real card through the dev PC's bridge;
+    // LW5c: C3 with split-lab's 13 UEs).
+    for (const char* f : {"aio-open5gs-nea1.yaml", "aio-lab-card.yaml"}) {
+        auto t = load_topology(root + "/topologies/" + f, why);
+        ASSERT_TRUE(t) << f << ": " << why;
+        EXPECT_EQ(t->mode, Mode::aio) << f;
+    }
+    auto card = load_topology(root + "/topologies/aio-lab-card.yaml", why);
+    ASSERT_TRUE(card) << why;
+    ASSERT_EQ(card->ues.size(), 1u);
+    EXPECT_EQ(card->ues[0].count, 1u);
+    EXPECT_EQ(card->ues[0].first_imsi, "001010000300100");
+    EXPECT_EQ(card->ues[0].card_bridge, "192.168.0.8:35970");
+    auto c3p1 = load_topology(root + "/topologies/ocudu-c3-lab-p1.yaml", why);
+    ASSERT_TRUE(c3p1) << why;
+    ASSERT_EQ(c3p1->ues.size(), 3u);
+    EXPECT_EQ(c3p1->ues[1].first_imsi, "001010000300050");
+    EXPECT_EQ(c3p1->ues[2].first_imsi, "001010000300060");
+    EXPECT_EQ(c3p1->peer_cucp, "ocudu");
+    auto nea1 = load_topology(root + "/topologies/split-lab-nea1.yaml", why);
+    ASSERT_TRUE(nea1) << why;
+    EXPECT_EQ(nea1->nea_pref, (std::vector<std::uint8_t>{1, 2}));
+    EXPECT_EQ(nea1->nia_pref, (std::vector<std::uint8_t>{1, 2}));
 }
 
 TEST(Topology, SplitRolesInNamespacesNeedKsimMidAndOneAddressPerLeg) {

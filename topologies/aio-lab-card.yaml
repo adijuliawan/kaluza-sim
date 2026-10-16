@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The real card against kaluza-core (P2 Q14, LW4; D3; lab.md 7): imsi-001010000300100, the
+# sysmoISIM the user burned, in the OmniKey on the dev PC, reached from kaluza-uesim through the
+# card bridge on the management LAN (ksim-sim serve --pcsc OMNIKEY --listen 192.168.0.8:35970
+# --allow 192.168.0.139, for the window only). One UE, as a bridged card must be alone in its
+# group. Its subscriber is in kaluza-core's UDR (provisioned through the API, 2026-10-16).
+plmn: "00101"
+seed: 42
+amf: [{addr: 172.30.30.1, port: 38412}]
+gnbs:
+  - id: {value: 0x1A0, bits: 22}
+    name: ksim-gnb1
+    cucp: {ng_bind: 172.30.30.30}
+    cuup: {n3_bind: 172.30.30.31}
+    dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
+ues:
+  - {group: card, count: 1, range: "001010000300100", card: {bridge: "192.168.0.8:35970"}, nssai: ["1-000001"],
+     imeisv_tac: "86000000"}
+secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
+peer: {name: kaluza-core}
+netd: {netns: ksim-cucp, cuup_netns: ksim-cuup, parent: ens19, prefix: 24}
