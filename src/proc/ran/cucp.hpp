@@ -40,6 +40,15 @@
 //    the response with the CU-UP's N3 end once the UE completes it. A release
 //    reconfigures the UE first, then the DU and the CU-UP. E1 is the CU-UP's
 //    association (it sends gNB-CU-UP E1 SETUP).
+//  - P2 Q10: a session's QoS flows go on DRBs by the topology's mapping (cucp
+//    {drb_map}): one DRB per 5QI, the default DRB the first flow's (OCUDU's way),
+//    or every flow on one DRB. A PDU SESSION RESOURCE MODIFY REQUEST is a job of
+//    its own: flows added, modified (a new 5QI moves the flow) and released, the
+//    session-AMBR. The CU-UP (E1: DRBs set up, remapped, removed), the DU (F1:
+//    DRBs set up, modified, released) and the UE (RRCReconfiguration with the
+//    session's NAS) follow, and the response lists the flows done and failed. A
+//    flow released by the gNB itself (ksim-ctl gnb qos-release) is told to the
+//    AMF in PDU SESSION RESOURCE NOTIFY.
 //
 // Not in P1: handover (P3), several DUs, CU-UPs or AMFs.
 
@@ -56,6 +65,7 @@
 
 #include "codec/asn1/msg/e1ap.hpp"
 #include "codec/asn1/msg/f1ap.hpp"
+#include "proc/ran/drb_map.hpp"
 #include "proc/ran/du.hpp"
 #include "codec/asn1/msg/ngap.hpp"
 #include "proc/ran/up_security.hpp"
@@ -82,6 +92,7 @@ struct CuCpConfig {
     bool allow_null = false;            // D1: NIA0/NEA0 only as the bisect switch
     std::optional<int> t_reordering_ms;   // P2 Q8: the DRBs' t-Reordering (RRC and E1); absent: infinity
     UpPolicy up_policy;                   // P2 Q9: "preferred" and no Security Indication (proc/ran/up_security)
+    DrbMap drb_map = DrbMap::per_5qi;     // P2 Q10
     // The UE Inactivity Timer E1 Bearer Context Setup gives the CU-UP with
     // ActivityNotificationLevel "ue" (P2 Q4, KS-E1AP-D1). From Q5 the CU-UP's
     // report releases the UE, so the default is the longest the IE allows: a run's
@@ -115,6 +126,7 @@ public:
     /// P2 Q9: the local UP security policy for sessions set up from now on (ksim-ctl gnb up-policy).
     void set_up_policy(const UpPolicy& p) noexcept { cfg_.up_policy = p; }
     const UpPolicy& up_policy() const noexcept { return cfg_.up_policy; }
+    DrbMap drb_map() const noexcept { return cfg_.drb_map; }
     /// `e1`: the CU-UP's association (none: sessions are refused).
     CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1, IAssoc* e1 = nullptr);
     ~CuCp();
@@ -131,6 +143,18 @@ public:
     bool e1_ready() const noexcept { return e1_ready_; }
     /// The PDU sessions the RAN holds for the UE with this RAN UE NGAP ID.
     std::vector<std::uint8_t> sessions_of(std::uint32_t ran_ue) const;
+    /// P2 Q10: a session's DRBs and the QFIs on each, as the CU-CP holds them.
+    struct DrbView {
+        std::uint8_t drb_id = 1;
+        bool default_drb = false;
+        std::uint16_t five_qi = 9;
+        std::vector<std::uint8_t> qfis;
+    };
+    std::vector<DrbView> drbs_of(std::uint32_t ran_ue, std::uint8_t psi) const;
+    /// P2 Q10: the gNB releases one QoS flow of a session itself (E1, F1 and the UE
+    /// reconfigured) and tells the AMF in PDU SESSION RESOURCE NOTIFY (TS 38.413 8.2.4).
+    /// Errc::invalid_argument for a UE, session or flow it does not hold.
+    Result<void> release_flow(std::uint32_t ran_ue, std::uint8_t psi, std::uint8_t qfi);
     /// A gNB-initiated release (TS 38.413 §8.3.2; `ksim-ctl gnb ue-release`):
     /// UE CONTEXT RELEASE REQUEST with a radio network cause ("user-inactivity").
     /// Errc::invalid_argument for a UE the AMF does not know yet.
@@ -175,11 +199,18 @@ private:
         bool capture = false;            // the next SRB1 PDU goes into a release command
         std::optional<Bytes> captured;
         // PDU sessions (N10)
+        struct Drb {                                    // P2 Q10: a session has one or more
+            std::uint8_t id = 1;
+            std::uint16_t five_qi = 9;                  // its flows' (per-5QI mapping)
+            bool default_drb = false;
+            std::vector<ngap::QosFlowRequest> flows;
+            std::optional<e1ap::GtpTunnel> f1u_ul;      // the CU-UP's F1-U end
+            std::optional<f1ap::DrbSetup> du;           // the DU's answer (F1-U DL end, LCID)
+        };
         struct Session {
-            ngap::SessionSetupItem item;
-            std::uint8_t drb_id = 1;
-            std::optional<e1ap::SessionSetup> up;       // the CU-UP's answer (N3 DL end, F1-U UL ends)
-            std::optional<f1ap::DrbSetup> du;           // the DU's answer (F1-U DL end)
+            ngap::SessionSetupItem item;                // its transfer's flows and AMBR: as they are now
+            std::vector<Drb> drbs;
+            std::optional<e1ap::GtpTunnel> ng_dl;       // the CU-UP's N3 end
             bool integrity = false;                     // P2 Q9: the UP security decision
             bool confidentiality = true;
             bool report = false;                        // a Security Result goes back
@@ -188,7 +219,7 @@ private:
         std::optional<std::uint32_t> cu_up_ue;
         std::optional<ngap::Ambr> ue_ambr;
         struct Job {
-            enum class Kind : std::uint8_t { setup, release } kind = Kind::setup;
+            enum class Kind : std::uint8_t { setup, release, modify } kind = Kind::setup;
             bool ics = false;                           // the sessions of an INITIAL CONTEXT SETUP
             std::vector<ngap::SessionSetupItem> items;
             std::optional<Bytes> nas;                   // the message's own NAS PDU
@@ -197,6 +228,21 @@ private:
             std::map<std::uint8_t, Session> pending;    // being set up
             std::vector<ngap::SessionCause> failed;
             std::optional<rrc::CellGroup> cell_group;   // the DU's, for the new DRBs
+            // P2 Q10: a modification, each session as it will be.
+            std::vector<ngap::SessionModifyItem> modify;
+            struct Change {
+                Session after;
+                std::vector<std::uint8_t> added;        // DRBs new in `after`
+                std::map<std::uint8_t, std::pair<std::vector<std::uint8_t>, std::vector<std::uint8_t>>> remapped;
+                                                        // DRB -> (QFIs mapped to it, QFIs released from it)
+                std::vector<std::uint8_t> removed;      // DRBs that go
+                std::vector<std::uint8_t> ok;           // QFIs added or modified
+                std::vector<ngap::QosFlowCause> failed;
+                std::optional<std::uint64_t> dl_ambr;
+                std::optional<Bytes> nas;
+            };
+            std::map<std::uint8_t, Change> changes;     // by PSI
+            bool notify = false;                        // the gNB's own release: NOTIFY, not a response
         };
         std::deque<Job> jobs;
     };
@@ -242,6 +288,15 @@ private:
     void job_failed(Ue& ue, const char* group, const char* value);
     void job_rrc(Ue& ue);
     void job_done(Ue& ue);
+    // P2 Q10
+    bool one_drb() const;
+    std::set<std::uint8_t> drbs_in_use(const Ue& ue) const;
+    static std::optional<std::uint8_t> take_drb(std::set<std::uint8_t>& used);
+    Ue::Drb* drb_for(Ue::Session& s, std::uint16_t five_qi) const;
+    void start_modify(Ue& ue);
+    void modify_e1_done(Ue& ue, const e1ap::BearerContextModificationResponse& m);
+    void modify_f1(Ue& ue);
+    void modify_done(Ue& ue, Ue::Job j);
     void finish_ics(Ue& ue, std::vector<ngap::SessionSetupOk> ok, std::vector<ngap::SessionCause> failed);
     Ue* by_cu_up(std::uint32_t id);
 

@@ -215,6 +215,30 @@ Result<std::uint8_t> Sm::establish(const SessionRequest& r) {
     return psi;
 }
 
+void Sm::apply_flows(Session& s, const ie::QosFlowDescriptions& d, bool initial) {
+    // P2 Q10 (TS 24.501 6.2.5.1.4, 9.11.4.12): create, delete, modify; the 5QI is kept.
+    if (initial) {
+        s.info.flow_5qi.clear();
+    }
+    for (const auto& f : d.list) {
+        switch (f.operation) {
+        case 1:   // create new QoS flow description
+        case 3:   // modify existing QoS flow description
+            if (const auto q = f.five_qi()) {
+                s.info.flow_5qi[f.qfi] = *q;
+            } else if (f.operation == 1) {
+                s.info.flow_5qi[f.qfi] = 0;
+            }
+            break;
+        case 2:   // delete existing QoS flow description
+            s.info.flow_5qi.erase(f.qfi);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
 bool Sm::apply_rules(Session& s, const ie::QosRules& r, bool initial) {
     if (initial) {
         s.rules.clear();
@@ -263,6 +287,7 @@ bool Sm::apply_rules(Session& s, const ie::QosRules& r, bool initial) {
         }
     }
     s.info.qfis.clear();
+    s.info.rules = s.rules;   // P2 Q10: the UE's classifier works from them (proc/ue/qos_classifier)
     int defaults = 0;
     for (const auto& rule : s.rules) {
         if (rule.qfi) {
@@ -286,6 +311,11 @@ void Sm::on_accept(Session& s, const nas::Message& m, std::uint8_t pti) {
     if (const Bytes* r = nas::get(m, "Authorized QoS rules")) {
         if (auto rules = ie::QosRules::decode(*r)) {
             rules_ok = apply_rules(s, *rules, true);
+        }
+    }
+    if (const Bytes* d = nas::get(m, "Authorized QoS flow descriptions")) {
+        if (auto flows = ie::QosFlowDescriptions::decode(*d)) {
+            apply_flows(s, *flows, true);
         }
     }
     if (const Bytes* a = nas::get(m, "Session AMBR")) {
@@ -592,9 +622,21 @@ void Sm::on_modification_command(Session& s, const nas::Message& m, std::uint8_t
             rules_ok = apply_rules(s, *rules, false);
         }
     }
+    if (const Bytes* d = nas::get(m, "Authorized QoS flow descriptions")) {
+        if (auto flows = ie::QosFlowDescriptions::decode(*d)) {
+            apply_flows(s, *flows, false);
+        }
+    }
+    std::string qfis;
+    for (const auto& rule : s.rules) {
+        if (rule.qfi) {
+            qfis += (qfis.empty() ? "" : ",") + str(*rule.qfi);
+        }
+    }
     events_.emit("nas.sm.mod.command", cfg_.id,
                  {{"psi", str(s.info.psi)}, {"cause", str(cause_of(m))}, {"qfi", str(s.info.default_qfi)},
-                  {"ambr_dl", s.info.ambr_dl_bps ? str(static_cast<std::int64_t>(*s.info.ambr_dl_bps)) : ""}});
+                  {"ambr_dl", s.info.ambr_dl_bps ? str(static_cast<std::int64_t>(*s.info.ambr_dl_bps)) : ""},
+                  {"rules", str(static_cast<std::int64_t>(s.rules.size()))}, {"qfis", qfis.empty() ? "-" : qfis}});
     nas::Message c = make(kModificationComplete, s.info.psi, pti);
     send(s, c, std::nullopt);
     if (!rules_ok) {

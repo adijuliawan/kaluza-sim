@@ -25,13 +25,16 @@ struct SdapDrb {
     bool header_dl = false;
     bool default_drb = false;
     std::vector<std::uint8_t> qfis;   // mappedQoS-FlowsToAdd
+    std::vector<std::uint8_t> qfis_release;   // mappedQoS-FlowsToRelease (P2 Q10)
 };
 
 class Sdap {
 public:
     explicit Sdap(std::uint8_t pdu_session) : psi_(pdu_session) {}
 
-    void configure(const SdapDrb& d);   // add or modify (mappings add up, §5.3.1)
+    void configure(const SdapDrb& d);   // add or modify (mappings add up, §5.3.1; released ones go)
+    /// The QoS flows mapped to `drb_id` (P2 Q10).
+    std::vector<std::uint8_t> flows_of(std::uint8_t drb_id) const;
     void release(std::uint8_t drb_id);
 
     struct Ul {

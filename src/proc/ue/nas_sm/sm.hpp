@@ -83,6 +83,8 @@ struct SessionInfo {
     std::optional<std::uint16_t> mtu;
     std::uint8_t default_qfi = 0;      // the QFI of the default QoS rule
     std::vector<std::uint8_t> qfis;    // every QoS rule's
+    std::vector<nas::ie::QosRules::Rule> rules;   // P2 Q10: the signalled QoS rules, for the UL classifier
+    std::map<std::uint8_t, std::uint16_t> flow_5qi;   // P2 Q10: the QoS flow descriptions (QFI -> 5QI; 0 when none given)
     std::optional<std::uint64_t> ambr_dl_bps;
     std::optional<std::uint64_t> ambr_ul_bps;
 };
@@ -155,6 +157,7 @@ private:
     void release_local(Session& s, const char* why);
     void set_state(Session& s, SmState to);
     bool apply_rules(Session& s, const nas::ie::QosRules& r, bool initial);
+    void apply_flows(Session& s, const nas::ie::QosFlowDescriptions& d, bool initial);
     std::uint8_t next_pti();
 
     Executor& ex_;

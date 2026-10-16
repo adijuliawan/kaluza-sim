@@ -21,6 +21,7 @@
 //     ue <sel> events [--since N] [--follow] [--filter PREFIX]
 //     wait <event> … (any subject)      events …      metrics (P2 Q7: Prometheus text)
 //     gnb <name> ue-list | amf-list | ue-release <ue sel> [--cause C] | restart
+//     gnb <name> qos <ue sel> | qos-release <ue sel> --psi N --qfi N    (P2 Q10: DRBs; the gNB's own release)
 //     ue <sel> service-request [--wait DUR] | sim remove|insert | airplane on|off
 //     ue <sel> sms-send <digits> <text> [--ucs2] [--srr] [--vp N] | sms-list | sms-memory full|available
 //     ue <sel> register --update
@@ -29,7 +30,9 @@
 //          | exec <ns> --log FILE -- <argv…>      (P2 Q7: ksim-netd for scripts, --netd PATH or
 //          $KSIM_NETD, default /run/ksim/netd.sock; exec prints PID= and does not wait)
 //     stub [release --ue SUPI --psi N [--cause C] | ping-ue --ue SUPI --psi N [--seq N]
-//           | deregister --ue SUPI [--rereg] | restart | t3512 --seconds N | sms-sub --ue SUPI [--off]]
+//           | deregister --ue SUPI [--rereg] | restart | t3512 --seconds N | sms-sub --ue SUPI [--off]
+//           | qos flows-add|add --qfi N --5qi N --precedence N --filter F [--direction D] [--ue SUPI --psi N]
+//           | qos flows-clear | qos del --ue SUPI --psi N --qfi N]                      (P2 Q10)
 //           (--socket <stub ctl>)
 //
 // <sel> is imsi-…, a farm index, a range of them (P2 Q7: 1-100), group:<name> or
@@ -198,7 +201,7 @@ Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
                                                  "seq", "seconds", "vp", "log", "netd", "parent", "addr", "ea", "ia",
                                                  "integrity", "confidentiality", "rate-ul", "rate-dl", "preferred-integrity",
                                                  "preferred-confidentiality", "absent-integrity", "absent-confidentiality",
-                                                 "integrity-possible"};
+                                                 "integrity-possible", "qfi", "5qi", "precedence", "filter", "direction"};
     Flags f;
     for (std::size_t i = from; i < args.size(); ++i) {
         const std::string& a = args[i];
@@ -715,10 +718,10 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
         // ksim-corestub (--socket): its report, or a network-side trigger for the gates.
         if (!f.words.empty() && (f.words[0] == "release" || f.words[0] == "ping-ue" || f.words[0] == "deregister" ||
                                  f.words[0] == "restart" || f.words[0] == "t3512" || f.words[0] == "sms-sub" ||
-                                 f.words[0] == "nas-alg" || f.words[0] == "up-policy")) {
+                                 f.words[0] == "nas-alg" || f.words[0] == "up-policy" || f.words[0] == "qos")) {
             json body = json::object();
             for (const char* k : {"ue", "psi", "cause", "seq", "seconds", "ea", "ia", "integrity", "confidentiality",
-                                  "rate-ul", "rate-dl"}) {
+                                  "rate-ul", "rate-dl", "qfi", "5qi", "precedence", "filter", "direction"}) {
                 if (f.has(k)) {
                     body[k] = f.get(k);
                 }
@@ -728,6 +731,9 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
             }
             if (f.words[0] == "sms-sub") {
                 body["on"] = f.has("off") ? "0" : "1";
+            }
+            if (f.words[0] == "qos") {
+                body["action"] = f.words.size() >= 2 ? f.words[1] : std::string();   // P2 Q10
             }
             r = call(c, "POST", "/v1/stub/" + f.words[0], body);
         } else {
@@ -762,6 +768,17 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
                 }
             }
             r = call(c, "POST", "/v1/gnb/" + encode(f.words[0]) + "/up-policy", body);
+        } else if (f.words.size() >= 3 && f.words[1] == "qos") {
+            // P2 Q10: the UE's DRBs and the QFIs on each, as the CU-CP holds them.
+            r = call(c, "GET", "/v1/gnb/" + encode(f.words[0]) + "/qos?ue=" + encode(f.words[2]));
+        } else if (f.words.size() >= 3 && f.words[1] == "qos-release") {
+            // P2 Q10: the gNB releases one QoS flow itself and tells the AMF (PDU SESSION RESOURCE NOTIFY).
+            if (!f.has("psi") || !f.has("qfi")) {
+                r = Reply::fail(Exit::usage, "gnb <name> qos-release <ue> --psi N --qfi N");
+            } else {
+                r = call(c, "POST", "/v1/gnb/" + encode(f.words[0]) + "/qos-release",
+                         json{{"ue", f.words[2]}, {"psi", f.get("psi")}, {"qfi", f.get("qfi")}});
+            }
         } else if (f.words.size() >= 3 && f.words[1] == "ue-release") {
             json body = json::object();
             body["ue"] = f.words[2];
@@ -773,7 +790,7 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
             // gnb: the whole gNB; cucp: the CU-CP's process alone (a split run, P2 Q3)
             r = call(c, "POST", std::string(verb == "cucp" ? "/v1/cucp/" : "/v1/gnb/") + encode(f.words[0]) + "/restart");
         } else {
-            r = Reply::fail(Exit::usage, "gnb|cucp <name> ue-list|amf-list|ue-release <ue>|restart");
+            r = Reply::fail(Exit::usage, "gnb|cucp <name> ue-list|amf-list|ue-release <ue>|qos <ue>|qos-release <ue>|restart");
         }
     } else if (verb == "du") {
         // P2 Q3 (cli.md): the DU's own verbs; restart is a split run's DU process alone.

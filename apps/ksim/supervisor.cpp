@@ -598,6 +598,35 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
             },
             follow, stop, write);
     });
+    // P2 Q10: the UE's DRBs at the CU-CP and a QoS flow the gNB releases itself, the UE
+    // found at the farm by its C-RNTI as for ue-release.
+    const auto with_crnti = [this, &ue, cucp](const Request& req, const std::string& method, const std::string& route,
+                                              json body) -> Reply {
+        if (req.params.at("name") != t_.gnb_name) {
+            return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        if (cucp == nullptr) {
+            return peer_reply("cucp");
+        }
+        Reply st = call(ue, "GET", "/v1/ue/" + encode(req.arg("ue")) + "/status");
+        if (st.exit != Exit::ok) {
+            return st;
+        }
+        const std::string crnti = st.kv.contains("C_RNTI") ? st.kv.at("C_RNTI").get<std::string>() : std::string();
+        if (crnti.empty() || crnti == "-") {
+            return Reply::fail(Exit::wrong_state, "the UE has no RRC connection at this gNB");
+        }
+        const std::string path = "/v1/gnb/" + encode(t_.gnb_name) + "/" + route;
+        if (method == "GET") {
+            return call(*cucp, "GET", path + "?c_rnti=" + encode(crnti));
+        }
+        body["c_rnti"] = crnti;
+        return call(*cucp, method, path, body);
+    };
+    server.get("/v1/gnb/:name/qos", [with_crnti](const Request& req) { return with_crnti(req, "GET", "qos", json::object()); });
+    server.post("/v1/gnb/:name/qos-release", [with_crnti](const Request& req) {
+        return with_crnti(req, "POST", "qos-release", json{{"psi", req.arg("psi")}, {"qfi", req.arg("qfi")}});
+    });
     server.post("/v1/gnb/:name/ue-release", [this, &ue, cucp](const Request& req) {
         if (req.params.at("name") != t_.gnb_name) {
             return Reply::fail(Exit::unknown, "no such gNB");

@@ -233,9 +233,33 @@ struct ModifyRequestTransfer {
     std::vector<std::uint8_t> release;   // QFIs, with cause nas/normal-release
     friend bool operator==(const ModifyRequestTransfer&, const ModifyRequestTransfer&) = default;
 };
+/// A QoS flow with a cause (QosFlowWithCauseItem, TS 38.413 9.3.4.x).
+struct QosFlowCause {
+    std::uint8_t qfi = 1;
+    Cause cause;
+    friend bool operator==(const QosFlowCause&, const QosFlowCause&) = default;
+};
 struct ModifyResponseTransfer {
     std::vector<std::uint8_t> added_or_modified;   // QFIs
+    std::vector<QosFlowCause> failed;              // P2 Q10: qosFlowFailedToAddOrModifyList
     friend bool operator==(const ModifyResponseTransfer&, const ModifyResponseTransfer&) = default;
+};
+/// PDUSessionResourceNotifyTransfer (TS 38.413 9.3.4.x; P2 Q10): QoS flows the NG-RAN
+/// released on its own, and (GBR, Q11) flows whose GFBR is not fulfilled or fulfilled again.
+struct NotifyTransfer {
+    struct Notify {
+        std::uint8_t qfi = 1;
+        bool fulfilled = false;                    // notificationCause
+        friend bool operator==(const Notify&, const Notify&) = default;
+    };
+    std::vector<Notify> notify;
+    std::vector<QosFlowCause> released;
+    friend bool operator==(const NotifyTransfer&, const NotifyTransfer&) = default;
+};
+struct SessionNotify {
+    std::uint8_t psi = 1;
+    NotifyTransfer transfer;
+    friend bool operator==(const SessionNotify&, const SessionNotify&) = default;
 };
 struct SessionModifyItem {
     std::uint8_t psi = 1;
@@ -389,6 +413,15 @@ struct PduSessionResourceModifyResponse {
     friend bool operator==(const PduSessionResourceModifyResponse&, const PduSessionResourceModifyResponse&) = default;
 };
 
+/// PDU SESSION RESOURCE NOTIFY (TS 38.413 8.2.4, 9.2.1.7; P2 Q10).
+struct PduSessionResourceNotify {
+    std::uint64_t amf = 0;
+    std::uint32_t ran = 0;
+    std::vector<SessionNotify> sessions;     // PDU Session Resource Notify List
+    std::vector<SessionCause> released;      // PDU Session Resource Released List (whole sessions)
+    friend bool operator==(const PduSessionResourceNotify&, const PduSessionResourceNotify&) = default;
+};
+
 using Pdu = std::variant<NgSetupRequest, NgSetupResponse, NgSetupFailure, NgReset, NgResetAcknowledge,
                          ErrorIndication, AmfStatusIndication, AmfConfigurationUpdate, AmfConfigurationUpdateAcknowledge,
                          Paging, InitialUeMessage, DownlinkNasTransport, UplinkNasTransport, NasNonDeliveryIndication,
@@ -396,7 +429,8 @@ using Pdu = std::variant<NgSetupRequest, NgSetupResponse, NgSetupFailure, NgRese
                          UeContextReleaseRequest, UeContextReleaseCommand, UeContextReleaseComplete,
                          UeContextModificationRequest, UeContextModificationResponse, UeRadioCapabilityInfoIndication,
                          PduSessionResourceSetupRequest, PduSessionResourceSetupResponse, PduSessionResourceReleaseCommand,
-                         PduSessionResourceReleaseResponse, PduSessionResourceModifyRequest, PduSessionResourceModifyResponse>;
+                         PduSessionResourceReleaseResponse, PduSessionResourceModifyRequest, PduSessionResourceModifyResponse,
+                         PduSessionResourceNotify>;
 
 Result<Bytes> encode(const Pdu& p);
 

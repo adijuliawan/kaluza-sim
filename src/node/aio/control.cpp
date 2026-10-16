@@ -697,6 +697,24 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                 r.set(k + ".QFI", static_cast<std::int64_t>(p.default_qfi));
                 r.set(k + ".AMBR_DL", p.ambr_dl_bps ? std::to_string(*p.ambr_dl_bps) : "");
                 r.set(k + ".AMBR_UL", p.ambr_ul_bps ? std::to_string(*p.ambr_ul_bps) : "");
+                // P2 Q10: the signalled QoS rules the UL classifier works from, and what it sent.
+                r.set(k + ".RULES", static_cast<std::int64_t>(p.rules.size()));
+                for (const auto& rule : p.rules) {
+                    r.set(k + ".RULE." + std::to_string(rule.id),
+                          fmt::format("qfi={} precedence={} default={} filters={}", rule.qfi ? std::to_string(*rule.qfi) : "-",
+                                      rule.precedence ? std::to_string(*rule.precedence) : "-", rule.default_rule ? 1 : 0,
+                                      rule.filters.size()));
+                }
+                for (const auto& [key, n] : ue->ul_per_qfi()) {
+                    if (key.first == p.psi) {
+                        r.set(k + ".UL_QFI." + std::to_string(key.second), static_cast<std::int64_t>(n));
+                    }
+                }
+                for (const auto& [qfi, five_qi] : p.flow_5qi) {
+                    r.set(k + ".FLOW." + std::to_string(qfi) + ".5QI", static_cast<std::int64_t>(five_qi));
+                }
+                const auto um = ue->ul_unmatched().find(p.psi);
+                r.set(k + ".UL_UNMATCHED", static_cast<std::int64_t>(um == ue->ul_unmatched().end() ? 0 : um->second));
             }
             return r;
         });
@@ -1033,6 +1051,106 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         });
         return s ? *s : unsound();
     });
+    // P2 Q10: a UE's DRBs as the CU-CP holds them (GET qos), and a QoS flow the gNB releases
+    // itself (POST qos-release; PDU SESSION RESOURCE NOTIFY to the AMF). The UE by its farm
+    // selector, or in a split run by the C-RNTI the supervisor found at the farm.
+    const auto crnti_of = [&aio](const Request& req) -> std::string {
+        if (!aio.hosts_ues()) {
+            return req.arg("c_rnti");
+        }
+        const std::string sel = req.arg("ue");
+        auto c = aio.call_ue<std::string>(sel, [&aio, sel] {
+            UeDevice* ue = aio.ue(sel);
+            if (ue == nullptr) {
+                return std::string();
+            }
+            for (const auto& [k, v] : ue->status()) {
+                if (k == "C_RNTI") {
+                    return v;
+                }
+            }
+            return std::string();
+        });
+        return c ? *c : std::string();
+    };
+    server.get("/v1/gnb/:name/qos", [&aio, &t, crnti_of](const Request& req) {
+        if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
+            return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        const std::string crnti = crnti_of(req);
+        if (crnti.empty() || crnti == "-") {
+            return Reply::fail(Exit::wrong_state, "the UE has no RRC connection at this gNB");
+        }
+        auto s = aio.call<Reply>([&aio, crnti] {
+            for (const auto& u : aio.cucp().ue_list()) {
+                if (fmt::format("0x{:04x}", u.c_rnti) != crnti) {
+                    continue;
+                }
+                Reply r;
+                r.set("RAN_UE_NGAP_ID", static_cast<std::int64_t>(u.ran_ue));
+                r.set("DRB_MAP", proc::ran::drb_map_name(aio.cucp().drb_map()));
+                const auto psis = aio.cucp().sessions_of(u.ran_ue);
+                r.set("PDU_SESSIONS", static_cast<std::int64_t>(psis.size()));
+                for (std::uint8_t psi : psis) {
+                    const std::string k = "PS." + std::to_string(psi);
+                    std::string ids;
+                    for (const auto& d : aio.cucp().drbs_of(u.ran_ue, psi)) {
+                        ids += (ids.empty() ? "" : ",") + std::to_string(d.drb_id);
+                        std::string q;
+                        for (std::uint8_t x : d.qfis) {
+                            q += (q.empty() ? "" : ",") + std::to_string(x);
+                        }
+                        const std::string dk = k + ".DRB." + std::to_string(d.drb_id);
+                        r.set(dk + ".QFIS", q.empty() ? "-" : q);
+                        r.set(dk + ".5QI", static_cast<std::int64_t>(d.five_qi));
+                        r.set(dk + ".DEFAULT", d.default_drb ? "1" : "0");
+                    }
+                    r.set(k + ".DRBS", ids.empty() ? "-" : ids);
+                }
+                return r;
+            }
+            return Reply::fail(Exit::wrong_state, "the UE has no RRC connection at this gNB");
+        });
+        return s ? *s : unsound();
+    });
+    server.post("/v1/gnb/:name/qos-release", [&aio, &t, crnti_of](const Request& req) {
+        if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
+            return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        int psi = 0;
+        int qfi = -1;
+        try {
+            psi = std::stoi(req.arg("psi"));
+            qfi = std::stoi(req.arg("qfi"));
+        } catch (const std::exception&) {
+            psi = 0;
+        }
+        if (psi < 1 || psi > 15 || qfi < 0 || qfi > 63) {
+            return Reply::fail(Exit::usage, "qos-release needs --psi 1..15 and --qfi 0..63");
+        }
+        const std::string crnti = crnti_of(req);
+        if (crnti.empty() || crnti == "-") {
+            return Reply::fail(Exit::wrong_state, "the UE has no RRC connection at this gNB");
+        }
+        auto s = aio.call<Reply>([&aio, crnti, psi, qfi] {
+            for (const auto& u : aio.cucp().ue_list()) {
+                if (fmt::format("0x{:04x}", u.c_rnti) != crnti) {
+                    continue;
+                }
+                if (auto r = aio.cucp().release_flow(u.ran_ue, static_cast<std::uint8_t>(psi), static_cast<std::uint8_t>(qfi)); !r) {
+                    return Reply::fail(Exit::wrong_state, r.error().what);
+                }
+                Reply out;
+                out.set("RAN_UE_NGAP_ID", static_cast<std::int64_t>(u.ran_ue));
+                out.set("PSI", static_cast<std::int64_t>(psi));
+                out.set("QFI", static_cast<std::int64_t>(qfi));
+                out.set("RESULT", "STARTED");
+                return out;
+            }
+            return Reply::fail(Exit::wrong_state, "the UE has no RRC connection at this gNB");
+        });
+        return s ? *s : unsound();
+    });
     server.post("/v1/gnb/:name/ue-release", [&aio, &t](const Request& req) {
         if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
             return Reply::fail(Exit::unknown, "no such gNB");
@@ -1126,6 +1244,18 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             r.set("WRONG_PPID", static_cast<std::int64_t>(aio.du().stats().wrong_ppid));
             r.set("DDDS_TX", static_cast<std::int64_t>(aio.du().stats().ddds_tx));
             r.set("SI_TX", static_cast<std::int64_t>(aio.du().stats().si_tx));
+            // P2 Q10: each UE's DRBs (by C-RNTI) with their LCIDs and QoS flows.
+            const auto drbs = aio.du().drb_list();
+            r.set("DRBS", static_cast<std::int64_t>(drbs.size()));
+            for (const auto& d : drbs) {
+                const std::string k = fmt::format("UE.0x{:04x}.DRB.{}", d.rnti, d.drb);
+                std::string q;
+                for (std::uint8_t x : d.qfis) {
+                    q += (q.empty() ? "" : ",") + std::to_string(x);
+                }
+                r.set(k + ".LCID", static_cast<std::int64_t>(d.lcid));
+                r.set(k + ".QFIS", q.empty() ? "-" : q);
+            }
             return r;
         });
         return s ? *s : unsound();
@@ -1143,6 +1273,24 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             r.set("DROPPED", static_cast<std::int64_t>(aio.cuup().stats().dropped));
             r.set("DDDS_RX", static_cast<std::int64_t>(aio.cuup().stats().ddds_rx));
             r.set("INACTIVITY_REPORTS", static_cast<std::int64_t>(aio.cuup().stats().inactivity_reports));
+            // P2 Q10: each DRB (CU-UP UE, PSI, DRB) with its flows and packets, and the packets per QFI.
+            const auto drbs = aio.cuup().drb_stats();
+            r.set("DRBS", static_cast<std::int64_t>(drbs.size()));
+            for (const auto& d : drbs) {
+                const std::string k = fmt::format("DRB.{}.{}.{}", d.cu_up_ue, d.psi, d.drb);
+                std::string q;
+                for (std::uint8_t x : d.qfis) {
+                    q += (q.empty() ? "" : ",") + std::to_string(x);
+                }
+                r.set(k + ".QFIS", q.empty() ? "-" : q);
+                r.set(k + ".DEFAULT", d.default_drb ? "1" : "0");
+                r.set(k + ".UL_PACKETS", static_cast<std::int64_t>(d.ul_packets));
+                r.set(k + ".DL_PACKETS", static_cast<std::int64_t>(d.dl_packets));
+            }
+            for (const auto& [qfi, q] : aio.cuup().per_qfi()) {
+                r.set("QFI." + std::to_string(qfi) + ".UL_PACKETS", static_cast<std::int64_t>(q.ul_packets));
+                r.set("QFI." + std::to_string(qfi) + ".DL_PACKETS", static_cast<std::int64_t>(q.dl_packets));
+            }
             return r;
         });
         return s ? *s : unsound();

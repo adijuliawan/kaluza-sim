@@ -32,7 +32,7 @@ Each UE gets a netns `ksim-ue-<n>`. It is created by `ksim-netd`, the privileged
 
 **Uplink:**
 1. TUN read, in batches of up to 64.
-2. QoS-rule classifier (TS 24.501 §6.2.5, §9.11.4.13): rules in precedence order, plus reflective (derived) rules.
+2. QoS-rule classifier (TS 24.501 §6.2.5, §9.11.4.13): rules in precedence order, plus reflective (derived) rules. *As built (P2 Q10, `proc/ue/qos_classifier`):* the signalled rules over every packet filter component but the (S)RTP one (KS-SM-B3, KS-NAS-G5); a packet no rule matches is not sent. Derived rules come with reflective QoS in Q11.
 3. SDAP: QFI header and QFI → DRB mapping (TS 37.324).
 4. PDCP: NEA/NIA, COUNT (TS 38.323).
 5. IdealRlc, then KAIR `UL_SDU`, to the DU.

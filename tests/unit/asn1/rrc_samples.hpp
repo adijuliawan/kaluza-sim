@@ -60,6 +60,23 @@ inline std::vector<Sample> all() {
     s.push_back({"DL-DCCH", "SecurityModeCommand", encode(SecurityModeCommand{1, 2, 2})});
     s.push_back({"DL-DCCH", "RRCReconfiguration",
                  encode(Reconfiguration{2, bearers(), cell_group(), {*from_hex("7e00680112000f2e0101c1ffff91a1280100")}})});
+    {
+        // P2 Q10: a QoS flow on a new DRB, another moved off the default DRB, which keeps its PDCP.
+        RadioBearers q;
+        DrbAdd fresh;
+        fresh.drb_id = 2;
+        fresh.default_drb = false;
+        fresh.sdap_header_dl = fresh.sdap_header_ul = true;
+        fresh.qfis = {3};
+        DrbAdd remap;
+        remap.sdap_header_dl = remap.sdap_header_ul = true;
+        remap.qfis = {4};
+        remap.qfis_release = {2};
+        remap.setup = false;
+        q.drbs = {fresh, remap};
+        q.drb_release = {5};
+        s.push_back({"DL-DCCH", "RRCReconfiguration.qos-remap", encode(Reconfiguration{3, q, std::nullopt, {}})});
+    }
     s.push_back({"DL-DCCH", "RRCRelease", encode(Release{3})});
     s.push_back({"DL-DCCH", "UECapabilityEnquiry", encode(CapabilityEnquiry{0})});
     s.push_back({"DL-DCCH", "DLInformationTransfer", encode(DlInformationTransfer{1, *from_hex("7e005b01")})});

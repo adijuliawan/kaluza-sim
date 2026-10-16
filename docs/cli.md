@@ -18,6 +18,11 @@
   - `stub up-policy --integrity X --confidentiality Y [--rate-ul R] [--rate-dl R]` (P2 Q9): the UP Security Indication the stub's SMF sends with the next sessions.
     - X and Y are each `required`, `preferred`, `not-needed` or `absent` (no IE).
     - R is `bitrate64kbs` or `maximum-UE-rate`.
+  - `stub qos flows-add|add --qfi N [--5qi N] [--precedence N] --filter F [--direction uplink|downlink|bidirectional]`, `stub qos flows-clear` and `stub qos del --qfi N` (P2 Q10): QoS flows beside the default one.
+    - `flows-add` and `flows-clear` set the flows of the sessions set up after it.
+    - `add` and `del`, with `--ue SUPI --psi N`, change a live session by a network-requested modification (the 5GSM command inside a PDU SESSION RESOURCE MODIFY REQUEST).
+    - F is comma-separated: `all`, `remote=A/N`, `local=A/N`, `proto=N`, `lport=N`, `lports=N-M`, `rport=N`, `rports=N-M`, `spi=N`, `tos=V/M`.
+    - The stub's report shows `NOTIFIES` and the UPF's packets per QFI, `UPF_UL_QFI.n` and `UPF_DL_QFI.n`.
 - **The run:** `--run D`, else `$KSIM_RUN`, else `$KSIM_RUNS/latest` (`runs/latest`); `--socket S` reaches any control socket, e.g. `ksim-corestub`'s, with `stub`.
 - **`ksim-sim`** (the offline card tool) has `range init|derive|provision|deprovision` (N8, N9) and, from N14:
   - `serve [--test-keys | --sealed D --kek F] [--imsi I] [--template Y] [--vpcd host:port] [--personality sysmoISIM-SJA5] [--trace-udp host:port] [--trace-pcap F] [--seconds N]`;
@@ -68,6 +73,12 @@ Group commands take `--stagger <ms>` and `--parallel <n>`, and print one block p
 - `ksim-ctl gnb <name> up-policy [--preferred-integrity 0|1] [--preferred-confidentiality 0|1] [--absent-integrity 0|1] [--absent-confidentiality 0|1] [--integrity-possible 0|1]` (P2 Q9) reads or sets the CU-CP's local UP security policy for the sessions after.
   - The topology's `cucp: {up_policy: {...}}` sets its defaults.
   - Each session's decision is a `ran.up.security` event.
+- `ksim-ctl gnb <name> qos <ue>` (P2 Q10) shows each of the UE's sessions as the CU-CP holds it: `PS.<psi>.DRBS`, and per DRB `PS.<psi>.DRB.<id>.QFIS`, `.5QI` and `.DEFAULT`, with `DRB_MAP` (the topology's `cucp: {drb_map: per-5qi|per-session}`).
+- `ksim-ctl gnb <name> qos-release <ue> --psi N --qfi N` (P2 Q10): the gNB releases one QoS flow itself, reconfigures the CU-UP, the DU and the UE, and tells the AMF in PDU SESSION RESOURCE NOTIFY (`ran.session.modify` with `by=gnb`).
+- P2 Q10 adds to these views:
+  - `ue <sel> ps-list`: the QoS rules (`PS.<psi>.RULES`, `PS.<psi>.RULE.<id>`), the flows' 5QI (`PS.<psi>.FLOW.<qfi>.5QI`), the uplink packets per QFI the classifier sent (`PS.<psi>.UL_QFI.<qfi>`) and those no rule matched (`PS.<psi>.UL_UNMATCHED`);
+  - `cuup <name> bearers`: each DRB as `DRB.<cu-up ue>.<psi>.<drb>.QFIS|DEFAULT|UL_PACKETS|DL_PACKETS`, and `QFI.<n>.UL_PACKETS|DL_PACKETS`;
+  - `du <name> ue-list`: each UE's DRBs as `UE.<c-rnti>.DRB.<drb>.LCID|QFIS`.
 - `ksim-bench [--ms N] [--size BYTES] [--check <bounds.tsv>]` (P2 Q8), a separate binary: the user plane's per-packet costs in one process, as `BENCH.<case>.NS=` and `BENCH.<case>.MBITS=`.
   - It covers PDCP DRB pairs per algorithm, the AS contexts against one-shot calls, SDAP, and GTP-U N3 and NR-U.
   - With `--check` it prints `BENCH=PASS|FAIL` against the bounds. CI's hook 75 runs it from the release build.

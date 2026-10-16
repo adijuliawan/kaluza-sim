@@ -23,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -106,6 +107,9 @@ struct SimInfo {
 
 class UeDevice {
 public:
+    /// P2 Q10: UL packets per (PSI, QFI) as the classifier sent them, and those no rule matched.
+    const std::map<std::pair<std::uint8_t, std::uint8_t>, std::uint64_t>& ul_per_qfi() const noexcept { return ul_per_qfi_; }
+    const std::map<std::uint8_t, std::uint64_t>& ul_unmatched() const noexcept { return ul_unmatched_; }
     /// `net`: the system's side of the TUN data plane (none: inject mode).
     UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::os::Card> card,
              std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net = nullptr);
@@ -212,6 +216,12 @@ private:
     /// Sends an uplink packet on its session's DRB; in 5GMM-IDLE it is held and
     /// a service request asks for the bearers (§5.6.1.1 d).
     bool send_ul(std::uint8_t psi, Bytes packet);
+    /// P2 Q10: the QFI a UL packet goes on, from the session's QoS rules; nullopt when none matches.
+    std::optional<std::uint8_t> ul_qfi(const proc::ue::SessionInfo& s, ByteView packet);
+    std::set<std::uint8_t> unmatched_;                               // sessions told of once
+    std::set<std::pair<std::uint8_t, std::uint8_t>> classified_;     // (PSI, rule) told of once
+    std::map<std::pair<std::uint8_t, std::uint8_t>, std::uint64_t> ul_per_qfi_;   // (PSI, QFI) -> packets
+    std::map<std::uint8_t, std::uint64_t> ul_unmatched_;   // by PSI
     void flush_held();
     void session_up(const proc::ue::SessionInfo& s);
     void session_down(std::uint8_t psi);

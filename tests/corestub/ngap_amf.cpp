@@ -52,6 +52,7 @@ const char* name_of(const ngap::Pdu& p) {
                           [](const ngap::PduSessionResourceSetupResponse&) { return "PDUSessionResourceSetupResponse"; },
                           [](const ngap::PduSessionResourceReleaseResponse&) { return "PDUSessionResourceReleaseResponse"; },
                           [](const ngap::PduSessionResourceModifyResponse&) { return "PDUSessionResourceModifyResponse"; },
+                          [](const ngap::PduSessionResourceNotify&) { return "PDUSessionResourceNotify"; },
                           [](const auto&) { return "other"; },
                       },
                       p);
@@ -399,6 +400,16 @@ void NgapAmf::relink(Ue& ue) {
                                                     {ngap::SessionCause{psi, ngap::Cause{"nas", "normal-release"}}}},
              stream_of(*u));
     };
+    link.session_modify = [this, id](Bytes nas, ngap::SessionModifyItem item) {
+        Ue* u = by_amf(id);
+        if (u == nullptr) {
+            return;
+        }
+        // P2 Q10 (TS 38.413 9.2.1.5): the 5GSM command as the session's NAS-PDU.
+        item.nas = std::move(nas);
+        u->modifies.push_back(item.psi);
+        send(ngap::PduSessionResourceModifyRequest{u->amf_ue, u->ran_ue, {std::move(item)}}, stream_of(*u));
+    };
     link.sms_uplink = [this, id](Bytes cp) {
         if (Ue* u = by_amf(id)) {
             smsf_.on_uplink(u->nas->supi(), cp);
@@ -563,6 +574,47 @@ void NgapAmf::on_message(ByteView msg) {
                                  std::to_string(f.psi) + " " + f.cause.group + "/" + f.cause.value);
                            ue->setups.erase(std::remove(ue->setups.begin(), ue->setups.end(), f.psi), ue->setups.end());
                            smf_.on_setup_failed(supi, f.psi);
+                       }
+                   },
+                   [&](const ngap::PduSessionResourceModifyResponse& m) {
+                       // P2 Q10 (TS 38.413 8.2.3.2): the answer to a modification the SMF asked for.
+                       Ue* ue = by_amf(m.amf);
+                       check(ue != nullptr && ue->ran_ue == m.ran, "TS 38.413 10.6", "the UE NGAP IDs are a known pair");
+                       if (ue == nullptr) {
+                           return;
+                       }
+                       const std::string supi = ue->nas->supi();
+                       for (const auto& s : m.sessions) {
+                           auto it = std::find(ue->modifies.begin(), ue->modifies.end(), s.psi);
+                           check(it != ue->modifies.end(), "TS 38.413 8.2.3.2", "the response answers a modify request",
+                                 std::to_string(s.psi));
+                           if (it != ue->modifies.end()) {
+                               ue->modifies.erase(it);
+                           }
+                           smf_.on_modify_response(supi, s.psi, s.transfer);
+                       }
+                       for (const auto& f : m.failed) {
+                           check(false, "TS 38.413 8.2.3.2", "the gNB modified the session",
+                                 std::to_string(f.psi) + " " + f.cause.group + "/" + f.cause.value);
+                           ue->modifies.erase(std::remove(ue->modifies.begin(), ue->modifies.end(), f.psi), ue->modifies.end());
+                           smf_.on_modify_failed(supi, f.psi);
+                       }
+                   },
+                   [&](const ngap::PduSessionResourceNotify& m) {
+                       // P2 Q10 (TS 38.413 8.2.4): flows the gNB released itself; the SMF has the UE delete their rules.
+                       Ue* ue = by_amf(m.amf);
+                       check(ue != nullptr && ue->ran_ue == m.ran, "TS 38.413 10.6", "the UE NGAP IDs are a known pair");
+                       if (ue == nullptr) {
+                           return;
+                       }
+                       ++notifies_;
+                       for (const auto& s : m.sessions) {
+                           std::vector<std::uint8_t> qfis;
+                           qfis.reserve(s.transfer.released.size());
+                           for (const auto& f : s.transfer.released) {
+                               qfis.push_back(f.qfi);
+                           }
+                           ue->nas->qos_released(s.psi, qfis);
                        }
                    },
                    [&](const ngap::PduSessionResourceReleaseResponse& m) {

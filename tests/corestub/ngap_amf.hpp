@@ -61,6 +61,7 @@ public:
     const std::vector<std::string>& received() const noexcept { return received_; }
     std::size_t count(std::string_view message) const;
     std::uint64_t error_indications() const noexcept { return error_indications_; }
+    std::uint64_t notifies() const noexcept { return notifies_; }   // P2 Q10: PDU SESSION RESOURCE NOTIFYs
     /// The cause of the last UE CONTEXT RELEASE REQUEST, "" before one (P2 Q5: a peer
     /// CU-CP's release is seen here only).
     const std::string& last_release_cause() const noexcept { return last_release_cause_; }
@@ -105,6 +106,7 @@ private:
         std::optional<Bytes> radio_capability;
         std::vector<std::uint8_t> setups;      // PSIs with a resource setup awaiting its response
         std::vector<std::uint8_t> releases;    // and with a release awaiting its response
+        std::vector<std::uint8_t> modifies;    // P2 Q10: and with a modification awaiting its response
         bool connected = true;                 // the N2 connection is up
         std::optional<Millis> paged_at;
     };
@@ -138,6 +140,7 @@ private:
     std::vector<Verdict> verdicts_;
     std::vector<std::string> received_;
     std::uint64_t error_indications_ = 0;
+    std::uint64_t notifies_ = 0;
     std::string last_release_cause_;
     std::optional<ngap::Cause> last_error_;
     std::size_t pagings_ = 0;

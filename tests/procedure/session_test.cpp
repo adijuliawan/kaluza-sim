@@ -391,6 +391,127 @@ TEST(Session, Ts24501_6_3_2_ANetworkModificationIsCompleted) {
     EXPECT_EQ(n.failures(), "");
 }
 
+// P2 Q10: a ping and its reply on PSI 1 to `dst`; true when it came back.
+bool ping_once(Net& n, ip::Addr dst) {
+    const auto done = n.named("ue.ping.done").size();
+    node::PingRequest p;
+    p.psi = 1;
+    p.dst = dst;
+    p.count = 2;
+    p.interval = 100;
+    if (!n.ue->ping(p)) {
+        return false;
+    }
+    if (!n.loop.run_until([&] { return n.named("ue.ping.done").size() > done; }, n.loop.now() + 5'000)) {
+        return false;
+    }
+    return *n.last("ue.ping.done")->find("received") == "2";
+}
+
+corestub::FlowSpec flow(std::uint8_t qfi, std::uint16_t five_qi, std::uint8_t precedence, const char* filter) {
+    corestub::FlowSpec f;
+    f.qfi = qfi;
+    f.five_qi = five_qi;
+    f.precedence = precedence;
+    f.filter = filter;
+    f.components = *corestub::parse_filter(filter);
+    return f;
+}
+
+std::uint64_t ul_on(const Net& n, std::uint8_t qfi) {
+    const auto& m = n.ue->ul_per_qfi();
+    const auto it = m.find({1, qfi});
+    return it == m.end() ? 0 : it->second;
+}
+
+// P2 Q10 (TS 23.501 5.7.1.5; TS 38.300 12): a second QoS flow of another 5QI gets a DRB of its
+// own; the UE's classifier puts a ping to its address on it, the stub's UPF finds the same QFI.
+TEST(Session, Ts23501_5_7_1_5_ASecondFlowGetsItsOwnDrbAndItsPackets) {
+    corestub::Profile p;
+    p.session.flows = {flow(2, 7, 10, "remote=10.60.0.9/32")};
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    const auto drbs = n.cucp.drbs_of(n.amf.ids(0)->ran, 1);
+    ASSERT_EQ(drbs.size(), 2u);
+    EXPECT_TRUE(drbs[0].default_drb);
+    EXPECT_EQ(drbs[0].qfis, std::vector<std::uint8_t>{1});
+    EXPECT_EQ(drbs[1].qfis, std::vector<std::uint8_t>{2});
+    EXPECT_EQ(drbs[1].five_qi, 7);
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 9}));
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 1}));
+    EXPECT_EQ(ul_on(n, 2), 2u);
+    EXPECT_EQ(ul_on(n, 1), 2u);
+    EXPECT_EQ(n.amf.upf()->stats().ul_per_qfi.at(2), 2u);
+    EXPECT_EQ(n.failures(), "");
+}
+
+// P2 Q10 (TS 38.413 8.2.3): a modification adds a flow on a new DRB through E1, F1 and the UE,
+// and a second one releases it there again.
+TEST(Session, Ts38413_8_2_3_AModifyAddsAFlowOnItsOwnDrbAndAnotherReleasesIt) {
+    Net n;
+    n.register_ue();
+    n.establish();
+    const std::uint32_t ran = n.amf.ids(0)->ran;
+    ASSERT_TRUE(n.amf.nas()->qos_add(1, flow(4, 8, 5, "remote=10.60.0.7/32")));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.count("PDUSessionResourceModifyResponse") == 1; }, n.loop.now() + 5'000))
+        << n.failures();
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.smf().completes() == 1; }, n.loop.now() + 5'000));
+    ASSERT_EQ(n.cucp.drbs_of(ran, 1).size(), 2u);
+    EXPECT_FALSE(n.named("ran.cuup.drb.setup").empty());
+    EXPECT_EQ(n.ue->sessions().at(0).rules.size(), 2u);
+    EXPECT_EQ(n.ue->sessions().at(0).flow_5qi.at(4), 8);
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 7}));
+    EXPECT_EQ(ul_on(n, 4), 2u);
+    ASSERT_TRUE(n.amf.nas()->qos_del(1, 4));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.count("PDUSessionResourceModifyResponse") == 2; }, n.loop.now() + 5'000));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.smf().completes() == 2; }, n.loop.now() + 5'000));
+    EXPECT_EQ(n.cucp.drbs_of(ran, 1).size(), 1u);
+    EXPECT_EQ(n.ue->sessions().at(0).rules.size(), 1u);
+    EXPECT_EQ(*n.last("ran.session.modify")->find("drbs_removed"), "2");
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 7}));   // now the default rule's
+    EXPECT_EQ(ul_on(n, 1), 2u);
+    EXPECT_EQ(n.failures(), "");
+}
+
+// P2 Q10 (TS 38.413 8.2.4; TS 23.502 4.3.3.2): a flow the gNB releases itself is told to the AMF
+// in PDU SESSION RESOURCE NOTIFY, and the SMF has the UE delete its rule.
+TEST(Session, Ts38413_8_2_4_TheGnbsOwnFlowReleaseIsNotifiedAndTheRuleGoes) {
+    corestub::Profile p;
+    p.session.flows = {flow(2, 7, 10, "remote=10.60.0.9/32")};
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    const std::uint32_t ran = n.amf.ids(0)->ran;
+    ASSERT_FALSE(n.cucp.release_flow(ran, 1, 9));   // no such flow
+    ASSERT_TRUE(n.cucp.release_flow(ran, 1, 2));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.notifies() == 1; }, n.loop.now() + 5'000)) << n.failures();
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.smf().completes() == 1; }, n.loop.now() + 5'000));
+    EXPECT_EQ(n.cucp.drbs_of(ran, 1).size(), 1u);
+    EXPECT_EQ(*n.last("ran.session.modify")->find("by"), "gnb");
+    EXPECT_EQ(n.ue->sessions().at(0).rules.size(), 1u);
+    EXPECT_EQ(n.amf.count("PDUSessionResourceModifyResponse"), 0);   // a notify, not a response
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 9}));
+    EXPECT_EQ(ul_on(n, 1), 2u);
+    EXPECT_EQ(n.failures(), "");
+}
+
+// P2 Q10: cucp {drb_map: per-session} keeps every flow of a session on one DRB (P1's way).
+TEST(Session, APerSessionMappingPutsBothFlowsOnOneDrb) {
+    corestub::Profile p;
+    p.session.flows = {flow(2, 7, 10, "remote=10.60.0.9/32")};
+    const ScopedCuCp per_session([](proc::ran::CuCpConfig& c) { c.drb_map = proc::ran::DrbMap::per_session; });
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    const auto drbs = n.cucp.drbs_of(n.amf.ids(0)->ran, 1);
+    ASSERT_EQ(drbs.size(), 1u);
+    EXPECT_EQ(drbs[0].qfis, (std::vector<std::uint8_t>{1, 2}));
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 9}));
+    EXPECT_EQ(ul_on(n, 2), 2u);
+    EXPECT_EQ(n.failures(), "");
+}
+
 TEST(Session, Ts38413_8_2_1_ADuplicatePsiIsRefusedByTheGnb) {
     Net n;
     n.register_ue();

@@ -245,16 +245,30 @@ SessionToSetup read_session_to_setup(const json& j, bool mod) {
     return s;
 }
 
+/// DRB-Setup-Item-NG-RAN (and its -Mod twin, the same fields).
+json drb_setup(const DrbSetup& d) {
+    json flows = json::array();
+    for (std::uint8_t q : d.qfis) {
+        flows.push_back({{"qoS-Flow-Identifier", q}});
+    }
+    return {{"dRB-ID", d.drb_id},
+            {"uL-UP-Transport-Parameters", json::array({{{"uP-TNL-Information", tunnel(d.f1u_ul)}, {"cell-Group-ID", 0}}})},
+            {"flow-Setup-List", flows}};
+}
+DrbSetup read_drb_setup(const json& d) {
+    DrbSetup x;
+    x.drb_id = d.at("dRB-ID").get<std::uint8_t>();
+    x.f1u_ul = read_tunnel(d.at("uL-UP-Transport-Parameters").at(0).at("uP-TNL-Information"));
+    for (const auto& f : d.at("flow-Setup-List")) {
+        x.qfis.push_back(f.at("qoS-Flow-Identifier").get<std::uint8_t>());
+    }
+    return x;
+}
+
 json session_setup(const SessionSetup& s, bool mod) {
     json drbs = json::array();
     for (const auto& d : s.drbs) {
-        json flows = json::array();
-        for (std::uint8_t q : d.qfis) {
-            flows.push_back({{"qoS-Flow-Identifier", q}});
-        }
-        drbs.push_back({{"dRB-ID", d.drb_id},
-                        {"uL-UP-Transport-Parameters", json::array({{{"uP-TNL-Information", tunnel(d.f1u_ul)}, {"cell-Group-ID", 0}}})},
-                        {"flow-Setup-List", flows}});
+        drbs.push_back(drb_setup(d));
     }
     json j = {{"pDU-Session-ID", s.psi}};
     if (s.security) {
@@ -272,13 +286,7 @@ SessionSetup read_session_setup(const json& j, bool mod) {
     }
     s.ng_dl = read_tunnel(j.at("nG-DL-UP-TNL-Information"));
     for (const auto& d : j.at(mod ? "dRB-Setup-Mod-List-NG-RAN" : "dRB-Setup-List-NG-RAN")) {
-        DrbSetup x;
-        x.drb_id = d.at("dRB-ID").get<std::uint8_t>();
-        x.f1u_ul = read_tunnel(d.at("uL-UP-Transport-Parameters").at(0).at("uP-TNL-Information"));
-        for (const auto& f : d.at("flow-Setup-List")) {
-            x.qfis.push_back(f.at("qoS-Flow-Identifier").get<std::uint8_t>());
-        }
-        s.drbs.push_back(std::move(x));
+        s.drbs.push_back(read_drb_setup(d));
     }
     return s;
 }
@@ -421,15 +429,47 @@ Result<Bytes> build(const BearerContextModificationRequest& m) {
     if (!m.modify.empty()) {
         json l = json::array();
         for (const auto& s : m.modify) {
-            json drbs = json::array();
-            for (const auto& d : s.drbs) {
-                json x = {{"dRB-ID", d.drb_id}};
-                if (d.f1u_dl) {
-                    x["dL-UP-Parameters"] = json::array({{{"uP-TNL-Information", tunnel(*d.f1u_dl)}, {"cell-Group-ID", 0}}});
-                }
-                drbs.push_back(x);
+            // In ASN.1 order (KS-PLAT-D10): the AMBR, then the DRBs to set up, modify, remove.
+            json item = {{"pDU-Session-ID", s.psi}};
+            if (s.dl_ambr) {
+                item["pDU-Session-Resource-DL-AMBR"] = *s.dl_ambr;
             }
-            l.push_back({{"pDU-Session-ID", s.psi}, {"dRB-To-Modify-List-NG-RAN", drbs}});
+            if (!s.drbs_setup.empty()) {
+                json add = json::array();
+                for (const auto& d : s.drbs_setup) {
+                    add.push_back(drb_to_setup(d, "qos-flow-Information-To-Be-Setup"));
+                }
+                item["dRB-To-Setup-List-NG-RAN"] = add;
+            }
+            if (!s.drbs.empty()) {
+                json drbs = json::array();
+                for (const auto& d : s.drbs) {
+                    json x = {{"dRB-ID", d.drb_id}};
+                    if (d.f1u_dl) {
+                        x["dL-UP-Parameters"] = json::array({{{"uP-TNL-Information", tunnel(*d.f1u_dl)}, {"cell-Group-ID", 0}}});
+                    }
+                    if (d.flows) {
+                        if (d.flows->empty()) {
+                            return bad("E1AP: a DRB's flow mapping names at least one flow");
+                        }
+                        json fl = json::array();
+                        for (const auto& f : *d.flows) {
+                            fl.push_back(flow(f));
+                        }
+                        x["flow-Mapping-Information"] = fl;
+                    }
+                    drbs.push_back(x);
+                }
+                item["dRB-To-Modify-List-NG-RAN"] = drbs;
+            }
+            if (!s.drbs_remove.empty()) {
+                json rm = json::array();
+                for (std::uint8_t d : s.drbs_remove) {
+                    rm.push_back({{"dRB-ID", d}});
+                }
+                item["dRB-To-Remove-List-NG-RAN"] = rm;
+            }
+            l.push_back(item);
         }
         ng.push_back(ie(kToModifyList, "reject", "PDU-Session-Resource-To-Modify-List", l));
     }
@@ -465,6 +505,13 @@ Result<Bytes> build(const BearerContextModificationResponse& m) {
                 drbs.push_back({{"dRB-ID", d}});
             }
             json item = {{"pDU-Session-ID", s.psi}};
+            if (!s.drbs_setup.empty()) {
+                json add = json::array();
+                for (const auto& d : s.drbs_setup) {
+                    add.push_back(drb_setup(d));
+                }
+                item["dRB-Setup-List-NG-RAN"] = add;   // before the modified list (ASN.1 order)
+            }
             if (!drbs.empty()) {
                 item["dRB-Modified-List-NG-RAN"] = drbs;
             }
@@ -651,6 +698,14 @@ Result<Pdu> read(const std::string& kind, int code, const Ies& ies) {
                     for (const auto& s : *l) {
                         SessionToModify x;
                         x.psi = s.at("pDU-Session-ID").get<std::uint8_t>();
+                        if (s.contains("pDU-Session-Resource-DL-AMBR")) {
+                            x.dl_ambr = s.at("pDU-Session-Resource-DL-AMBR").get<std::uint64_t>();
+                        }
+                        if (s.contains("dRB-To-Setup-List-NG-RAN")) {
+                            for (const auto& d : s.at("dRB-To-Setup-List-NG-RAN")) {
+                                x.drbs_setup.push_back(read_drb_to_setup(d, "qos-flow-Information-To-Be-Setup"));
+                            }
+                        }
                         if (s.contains("dRB-To-Modify-List-NG-RAN")) {
                             for (const auto& d : s.at("dRB-To-Modify-List-NG-RAN")) {
                                 DrbToModify y;
@@ -658,7 +713,19 @@ Result<Pdu> read(const std::string& kind, int code, const Ies& ies) {
                                 if (d.contains("dL-UP-Parameters")) {
                                     y.f1u_dl = read_tunnel(d.at("dL-UP-Parameters").at(0).at("uP-TNL-Information"));
                                 }
+                                if (d.contains("flow-Mapping-Information")) {
+                                    std::vector<QosFlow> fl;
+                                    for (const auto& f : d.at("flow-Mapping-Information")) {
+                                        fl.push_back(read_flow(f));
+                                    }
+                                    y.flows = std::move(fl);
+                                }
                                 x.drbs.push_back(y);
+                            }
+                        }
+                        if (s.contains("dRB-To-Remove-List-NG-RAN")) {
+                            for (const auto& d : s.at("dRB-To-Remove-List-NG-RAN")) {
+                                x.drbs_remove.push_back(d.at("dRB-ID").get<std::uint8_t>());
                             }
                         }
                         m.modify.push_back(std::move(x));
@@ -687,6 +754,11 @@ Result<Pdu> read(const std::string& kind, int code, const Ies& ies) {
                     for (const auto& s : *l) {
                         SessionModified x;
                         x.psi = s.at("pDU-Session-ID").get<std::uint8_t>();
+                        if (s.contains("dRB-Setup-List-NG-RAN")) {
+                            for (const auto& d : s.at("dRB-Setup-List-NG-RAN")) {
+                                x.drbs_setup.push_back(read_drb_setup(d));
+                            }
+                        }
                         if (s.contains("dRB-Modified-List-NG-RAN")) {
                             for (const auto& d : s.at("dRB-Modified-List-NG-RAN")) {
                                 x.drbs.push_back(d.at("dRB-ID").get<std::uint8_t>());

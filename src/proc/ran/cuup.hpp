@@ -75,6 +75,17 @@ public:
 
     bool e1_ready() const noexcept { return e1_ready_; }
     std::size_t contexts() const noexcept { return ctx_.size(); }
+    /// P2 Q10: each DRB with its QoS flows and its packets (the bearers view).
+    struct DrbStat {
+        std::uint32_t cu_up_ue = 0;
+        std::uint8_t psi = 0;
+        std::uint8_t drb = 0;
+        bool default_drb = false;
+        std::vector<std::uint8_t> qfis;
+        std::uint64_t ul_packets = 0;
+        std::uint64_t dl_packets = 0;
+    };
+    std::vector<DrbStat> drb_stats() const;
     const CuUpStats& stats() const noexcept { return stats_; }
     /// N3's traffic per QFI (P2 Q7, metrics v0).
     const std::map<std::uint8_t, QfiTraffic>& per_qfi() const noexcept { return per_qfi_; }
@@ -92,6 +103,8 @@ private:
         bool sdap_dl = true;
         std::vector<std::uint8_t> qfis;
         std::uint32_t nru_sn = 0;
+        std::uint64_t ul_packets = 0;   // P2 Q10: per DRB
+        std::uint64_t dl_packets = 0;
     };
     struct Session {
         std::uint8_t psi = 1;
@@ -102,6 +115,7 @@ private:
         std::map<std::uint8_t, Drb> drbs;
         std::map<std::uint8_t, std::uint8_t> qfi_to_drb;
         std::optional<std::uint8_t> default_drb;
+        std::optional<std::uint64_t> dl_ambr;   // P2 Q10: from E1, recorded (not enforced, KS-NGAP-G4)
     };
     struct Context {
         std::uint32_t cu_cp_ue = 0;
@@ -129,6 +143,9 @@ private:
     void watch_inactivity(std::uint32_t cu_up_ue);    // arms the check at last_activity + the timer
 
     Result<e1ap::SessionSetup> setup_session(Context& c, const e1ap::SessionToSetup& s);
+    Result<e1ap::DrbSetup> add_drb(Context& c, Session& sess, const e1ap::DrbToSetup& d);
+    void remove_drb(Session& s, std::uint8_t drb_id);
+    void remap(Session& s, Drb& d, const std::vector<e1ap::QosFlow>& flows);
     void release_session(Session& s);
     void on_n3(std::uint32_t cu_up_ue, std::uint8_t psi, const entity::gtpu::UserData& d);
     void on_f1u(std::uint32_t cu_up_ue, std::uint8_t psi, std::uint8_t drb, const entity::gtpu::UserData& d);

@@ -12,9 +12,25 @@ void Sdap::configure(const SdapDrb& d) {
         }
     }
     drbs_[d.drb_id] = d;
+    for (std::uint8_t q : d.qfis_release) {
+        // TS 37.324 5.3.1: a released mapping goes; a flow remapped elsewhere keeps the new one.
+        if (auto it = qfi_to_drb_.find(q & 0x3F); it != qfi_to_drb_.end() && it->second == d.drb_id) {
+            qfi_to_drb_.erase(it);
+        }
+    }
     for (std::uint8_t q : d.qfis) {
         qfi_to_drb_[q & 0x3F] = d.drb_id;
     }
+}
+
+std::vector<std::uint8_t> Sdap::flows_of(std::uint8_t drb_id) const {
+    std::vector<std::uint8_t> out;
+    for (const auto& [q, d] : qfi_to_drb_) {
+        if (d == drb_id) {
+            out.push_back(q);
+        }
+    }
+    return out;
 }
 
 void Sdap::release(std::uint8_t drb_id) {

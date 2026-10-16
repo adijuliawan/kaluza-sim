@@ -153,8 +153,10 @@ Result<json> bearers_json(const RadioBearers& b) {
     if (!b.drbs.empty()) {
         json l = json::array();
         for (const DrbAdd& d : b.drbs) {
-            if (d.drb_id < 1 || d.drb_id > 32 || d.qfis.size() > 64 ||
-                std::any_of(d.qfis.begin(), d.qfis.end(), [](std::uint8_t q) { return q > 63; })) {
+            const auto qfi_bad = [](std::uint8_t q) { return q > 63; };
+            if (d.drb_id < 1 || d.drb_id > 32 || d.qfis.size() > 64 || d.qfis_release.size() > 64 ||
+                std::any_of(d.qfis.begin(), d.qfis.end(), qfi_bad) ||
+                std::any_of(d.qfis_release.begin(), d.qfis_release.end(), qfi_bad)) {
                 return bad("RRC: a DRB identity or QFI out of range");
             }
             json sdap = {{"pdu-Session", d.pdu_session},
@@ -163,6 +165,14 @@ Result<json> bearers_json(const RadioBearers& b) {
                          {"defaultDRB", d.default_drb}};
             if (!d.qfis.empty()) {
                 sdap["mappedQoS-FlowsToAdd"] = d.qfis;
+            }
+            if (!d.qfis_release.empty()) {
+                sdap["mappedQoS-FlowsToRelease"] = d.qfis_release;
+            }
+            if (!d.setup) {
+                // P2 Q10: the mapping of a DRB the UE has; its PDCP entity stays as it is.
+                l.push_back({{"cnAssociation", {{"sdap-Config", sdap}}}, {"drb-Identity", d.drb_id}});
+                continue;
             }
             auto pdcp = pdcp_json(d.pdcp);
             if (!pdcp) {
@@ -198,7 +208,11 @@ RadioBearers read_bearers(const json& j) {
                 if (s.contains("mappedQoS-FlowsToAdd")) {
                     d.qfis = s.at("mappedQoS-FlowsToAdd").get<std::vector<std::uint8_t>>();
                 }
+                if (s.contains("mappedQoS-FlowsToRelease")) {
+                    d.qfis_release = s.at("mappedQoS-FlowsToRelease").get<std::vector<std::uint8_t>>();
+                }
             }
+            d.setup = e.contains("pdcp-Config");
             if (e.contains("pdcp-Config")) {
                 const json& p = e.at("pdcp-Config");
                 if (p.contains("drb")) {

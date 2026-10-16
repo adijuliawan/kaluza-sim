@@ -96,7 +96,15 @@ inline std::vector<Sample> all() {
     s.push_back({"PDUSessionResourceModifyRequest",
                  PduSessionResourceModifyRequest{7, 1, {SessionModifyItem{1, protected_nas, mt}}}});
     s.push_back({"PDUSessionResourceModifyResponse",
-                 PduSessionResourceModifyResponse{7, 1, {SessionModifyOk{1, ModifyResponseTransfer{{2}}}}, {}}});
+                 PduSessionResourceModifyResponse{7, 1, {SessionModifyOk{1, ModifyResponseTransfer{{2}, {}}}}, {}}});
+    // P2 Q10: a flow that could not be added, and PDU SESSION RESOURCE NOTIFY with a flow released.
+    s.push_back({"PDUSessionResourceModifyResponse.failed-flow",
+                 PduSessionResourceModifyResponse{
+                     7, 1, {SessionModifyOk{1, ModifyResponseTransfer{{2}, {QosFlowCause{3, Cause{"radioNetwork", "radio-resources-not-available"}}}}}}, {}}});
+    s.push_back({"PDUSessionResourceNotify",
+                 PduSessionResourceNotify{7, 1, {SessionNotify{1, NotifyTransfer{{}, {QosFlowCause{2, Cause{"radioNetwork", "unspecified"}}}}}}, {}}});
+    s.push_back({"PDUSessionResourceNotify.released",
+                 PduSessionResourceNotify{7, 1, {}, {SessionCause{2, Cause{"radioNetwork", "radio-connection-with-ue-lost"}}}}});
     s.push_back({"InitialContextSetupFailure", InitialContextSetupFailure{7, 1, Cause{"radioNetwork", "unspecified"}}});
     s.push_back({"UEContextReleaseRequest", UeContextReleaseRequest{7, 1, Cause{"radioNetwork", "user-inactivity"}}});
     s.push_back({"UEContextReleaseCommand", UeContextReleaseCommand{7, 1, Cause{"nas", "normal-release"}}});

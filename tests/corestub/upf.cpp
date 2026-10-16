@@ -3,6 +3,8 @@
 
 #include "upf.hpp"
 
+#include "proc/ue/qos_classifier.hpp"
+
 #include "verdict.hpp"
 
 namespace ksim::corestub {
@@ -26,7 +28,7 @@ void Upf::check(bool ok, const char* clause, const char* what, std::string detai
 
 std::uint32_t Upf::open(ip::Addr ue, std::uint8_t qfi) {
     const std::uint32_t teid = gtpu_.bind([this](const entity::gtpu::UserData& d, const ksim::Endpoint&) { on_ul(d.teid, d); });
-    tunnels_[teid] = Tunnel{ue, qfi, std::nullopt, {}};
+    tunnels_[teid] = Tunnel{ue, qfi, std::nullopt, {}, {}};
     return teid;
 }
 
@@ -73,9 +75,21 @@ void Upf::send_dl(Tunnel& t, Bytes packet) {
         return;
     }
     const auto& a = t.dl->addr;
-    const auto d = entity::gtpu::UserData::dl_psc(t.dl->teid, t.qfi, std::move(packet));
+    // P2 Q10: the QFI the downlink filters give the packet; the default rule's otherwise.
+    std::uint8_t qfi = t.qfi;
+    if (const auto* r = proc::ue::classify(t.rules, packet, proc::ue::QosDirection::downlink); r != nullptr && r->qfi) {
+        qfi = *r->qfi;
+    }
+    ++stats_.dl_per_qfi[qfi];
+    const auto d = entity::gtpu::UserData::dl_psc(t.dl->teid, qfi, std::move(packet));
     if (gtpu_.send(ksim::Endpoint::v4(a[0], a[1], a[2], a[3], port_), d)) {
         ++stats_.dl_packets;
+    }
+}
+
+void Upf::set_rules(std::uint32_t ul_teid, std::vector<nas::ie::QosRules::Rule> rules) {
+    if (auto it = tunnels_.find(ul_teid); it != tunnels_.end()) {
+        it->second.rules = std::move(rules);
     }
 }
 
@@ -89,7 +103,16 @@ void Upf::on_ul(std::uint32_t teid, const entity::gtpu::UserData& d) {
     const Tunnel& t = it->second;
     check(d.ul_qfi.has_value(), "TS 38.415 5.5.2.2", "an uplink G-PDU carries a UL PDU SESSION INFORMATION frame");
     if (d.ul_qfi) {
-        check(*d.ul_qfi == t.qfi, "TS 38.415 5.5.3.3", "the uplink QFI is the session's", std::to_string(*d.ul_qfi));
+        ++stats_.ul_per_qfi[*d.ul_qfi];
+        if (t.rules.empty()) {
+            check(*d.ul_qfi == t.qfi, "TS 38.415 5.5.3.3", "the uplink QFI is the session's", std::to_string(*d.ul_qfi));
+        } else {
+            // P2 Q10: the QFI of the QoS rule the packet matches (TS 23.501 5.7.1.5, 24.501 6.2.5.1.1.2).
+            const auto* r = proc::ue::classify(t.rules, d.payload, proc::ue::QosDirection::uplink);
+            const std::uint8_t want = r != nullptr && r->qfi ? *r->qfi : 0;
+            check(*d.ul_qfi == want, "TS 23.501 5.7.1.5", "the uplink QFI is the one the session's QoS rules give the packet",
+                  std::to_string(*d.ul_qfi) + " for " + std::to_string(want));
+        }
     }
     auto p = ip::decode(d.payload);
     check(p.has_value(), "RFC 791 3.1", "the uplink T-PDU is an IPv4 packet", p ? "" : p.error().what);

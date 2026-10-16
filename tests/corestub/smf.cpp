@@ -67,7 +67,7 @@ ie::GprsTimer3 timer3(int s) {
 std::vector<SmAction> one(std::uint8_t psi, Result<Bytes> wire, bool release) {
     std::vector<SmAction> out;
     if (wire) {
-        out.push_back(SmAction{psi, std::move(*wire), std::nullopt, release});
+        out.push_back(SmAction{psi, std::move(*wire), std::nullopt, release, std::nullopt});
     }
     return out;
 }
@@ -81,12 +81,50 @@ ie::SessionAmbr ambr(std::uint32_t mbps) {
     return a;
 }
 
+// P2 Q10
+
+std::optional<std::uint32_t> number(const std::string& t) {
+    try {
+        std::size_t used = 0;
+        const unsigned long v = std::stoul(t, &used, 0);
+        if (used != t.size() || v > 0xFFFFFFFFUL) {
+            return std::nullopt;
+        }
+        return static_cast<std::uint32_t>(v);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
+Bytes be(std::uint32_t v, std::size_t n) {
+    Bytes out(n);
+    for (std::size_t i = 0; i < n; ++i) {
+        out[n - 1 - i] = static_cast<std::uint8_t>(v >> (8 * i));
+    }
+    return out;
+}
+
+ie::QosRules::Rule rule_of(std::uint8_t id, const FlowSpec& f) {
+    ie::QosRules::Rule r;
+    r.id = id;
+    r.operation = 1;   // create new QoS rule
+    r.default_rule = false;
+    r.filters = {ie::QosRules::PacketFilter{f.direction, 1, f.components}};
+    r.precedence = f.precedence;
+    r.qfi = f.qfi;
+    return r;
+}
+
+ie::QosFlowDescriptions::Description create_flow(std::uint8_t qfi, std::uint16_t five_qi) {
+    return {qfi, 1, true, {ie::QosFlowDescriptions::Parameter{1, Bytes{static_cast<std::uint8_t>(five_qi)}}}};
+}
+
 } // namespace
 
 SessionProfile SessionProfile::from_yaml(const Yaml& y) {
     y.only({"establishment", "reject_cause", "backoff_s", "rejects", "dnns", "pool", "dns", "dn", "mtu", "qfi", "five_qi",
             "ambr_mbps", "default_rule", "up_integrity", "up_confidentiality", "up_rate_ul", "up_rate_dl",
-            "backoff_dnn", "backoff_dnn_s", "backoff_dnn_rejects"});
+            "backoff_dnn", "backoff_dnn_s", "backoff_dnn_rejects", "flows"});
     SessionProfile p;
     const std::string e = y.get<std::string>("establishment", "accept");
     if (e == "accept") {
@@ -128,6 +166,26 @@ SessionProfile SessionProfile::from_yaml(const Yaml& y) {
     p.backoff_dnn = y.get<std::string>("backoff_dnn", p.backoff_dnn);
     p.backoff_dnn_s = y.get<int>("backoff_dnn_s", p.backoff_dnn_s);
     p.backoff_dnn_rejects = y.get<int>("backoff_dnn_rejects", p.backoff_dnn_rejects);
+    if (y.has("flows")) {
+        // P2 Q10: QoS flows beside the default one, with their rules.
+        for (std::size_t i = 0; i < y.at("flows").size(); ++i) {
+            const Yaml f = y.at("flows").at(i);
+            f.only({"qfi", "five_qi", "precedence", "direction", "filter"});
+            FlowSpec spec;
+            spec.qfi = static_cast<std::uint8_t>(f.at("qfi").as<int>());
+            spec.five_qi = static_cast<std::uint16_t>(f.get<int>("five_qi", spec.five_qi));
+            spec.precedence = static_cast<std::uint8_t>(f.get<int>("precedence", spec.precedence));
+            auto d = parse_direction(f.get<std::string>("direction", "bidirectional"));
+            spec.filter = f.at("filter").as<std::string>();
+            auto c = parse_filter(spec.filter);
+            if (!d || !c || spec.qfi < 1 || spec.qfi > 63 || spec.qfi == p.qfi) {
+                throw YamlError(f.where(), f.path(), "a flow: qfi 1..63 not the default's, a direction and a filter");
+            }
+            spec.direction = *d;
+            spec.components = std::move(*c);
+            p.flows.push_back(std::move(spec));
+        }
+    }
     return p;
 }
 
@@ -331,6 +389,11 @@ std::vector<SmAction> Smf::on_establishment(const std::string& supi, std::uint8_
     rule.precedence = 255;
     rule.qfi = p_.qfi;
     rules.list.push_back(rule);
+    // P2 Q10: the profile's further flows, each with its rule (TS 24.501 6.2.5.1.1.2).
+    for (const auto& f : p_.flows) {
+        rules.list.push_back(rule_of(s.next_rule++, f));
+    }
+    s.rules = rules.list;
     if (auto r = rules.encode()) {
         (void)nas::set(a, "Authorized QoS rules", std::move(*r));
     }
@@ -343,8 +406,10 @@ std::vector<SmAction> Smf::on_establishment(const std::string& supi, std::uint8_
         (void)nas::set(a, "S-NSSAI", snssai->encode());
     }
     ie::QosFlowDescriptions flows;
-    flows.list.push_back(ie::QosFlowDescriptions::Description{
-        p_.qfi, 1, true, {ie::QosFlowDescriptions::Parameter{1, Bytes{static_cast<std::uint8_t>(p_.five_qi)}}}});
+    flows.list.push_back(create_flow(p_.qfi, p_.five_qi));
+    for (const auto& f : p_.flows) {
+        flows.list.push_back(create_flow(f.qfi, f.five_qi));
+    }
     if (auto f = flows.encode()) {
         (void)nas::set(a, "Authorized QoS flow descriptions", std::move(*f));
     }
@@ -375,10 +440,13 @@ std::vector<SmAction> Smf::on_establishment(const std::string& supi, std::uint8_
         item.transfer.security = si;
     }
     item.transfer.flows = {ngap::QosFlowRequest{p_.qfi, p_.five_qi, ngap::Arp{}}};
+    for (const auto& f : p_.flows) {
+        item.transfer.flows.push_back(ngap::QosFlowRequest{f.qfi, f.five_qi, ngap::Arp{}});
+    }
     s.setup = item;
     sessions_[{supi, psi}] = s;
     std::vector<SmAction> out;
-    out.push_back(SmAction{psi, std::move(*wire), std::move(item), false});
+    out.push_back(SmAction{psi, std::move(*wire), std::move(item), false, std::nullopt});
     return out;
 }
 
@@ -392,6 +460,7 @@ void Smf::on_setup_response(const std::string& supi, std::uint8_t psi, const nga
     it->second.active = true;
     it->second.pending = false;
     if (upf_ != nullptr) {
+        upf_->set_rules(it->second.ul_teid, it->second.rules);   // P2 Q10: the UPF classifies with them
         upf_->set_dl(it->second.ul_teid, dl);   // what was held goes now
     }
 }
@@ -450,11 +519,12 @@ std::optional<SmAction> Smf::release(const std::string& supi, std::uint8_t psi, 
     if (!wire) {
         return std::nullopt;
     }
-    return SmAction{psi, std::move(*wire), std::nullopt, true};
+    return SmAction{psi, std::move(*wire), std::nullopt, true, std::nullopt};
 }
 
 std::optional<SmAction> Smf::modify(const std::string& supi, std::uint8_t psi, std::uint32_t ambr_mbps) {
-    if (sessions_.count({supi, psi}) == 0) {
+    auto it = sessions_.find({supi, psi});
+    if (it == sessions_.end()) {
         return std::nullopt;
     }
     nas::Message c = make(kModificationCommand, psi, 0);
@@ -463,7 +533,291 @@ std::optional<SmAction> Smf::modify(const std::string& supi, std::uint8_t psi, s
     if (!wire) {
         return std::nullopt;
     }
-    return SmAction{psi, std::move(*wire), std::nullopt, false};
+    Session& s = it->second;
+    if (!s.active || !s.setup || s.modifying) {
+        return SmAction{psi, std::move(*wire), std::nullopt, false, std::nullopt};   // the 5GSM command alone
+    }
+    // P2 Q10 (TS 23.502 4.3.3.2): the new session-AMBR goes to the gNB too.
+    ngap::SessionModifyItem item;
+    item.psi = psi;
+    item.transfer.session_ambr = ngap::Ambr{std::uint64_t{ambr_mbps} * 1'000'000, std::uint64_t{ambr_mbps} * 1'000'000};
+    s.modifying = Session::Pending{s.rules, s.setup->transfer.flows, {}, {}};
+    return SmAction{psi, std::move(*wire), std::nullopt, false, std::move(item)};
+}
+
+// ---- P2 Q10: QoS flows beyond the default one ------------------------------------------------
+
+
+Result<std::vector<ie::QosRules::Component>> parse_filter(const std::string& text) {
+    std::vector<ie::QosRules::Component> out;
+    std::size_t at = 0;
+    while (at <= text.size()) {
+        const std::size_t end = std::min(text.find(',', at), text.size());
+        const std::string tok = text.substr(at, end - at);
+        at = end + 1;
+        if (tok.empty()) {
+            continue;
+        }
+        const std::size_t eq = tok.find('=');
+        const std::string key = tok.substr(0, eq);
+        const std::string val = eq == std::string::npos ? std::string() : tok.substr(eq + 1);
+        auto bad = [&at]() {
+            return make_error(Errc::invalid_argument, static_cast<std::uint32_t>(at), "filter: a component it cannot read");
+        };
+        if (key == "all") {
+            out.push_back({0x01, {}});
+        } else if (key == "remote" || key == "local") {
+            const std::size_t slash = val.find('/');
+            auto e = Endpoint::parse(val.substr(0, slash), 0);
+            const auto bits = slash == std::string::npos ? std::optional<std::uint32_t>(32) : number(val.substr(slash + 1));
+            if (!e || e->family != Endpoint::Family::v4 || !bits || *bits > 32) {
+                return bad();
+            }
+            const std::uint32_t mask = *bits == 0 ? 0 : ~std::uint32_t{0} << (32 - *bits);
+            Bytes v{e->addr[0], e->addr[1], e->addr[2], e->addr[3]};
+            const Bytes m = be(mask, 4);
+            v.insert(v.end(), m.begin(), m.end());
+            out.push_back({static_cast<std::uint8_t>(key == "remote" ? 0x10 : 0x11), std::move(v)});
+        } else if (key == "proto") {
+            const auto n = number(val);
+            if (!n || *n > 255) {
+                return bad();
+            }
+            out.push_back({0x30, be(*n, 1)});
+        } else if (key == "lport" || key == "rport") {
+            const auto n = number(val);
+            if (!n || *n > 0xFFFF) {
+                return bad();
+            }
+            out.push_back({static_cast<std::uint8_t>(key == "lport" ? 0x40 : 0x50), be(*n, 2)});
+        } else if (key == "lports" || key == "rports") {
+            const std::size_t dash = val.find('-');
+            const auto lo = number(val.substr(0, dash));
+            const auto hi = dash == std::string::npos ? std::nullopt : number(val.substr(dash + 1));
+            if (!lo || !hi || *lo > *hi || *hi > 0xFFFF) {
+                return bad();
+            }
+            Bytes v = be(*lo, 2);
+            const Bytes h = be(*hi, 2);
+            v.insert(v.end(), h.begin(), h.end());
+            out.push_back({static_cast<std::uint8_t>(key == "lports" ? 0x41 : 0x51), std::move(v)});
+        } else if (key == "spi") {
+            const auto n = number(val);
+            if (!n) {
+                return bad();
+            }
+            out.push_back({0x60, be(*n, 4)});
+        } else if (key == "tos") {
+            const std::size_t slash = val.find('/');
+            const auto v = number(val.substr(0, slash));
+            const auto m = slash == std::string::npos ? std::optional<std::uint32_t>(0xFF) : number(val.substr(slash + 1));
+            if (!v || !m || *v > 255 || *m > 255) {
+                return bad();
+            }
+            out.push_back({0x70, Bytes{static_cast<std::uint8_t>(*v), static_cast<std::uint8_t>(*m)}});
+        } else {
+            return bad();
+        }
+    }
+    if (out.empty()) {
+        return make_error(Errc::invalid_argument, 0, "filter: no component");
+    }
+    return out;
+}
+
+Result<std::uint8_t> parse_direction(const std::string& text) {
+    if (text == "downlink") {
+        return std::uint8_t{1};
+    }
+    if (text == "uplink") {
+        return std::uint8_t{2};
+    }
+    if (text == "bidirectional" || text.empty()) {
+        return std::uint8_t{3};
+    }
+    return make_error(Errc::invalid_argument, 0, "direction: uplink, downlink or bidirectional");
+}
+
+Result<SmAction> Smf::modification(Session& s, Session::Pending p, ngap::ModifyRequestTransfer t, const ie::QosRules& rules,
+                                   const ie::QosFlowDescriptions& flows) {
+    nas::Message c = make(kModificationCommand, s.psi, 0);
+    if (!rules.list.empty()) {
+        auto r = rules.encode();
+        if (!r) {
+            return r.error();
+        }
+        (void)nas::set(c, "Authorized QoS rules", std::move(*r));
+    }
+    if (!flows.list.empty()) {
+        auto f = flows.encode();
+        if (!f) {
+            return f.error();
+        }
+        (void)nas::set(c, "Authorized QoS flow descriptions", std::move(*f));
+    }
+    auto wire = nas::encode(c);
+    if (!wire) {
+        return wire.error();
+    }
+    ngap::SessionModifyItem item;
+    item.psi = s.psi;
+    item.transfer = std::move(t);
+    s.modifying = std::move(p);
+    return SmAction{s.psi, std::move(*wire), std::nullopt, false, std::move(item)};
+}
+
+Result<SmAction> Smf::qos_add(const std::string& supi, std::uint8_t psi, const FlowSpec& f) {
+    auto it = sessions_.find({supi, psi});
+    if (it == sessions_.end() || !it->second.active || !it->second.setup) {
+        return make_error(Errc::invalid_argument, psi, "smf: no active session with that PSI");
+    }
+    Session& s = it->second;
+    if (s.modifying) {
+        return make_error(Errc::invalid_argument, psi, "smf: a modification of the session is on its way");
+    }
+    const auto& now = s.setup->transfer.flows;
+    if (f.qfi < 1 || f.qfi > 63 || std::any_of(now.begin(), now.end(), [&f](const auto& x) { return x.qfi == f.qfi; })) {
+        return make_error(Errc::invalid_argument, f.qfi, "smf: a QFI 1..63 the session does not have");
+    }
+    Session::Pending p;
+    p.rules = s.rules;
+    const ie::QosRules::Rule r = rule_of(s.next_rule++, f);
+    p.rules.push_back(r);
+    p.flows = now;
+    const ngap::QosFlowRequest flow{f.qfi, f.five_qi, ngap::Arp{}};
+    p.flows.push_back(flow);
+    p.added = {f.qfi};
+    ngap::ModifyRequestTransfer t;
+    t.add_or_modify = {flow};
+    ie::QosRules rules;
+    rules.list = {r};
+    ie::QosFlowDescriptions flows;
+    flows.list = {create_flow(f.qfi, f.five_qi)};
+    return modification(s, std::move(p), std::move(t), rules, flows);
+}
+
+Result<SmAction> Smf::qos_del(const std::string& supi, std::uint8_t psi, std::uint8_t qfi) {
+    auto it = sessions_.find({supi, psi});
+    if (it == sessions_.end() || !it->second.active || !it->second.setup) {
+        return make_error(Errc::invalid_argument, psi, "smf: no active session with that PSI");
+    }
+    Session& s = it->second;
+    if (s.modifying) {
+        return make_error(Errc::invalid_argument, psi, "smf: a modification of the session is on its way");
+    }
+    if (qfi == p_.qfi) {
+        return make_error(Errc::invalid_argument, qfi, "smf: the default QoS rule's flow goes with the session");
+    }
+    const auto& now = s.setup->transfer.flows;
+    if (std::none_of(now.begin(), now.end(), [qfi](const auto& x) { return x.qfi == qfi; })) {
+        return make_error(Errc::invalid_argument, qfi, "smf: no such QoS flow in the session");
+    }
+    Session::Pending p;
+    ie::QosRules rules;
+    for (const auto& r : s.rules) {
+        if (r.qfi == qfi && !r.default_rule) {
+            ie::QosRules::Rule d;   // delete existing QoS rule: the identifier alone (9.11.4.13)
+            d.id = r.id;
+            d.operation = 2;
+            rules.list.push_back(d);
+        } else {
+            p.rules.push_back(r);
+        }
+    }
+    for (const auto& x : now) {
+        if (x.qfi != qfi) {
+            p.flows.push_back(x);
+        }
+    }
+    p.released = {qfi};
+    ngap::ModifyRequestTransfer t;
+    t.release = {qfi};
+    ie::QosFlowDescriptions flows;
+    flows.list = {ie::QosFlowDescriptions::Description{qfi, 2, false, {}}};   // delete existing QoS flow description
+    return modification(s, std::move(p), std::move(t), rules, flows);
+}
+
+void Smf::on_modify_response(const std::string& supi, std::uint8_t psi, const ngap::ModifyResponseTransfer& t) {
+    auto it = sessions_.find({supi, psi});
+    check(it != sessions_.end() && it->second.modifying.has_value(), "TS 38.413 8.2.3.2",
+          "the modify response answers a modification the SMF asked for", std::to_string(psi));
+    if (it == sessions_.end() || !it->second.modifying) {
+        return;
+    }
+    Session& s = it->second;
+    Session::Pending p = std::move(*s.modifying);
+    s.modifying.reset();
+    ++s.modifications;
+    for (std::uint8_t q : p.added) {
+        const bool done = std::find(t.added_or_modified.begin(), t.added_or_modified.end(), q) != t.added_or_modified.end();
+        const bool failed = std::any_of(t.failed.begin(), t.failed.end(), [q](const auto& f) { return f.qfi == q; });
+        check(done || failed, "TS 38.413 9.3.4.4", "the gNB answers every QoS flow it was asked to add",
+              std::to_string(q));
+        if (!done) {
+            // Not set up: the rule stays out of the UPF (the UE keeps it until the SMF deletes it).
+            p.rules.erase(std::remove_if(p.rules.begin(), p.rules.end(), [q](const auto& r) { return r.qfi == q; }), p.rules.end());
+            p.flows.erase(std::remove_if(p.flows.begin(), p.flows.end(), [q](const auto& f) { return f.qfi == q; }), p.flows.end());
+        }
+    }
+    s.rules = std::move(p.rules);
+    s.setup->transfer.flows = std::move(p.flows);   // a reactivation sets up these
+    if (upf_ != nullptr) {
+        upf_->set_rules(s.ul_teid, s.rules);
+    }
+}
+
+void Smf::on_modify_failed(const std::string& supi, std::uint8_t psi) {
+    auto it = sessions_.find({supi, psi});
+    if (it != sessions_.end()) {
+        it->second.modifying.reset();
+        ++it->second.modifications;
+    }
+}
+
+std::optional<SmAction> Smf::on_notify(const std::string& supi, std::uint8_t psi, const std::vector<std::uint8_t>& released) {
+    auto it = sessions_.find({supi, psi});
+    check(it != sessions_.end(), "TS 38.413 8.2.4.2", "the notify names a session the SMF holds", std::to_string(psi));
+    if (it == sessions_.end() || released.empty()) {
+        return std::nullopt;
+    }
+    Session& s = it->second;
+    ie::QosRules rules;
+    ie::QosFlowDescriptions flows;
+    for (std::uint8_t q : released) {
+        check(q != p_.qfi, "TS 23.501 5.7.1.3", "the gNB released a flow other than the default QoS rule's", std::to_string(q));
+        for (const auto& r : s.rules) {
+            if (r.qfi == q && !r.default_rule) {
+                ie::QosRules::Rule d;
+                d.id = r.id;
+                d.operation = 2;
+                rules.list.push_back(d);
+            }
+        }
+        s.rules.erase(std::remove_if(s.rules.begin(), s.rules.end(), [q](const auto& r) { return r.qfi == q && !r.default_rule; }),
+                      s.rules.end());
+        if (s.setup) {
+            auto& fl = s.setup->transfer.flows;
+            fl.erase(std::remove_if(fl.begin(), fl.end(), [q](const auto& f) { return f.qfi == q; }), fl.end());
+        }
+        flows.list.push_back(ie::QosFlowDescriptions::Description{q, 2, false, {}});
+    }
+    if (upf_ != nullptr) {
+        upf_->set_rules(s.ul_teid, s.rules);
+    }
+    nas::Message c = make(kModificationCommand, psi, 0);
+    if (!rules.list.empty()) {
+        if (auto r = rules.encode()) {
+            (void)nas::set(c, "Authorized QoS rules", std::move(*r));
+        }
+    }
+    if (auto f = flows.encode()) {
+        (void)nas::set(c, "Authorized QoS flow descriptions", std::move(*f));
+    }
+    auto wire = nas::encode(c);
+    if (!wire) {
+        return std::nullopt;
+    }
+    return SmAction{psi, std::move(*wire), std::nullopt, false, std::nullopt};
 }
 
 Result<void> Smf::ping_ue(const std::string& supi, std::uint8_t psi, std::uint16_t seq) {

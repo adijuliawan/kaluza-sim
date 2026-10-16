@@ -17,6 +17,13 @@ using crypto::keys5g::AlgType;
 constexpr std::uint64_t kPart1Mask = (std::uint64_t{1} << 39) - 1;
 
 std::string str(std::int64_t v) { return std::to_string(v); }
+std::string join(const std::vector<std::uint8_t>& v) {
+    std::string out;
+    for (std::uint8_t x : v) {
+        out += (out.empty() ? "" : ",") + std::to_string(x);
+    }
+    return out.empty() ? "-" : out;
+}
 
 template <class... F>
 struct Overload : F... {
@@ -346,6 +353,23 @@ void UeRrc::add_srb(std::uint8_t id) {
 }
 
 Result<void> UeRrc::add_drb(const rrc::DrbAdd& d) {
+    if (!d.setup) {
+        // P2 Q10: the QoS flow mapping of a DRB the UE has; its PDCP entity and RLC stay.
+        auto have = drbs_.find(d.drb_id);
+        if (have == drbs_.end()) {
+            return make_error(Errc::invalid_argument, d.drb_id, "RRC: a DRB to modify that the UE does not have");
+        }
+        auto s = sdaps_.find(have->second.psi);
+        if (s == sdaps_.end()) {
+            return make_error(Errc::internal, d.drb_id, "RRC: a DRB without its SDAP entity");
+        }
+        // The SDAP headers and the session cannot change after setup (TS 38.331 SDAP-Config).
+        entity::SdapDrb m{d.drb_id, d.sdap_header_ul, d.sdap_header_dl, d.default_drb, d.qfis, d.qfis_release};
+        s->second.configure(m);
+        events_.emit("rrc.drb.remapped", cfg_.id,
+                     {{"drb", str(d.drb_id)}, {"added", join(d.qfis)}, {"released", join(d.qfis_release)}});
+        return {};
+    }
     const auto lc = lcids_.find({false, d.drb_id});
     if (lc == lcids_.end()) {
         return make_error(Errc::invalid_argument, d.drb_id, "RRC: a DRB without a logical channel in the cell group");
@@ -387,7 +411,7 @@ Result<void> UeRrc::add_drb(const rrc::DrbAdd& d) {
     drbs_.emplace(id, std::move(b));
     auto [it, fresh] = sdaps_.try_emplace(d.pdu_session, d.pdu_session);
     (void)fresh;
-    it->second.configure(entity::SdapDrb{d.drb_id, d.sdap_header_ul, d.sdap_header_dl, d.default_drb, d.qfis});
+    it->second.configure(entity::SdapDrb{d.drb_id, d.sdap_header_ul, d.sdap_header_dl, d.default_drb, d.qfis, d.qfis_release});
     return {};
 }
 
@@ -573,7 +597,9 @@ void UeRrc::on_reconfiguration(const rrc::Reconfiguration& m) {
                 lost("RRCReconfiguration the UE cannot comply with");
                 return;
             }
-            added += "drb" + str(d.drb_id) + " ";
+            if (d.setup) {
+                added += "drb" + str(d.drb_id) + " ";
+            }
         }
     }
     events_.emit("rrc.reconfiguration.complete", cfg_.id,

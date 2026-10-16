@@ -137,7 +137,15 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         t.gnb_name = g.get<std::string>("name", t.gnb_name);
         // A peer CU-CP (P2 Q4) has its own N2 and N3 addresses in its config, not here.
         if (t.peer_cucp.empty() || g.has("cucp")) {
-            g.at("cucp").only({"ng_bind", "ng_streams", "ue_inactivity_s", "nea", "nia", "t_reordering_ms", "up_policy"});
+            g.at("cucp").only({"ng_bind", "ng_streams", "ue_inactivity_s", "nea", "nia", "t_reordering_ms", "up_policy", "drb_map"});
+            if (g.at("cucp").has("drb_map")) {
+                // P2 Q10: the QoS flow to DRB mapping (KS-RRC-B6): a DRB per 5QI, or one per session.
+                const std::string m = g.at("cucp").at("drb_map").as<std::string>();
+                if (m != "per-5qi" && m != "per-session") {
+                    g.at("cucp").at("drb_map").fail("per-5qi or per-session");
+                }
+                t.drb_map = m == "per-session" ? proc::ran::DrbMap::per_session : proc::ran::DrbMap::per_5qi;
+            }
             if (g.at("cucp").has("up_policy")) {
                 // P2 Q9: the CU-CP's local UP security policy (proc/ran/up_security.hpp, KS-NGAP-B8).
                 const Yaml u = g.at("cucp").at("up_policy");

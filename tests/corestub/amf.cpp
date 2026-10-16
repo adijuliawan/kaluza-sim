@@ -1166,6 +1166,8 @@ void Amf::sm_actions(std::vector<SmAction> actions) {
         }
         if (a.setup && link_.session_setup) {
             link_.session_setup(std::move(wire), std::move(*a.setup));
+        } else if (a.modify && link_.session_modify) {
+            link_.session_modify(std::move(wire), std::move(*a.modify));
         } else if (a.release_resources && link_.session_release) {
             link_.session_release(std::move(wire), a.psi);
         } else {
@@ -1184,6 +1186,39 @@ bool Amf::release_session(std::uint8_t psi, std::uint8_t cause) {
     }
     sm_actions({std::move(*a)});
     return true;
+}
+
+Result<void> Amf::qos_add(std::uint8_t psi, const FlowSpec& f) {
+    if (smf_ == nullptr || state_ != State::registered) {
+        return make_error(Errc::invalid_argument, psi, "amf: the UE is not registered");
+    }
+    auto a = smf_->qos_add(supi_, psi, f);
+    if (!a) {
+        return a.error();
+    }
+    sm_actions({std::move(*a)});
+    return {};
+}
+
+Result<void> Amf::qos_del(std::uint8_t psi, std::uint8_t qfi) {
+    if (smf_ == nullptr || state_ != State::registered) {
+        return make_error(Errc::invalid_argument, psi, "amf: the UE is not registered");
+    }
+    auto a = smf_->qos_del(supi_, psi, qfi);
+    if (!a) {
+        return a.error();
+    }
+    sm_actions({std::move(*a)});
+    return {};
+}
+
+void Amf::qos_released(std::uint8_t psi, const std::vector<std::uint8_t>& qfis) {
+    if (smf_ == nullptr) {
+        return;
+    }
+    if (auto a = smf_->on_notify(supi_, psi, qfis)) {
+        sm_actions({std::move(*a)});
+    }
 }
 
 bool Amf::modify_session(std::uint8_t psi, std::uint32_t ambr_mbps) {

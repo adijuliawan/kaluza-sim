@@ -101,6 +101,8 @@ public:
         /// resource setup or release, instead of to_ue.
         std::function<void(Bytes nas, ngap::SessionSetupItem item)> session_setup;
         std::function<void(Bytes nas, std::uint8_t psi)> session_release;
+        /// P2 Q10: a 5GSM modification command that goes inside a PDU SESSION RESOURCE MODIFY REQUEST.
+        std::function<void(Bytes nas, ngap::SessionModifyItem item)> session_modify;
         /// N12: the SERVICE ACCEPT in an INITIAL CONTEXT SETUP REQUEST with K_gNB
         /// and the sessions (bit n for PSI n) whose user plane comes back.
         std::function<void(Bytes accept, SecretBytes kgnb, std::uint16_t psis)> service_accept;
@@ -122,6 +124,11 @@ public:
     /// Network-requested release and modification of a session (TS 24.501 §6.3.3, §6.3.2).
     bool release_session(std::uint8_t psi, std::uint8_t cause);
     bool modify_session(std::uint8_t psi, std::uint32_t ambr_mbps);
+    /// P2 Q10: a QoS flow added to or deleted from a session (Smf::qos_add, qos_del), and the
+    /// UE told of flows the gNB released (Smf::on_notify).
+    Result<void> qos_add(std::uint8_t psi, const FlowSpec& f);
+    Result<void> qos_del(std::uint8_t psi, std::uint8_t qfi);
+    void qos_released(std::uint8_t psi, const std::vector<std::uint8_t>& qfis);
     /// Network-initiated de-registration (§5.5.2.3.1) of a registered, connected UE.
     /// With a 5GMM cause when not 0 (§5.5.2.3.1). Also while a UE de-registration
     /// waits unanswered (Deregistration::silent), for the collision of §5.5.2.2.6 d.

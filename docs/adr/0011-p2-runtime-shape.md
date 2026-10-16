@@ -41,6 +41,10 @@
      - *As built (P2 Q9):* `cucp: {up_policy: {preferred_integrity, preferred_confidentiality, absent_integrity, absent_confidentiality, integrity_possible}}` (KS-NGAP-B8).
        - The defaults: "preferred" is performed, and with no indication integrity is off and ciphering on. These are OCUDU's choices too.
        - `ksim-ctl gnb <name> up-policy` changes the policy during a run.
+     - *As built (P2 Q10):* `cucp: {drb_map: per-5qi|per-session}` (KS-RRC-B6), default per-5qi.
+       - per-5qi gives each 5QI of a session its own DRB, the default DRB holding the first flow's, as OCUDU's CU-CP does.
+       - per-session puts every flow on one DRB, P1's way.
+       - A modification keeps the mapping, and a DRB left with no flow is removed.
   8. **Topology settings,** each recorded as a -B row when it lands: the CU-CP's NEA/NIA preference lists, its UP security policy for "preferred" and for an absent Security Indication, its QoS-flow-to-DRB mapping, and t-Reordering.
   9. **Throughput** is measured only on the dev PC or inside kaluza-uesim against the scripted core on 127.0.0.x, never across the lab (kaluza-core-df, 2026-10-15). The numbers are the sim's own processing over an ideal link with zero delay; the scripted UPF's CPU is reported apart.
 - **Consequences:**

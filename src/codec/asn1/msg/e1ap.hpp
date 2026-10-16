@@ -108,16 +108,25 @@ struct SessionSetup {
 struct DrbToModify {
     std::uint8_t drb_id = 1;
     std::optional<GtpTunnel> f1u_dl;   // the DU's F1-U end
+    // P2 Q10: flow-Mapping-Information, the QoS flows the DRB carries from now on
+    // (TS 37.483 9.3.3.x: the CU-UP updates its mapping).
+    std::optional<std::vector<QosFlow>> flows;
     friend bool operator==(const DrbToModify&, const DrbToModify&) = default;
 };
 struct SessionToModify {
     std::uint8_t psi = 1;
     std::vector<DrbToModify> drbs;
+    // P2 Q10 (TS 37.483 9.2.2.x, PDU Session Resource To Modify Item): the session-AMBR
+    // downlink, DRBs added to the session, and DRBs removed from it.
+    std::optional<std::uint64_t> dl_ambr;
+    std::vector<DrbToSetup> drbs_setup;
+    std::vector<std::uint8_t> drbs_remove;
     friend bool operator==(const SessionToModify&, const SessionToModify&) = default;
 };
 struct SessionModified {
     std::uint8_t psi = 1;
     std::vector<std::uint8_t> drbs;
+    std::vector<DrbSetup> drbs_setup;   // P2 Q10: the DRBs added, with the CU-UP's F1-U UL ends
     friend bool operator==(const SessionModified&, const SessionModified&) = default;
 };
 

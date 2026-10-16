@@ -439,6 +439,9 @@ std::vector<f1ap::DrbSetup> Du::drbs_change(Ue& ue, const std::vector<f1ap::DrbT
         drb.lcid = lcid_of_drb(d.drb_id);
         drb.ul = d.ul;
         drb.sn_bits = d.dl_pdcp_sn_bits;
+        for (const auto& f : d.flows) {
+            drb.qfis.push_back(f.qfi);
+        }
         const std::uint32_t du_ue = ue.du_ue;
         const std::uint8_t drb_id = drb.id;
         drb.dl_teid = f1u_->bind([this, alive = alive_, du_ue, drb_id](const entity::gtpu::UserData& u, const ksim::Endpoint&) {
@@ -666,6 +669,16 @@ void Du::handle(const f1ap::UeContextSetupRequest& m) {
     }
 }
 
+std::vector<Du::DrbView> Du::drb_list() const {
+    std::vector<DrbView> out;
+    for (const auto& [id, ue] : ues_) {
+        for (const auto& [d, drb] : ue.drbs) {
+            out.push_back(DrbView{ue.rnti, d, drb.lcid, drb.qfis});
+        }
+    }
+    return out;
+}
+
 void Du::handle(const f1ap::UeContextModificationRequest& m) {
     Ue* ue = by_du(m.du_ue);
     if (ue == nullptr) {
@@ -680,9 +693,25 @@ void Du::handle(const f1ap::UeContextModificationRequest& m) {
     std::vector<Ue::Drb> new_drbs;
     std::vector<std::uint8_t> released;
     auto drbs = drbs_change(*ue, m.drbs, m.release_drbs, new_drbs, released);
+    // P2 Q10 (TS 38.473 8.3.4.2): a DRB whose QoS flows change keeps its RLC and F1-U ends.
+    std::vector<f1ap::DrbSetup> modified;
+    for (const auto& d : m.modify_drbs) {
+        auto it = ue->drbs.find(d.drb_id);
+        if (it == ue->drbs.end()) {
+            continue;
+        }
+        if (d.ul.teid != 0) {
+            it->second.ul = d.ul;   // the CU-UP's end, as it was unless the CU-CP names another
+        }
+        it->second.qfis.clear();
+        for (const auto& f : d.flows) {
+            it->second.qfis.push_back(f.qfi);
+        }
+        modified.push_back(f1ap::DrbSetup{it->second.id, std::nullopt, f1ap::GtpTunnel{cfg_.f1u_addr, it->second.dl_teid}});
+    }
     // TS 38.473 8.3.4.3 (P2 Q4): when none of the requested modifications can be made.
-    const bool asked = !m.drbs.empty() || !m.release_drbs.empty() || !added.empty() || m.rrc.has_value();
-    const bool made = !drbs.empty() || !released.empty() || !added.empty() || m.rrc.has_value();
+    const bool asked = !m.drbs.empty() || !m.release_drbs.empty() || !m.modify_drbs.empty() || !added.empty() || m.rrc.has_value();
+    const bool made = !drbs.empty() || !released.empty() || !modified.empty() || !added.empty() || m.rrc.has_value();
     if (asked && !made) {
         const f1ap::Cause why = f1u_ ? f1ap::Cause{"radioNetwork", "unspecified"}
                                      : f1ap::Cause{"transport", "transport-resource-unavailable"};
@@ -696,7 +725,7 @@ void Du::handle(const f1ap::UeContextModificationRequest& m) {
             cg = std::move(*c);
         }
     }
-    send_f1(f1ap::UeContextModificationResponse{m.cu_ue, ue->du_ue, std::move(cg), std::move(drbs)}, true);
+    send_f1(f1ap::UeContextModificationResponse{m.cu_ue, ue->du_ue, std::move(cg), std::move(drbs), std::move(modified)}, true);
     if (m.rrc) {
         dl_sdu(*ue, 1, *m.rrc);
     }

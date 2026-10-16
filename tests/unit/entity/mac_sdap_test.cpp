@@ -126,8 +126,8 @@ TEST(UeMac, DownlinkSdusForAnotherRntiOrAnUnattachedLcidAreDropped) {
 
 TEST(Sdap, Clause5_2_1_FlowsMapToTheirDrbOrTheDefaultWithTheHeaderWhereConfigured) {
     Sdap s(1);
-    s.configure(SdapDrb{1, true, true, true, {9}});
-    s.configure(SdapDrb{2, false, false, false, {5}});
+    s.configure(SdapDrb{1, true, true, true, {9}, {}});
+    s.configure(SdapDrb{2, false, false, false, {5}, {}});
     auto a = s.map_ul(9, h("45"));
     ASSERT_TRUE(a);
     EXPECT_EQ(a->drb_id, 1);
@@ -150,7 +150,7 @@ TEST(Sdap, Clause5_2_1_FlowsMapToTheirDrbOrTheDefaultWithTheHeaderWhereConfigure
 
 TEST(Sdap, TheDownlinkHeaderIsReadAndStripped) {
     Sdap s(1);
-    s.configure(SdapDrb{1, false, true, true, {}});
+    s.configure(SdapDrb{1, false, true, true, {}, {}});
     auto d = s.on_dl(1, h("4945"));
     ASSERT_TRUE(d);
     ASSERT_TRUE(d->header);

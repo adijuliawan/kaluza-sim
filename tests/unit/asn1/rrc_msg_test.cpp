@@ -41,6 +41,38 @@ TEST(RrcMsg, CipheringDisabledRoundTrips) {
     EXPECT_EQ(back, rc);
 }
 
+// P2 Q10: a new DRB for a QoS flow, and the default DRB losing a flow and gaining another
+// with its PDCP entity kept (no pdcp-Config, TS 38.331 DRB-ToAddMod Cond PDCP).
+TEST(RrcMsg, QosFlowRemappingRoundTrips) {
+    RadioBearers b;
+    DrbAdd fresh;
+    fresh.drb_id = 2;
+    fresh.default_drb = false;
+    fresh.sdap_header_dl = fresh.sdap_header_ul = true;
+    fresh.qfis = {3};
+    DrbAdd remap;
+    remap.drb_id = 1;
+    remap.sdap_header_dl = remap.sdap_header_ul = true;
+    remap.qfis = {4};
+    remap.qfis_release = {2};
+    remap.setup = false;
+    b.drbs = {fresh, remap};
+    const Reconfiguration rc{1, b, std::nullopt, {}};
+    auto wire = encode(rc);
+    ASSERT_TRUE(wire) << wire.error().what;
+    auto j = to_jer("DL-DCCH", *wire);
+    ASSERT_TRUE(j);
+    EXPECT_NE(j->find("mappedQoS-FlowsToRelease"), std::string::npos);
+    auto d = decode_dl_dcch(*wire);
+    ASSERT_TRUE(d) << d.error().what;
+    const auto& back = std::get<Reconfiguration>(*d);
+    ASSERT_TRUE(back.bearers);
+    EXPECT_TRUE(back.bearers->drbs.at(0).setup);
+    EXPECT_FALSE(back.bearers->drbs.at(1).setup);
+    EXPECT_EQ(back.bearers->drbs.at(1).qfis_release, std::vector<std::uint8_t>{2});
+    EXPECT_EQ(back, rc);
+}
+
 TEST(RrcMsg, BroadcastAndPagingRoundTrip) {
     const Mib mib{512, true, 0, false, 12, 0, false, true};
     auto m = decode_mib(*encode(mib));

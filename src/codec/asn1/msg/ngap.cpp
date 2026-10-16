@@ -13,6 +13,8 @@ extern "C" {
 #include "NGAP_PDUSessionResourceModifyRequestTransfer.h"
 #include "NGAP_PDUSessionResourceModifyResponseTransfer.h"
 #include "NGAP_PDUSessionResourceModifyUnsuccessfulTransfer.h"
+#include "NGAP_PDUSessionResourceNotifyReleasedTransfer.h"
+#include "NGAP_PDUSessionResourceNotifyTransfer.h"
 #include "NGAP_PDUSessionResourceReleaseCommandTransfer.h"
 #include "NGAP_PDUSessionResourceReleaseResponseTransfer.h"
 #include "NGAP_PDUSessionResourceSetupRequestTransfer.h"
@@ -50,6 +52,7 @@ constexpr int kUeContextReleaseRequest = 42;
 constexpr int kUeRadioCapabilityInfoIndication = 44;
 constexpr int kUplinkNasTransport = 46;
 constexpr int kPduSessionResourceModify = 26;
+constexpr int kPduSessionResourceNotify = 30;   // P2 Q10
 constexpr int kPduSessionResourceRelease = 28;
 constexpr int kPduSessionResourceSetup = 29;
 
@@ -104,6 +107,8 @@ constexpr int kUeRadioCapability = 117;
 constexpr int kUeSecurityCapabilities = 119;
 constexpr int kUnavailableGuamiList = 120;
 constexpr int kUserLocationInformation = 121;
+constexpr int kNotifyList = 66;                  // P2 Q10: PDUSessionResourceNotifyList
+constexpr int kReleasedListNot = 67;             // PDUSessionResourceReleasedListNot
 
 constexpr std::uint64_t kMaxAmfUeId = (std::uint64_t{1} << 40) - 1;
 
@@ -587,7 +592,28 @@ Result<Bytes> encode_transfer(const ModifyRequestTransfer& t) {
     return per_of<ModifyRequestTransfer>(asn_DEF_NGAP_PDUSessionResourceModifyRequestTransfer, {{"protocolIEs", ies}});
 }
 
+json flows_with_cause(const std::vector<QosFlowCause>& l) {
+    json flows = json::array();
+    for (const auto& f : l) {
+        flows.push_back({{"qosFlowIdentifier", f.qfi}, {"cause", cause(f.cause)}});
+    }
+    return flows;
+}
+std::vector<QosFlowCause> read_flows_with_cause(const json& l) {
+    std::vector<QosFlowCause> out;
+    for (const auto& f : l) {
+        out.push_back(QosFlowCause{f.at("qosFlowIdentifier").get<std::uint8_t>(), read_cause(f.at("cause"))});
+    }
+    return out;
+}
+bool qfis_ok(const std::vector<QosFlowCause>& l) {
+    return std::all_of(l.begin(), l.end(), [](const QosFlowCause& f) { return f.qfi <= 63; });
+}
+
 Result<Bytes> encode_transfer(const ModifyResponseTransfer& t) {
+    if (!qfis_ok(t.failed)) {
+        return bad("NGAP: a QFI is 0..63");
+    }
     json j = json::object();
     if (!t.added_or_modified.empty()) {
         json flows = json::array();
@@ -596,7 +622,32 @@ Result<Bytes> encode_transfer(const ModifyResponseTransfer& t) {
         }
         j["qosFlowAddOrModifyResponseList"] = flows;
     }
+    if (!t.failed.empty()) {
+        j["qosFlowFailedToAddOrModifyList"] = flows_with_cause(t.failed);
+    }
     return per_of<ModifyResponseTransfer>(asn_DEF_NGAP_PDUSessionResourceModifyResponseTransfer, j);
+}
+
+Result<Bytes> encode_transfer(const NotifyTransfer& t) {
+    if (!qfis_ok(t.released) ||
+        !std::all_of(t.notify.begin(), t.notify.end(), [](const NotifyTransfer::Notify& n) { return n.qfi <= 63; })) {
+        return bad("NGAP: a QFI is 0..63");
+    }
+    if (t.notify.empty() && t.released.empty()) {
+        return bad("NGAP: a PDU session resource notify names a QoS flow");
+    }
+    json j = json::object();
+    if (!t.notify.empty()) {
+        json l = json::array();
+        for (const auto& n : t.notify) {
+            l.push_back({{"qosFlowIdentifier", n.qfi}, {"notificationCause", n.fulfilled ? "fulfilled" : "not-fulfilled"}});
+        }
+        j["qosFlowNotifyList"] = l;
+    }
+    if (!t.released.empty()) {
+        j["qosFlowReleasedList"] = flows_with_cause(t.released);
+    }
+    return per_of<NotifyTransfer>(asn_DEF_NGAP_PDUSessionResourceNotifyTransfer, j);
 }
 
 Result<Bytes> cause_transfer(const asn_TYPE_descriptor_t& td, const Cause& c) { return jer::encode(td, json{{"cause", cause(c)}}, asn1::Rules::aper); }
@@ -706,6 +757,29 @@ Result<ModifyResponseTransfer> decode_modify_response_transfer(ByteView in) {
             for (const auto& f : j->at("qosFlowAddOrModifyResponseList")) {
                 t.added_or_modified.push_back(f.at("qosFlowIdentifier").get<std::uint8_t>());
             }
+        }
+        if (j->contains("qosFlowFailedToAddOrModifyList")) {
+            t.failed = read_flows_with_cause(j->at("qosFlowFailedToAddOrModifyList"));
+        }
+        return t;
+    });
+}
+
+Result<NotifyTransfer> decode_notify_transfer(ByteView in) {
+    auto j = jer_of(asn_DEF_NGAP_PDUSessionResourceNotifyTransfer, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<NotifyTransfer> {
+        NotifyTransfer t;
+        if (j->contains("qosFlowNotifyList")) {
+            for (const auto& n : j->at("qosFlowNotifyList")) {
+                t.notify.push_back({n.at("qosFlowIdentifier").get<std::uint8_t>(),
+                                    n.at("notificationCause").get<std::string>() == "fulfilled"});
+            }
+        }
+        if (j->contains("qosFlowReleasedList")) {
+            t.released = read_flows_with_cause(j->at("qosFlowReleasedList"));
         }
         return t;
     });
@@ -930,6 +1004,33 @@ Result<Bytes> build(const PduSessionResourceModifyResponse& m) {
         ies.push_back(ie(kFailedToModifyListModRes, "ignore", "PDUSessionResourceFailedToModifyListModRes", *items));
     }
     return per(successful(kPduSessionResourceModify, "reject", "PDUSessionResourceModifyResponse", ies));
+}
+
+Result<Bytes> build(const PduSessionResourceNotify& m) {
+    if (m.sessions.empty() && m.released.empty()) {
+        return bad("NGAP: PDU SESSION RESOURCE NOTIFY names a session");
+    }
+    json ies = ids(m.amf, m.ran);
+    if (!m.sessions.empty()) {
+        json items = json::array();
+        for (const auto& s : m.sessions) {
+            auto t = encode_transfer(s.transfer);
+            if (!t || !psi_ok(s.psi)) {
+                return t ? Result<Bytes>(bad("NGAP: a PDU session ID is 1..15")) : Result<Bytes>(t.error());
+            }
+            items.push_back({{"pDUSessionID", s.psi}, {"pDUSessionResourceNotifyTransfer", hex(*t)}});
+        }
+        ies.push_back(ie(kNotifyList, "reject", "PDUSessionResourceNotifyList", items));
+    }
+    if (!m.released.empty()) {
+        auto items = cause_items(m.released, asn_DEF_NGAP_PDUSessionResourceNotifyReleasedTransfer,
+                                 "pDUSessionResourceNotifyReleasedTransfer");
+        if (!items) {
+            return items.error();
+        }
+        ies.push_back(ie(kReleasedListNot, "ignore", "PDUSessionResourceReleasedListNot", *items));
+    }
+    return per(initiating(kPduSessionResourceNotify, "ignore", "PDUSessionResourceNotify", ies));
 }
 
 json sec_caps(const InitialContextSetupRequest& m) {
@@ -1402,6 +1503,31 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
                     return f.error();
                 }
                 m.failed = std::move(*f);
+            }
+            return Pdu{std::move(m)};
+        }
+        break;
+    case kPduSessionResourceNotify:
+        if (kind == K::initiating) {
+            PduSessionResourceNotify m;
+            m.amf = amf_id(ies);
+            m.ran = ran_id(ies);
+            if (const json* l = maybe(ies, kNotifyList)) {
+                for (const auto& i : *l) {
+                    auto t = decode_notify_transfer(read_octets(i.at("pDUSessionResourceNotifyTransfer")));
+                    if (!t) {
+                        return t.error();
+                    }
+                    m.sessions.push_back({i.at("pDUSessionID").get<std::uint8_t>(), std::move(*t)});
+                }
+            }
+            if (const json* l = maybe(ies, kReleasedListNot)) {
+                auto f = read_cause_items(*l, asn_DEF_NGAP_PDUSessionResourceNotifyReleasedTransfer,
+                                          "pDUSessionResourceNotifyReleasedTransfer");
+                if (!f) {
+                    return f.error();
+                }
+                m.released = std::move(*f);
             }
             return Pdu{std::move(m)};
         }

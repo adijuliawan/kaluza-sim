@@ -99,6 +99,14 @@ public:
 
     bool cell_active() const noexcept { return active_; }
     std::size_t ues() const noexcept { return ues_.size(); }
+    /// P2 Q10: each UE's DRBs (by C-RNTI) and the QoS flows F1AP mapped to each.
+    struct DrbView {
+        std::uint16_t rnti = 0;
+        std::uint8_t drb = 0;
+        std::uint8_t lcid = 0;
+        std::vector<std::uint8_t> qfis;
+    };
+    std::vector<DrbView> drb_list() const;
     const DuStats& stats() const noexcept { return stats_; }
     f1ap::NrCgi cgi() const;
 
@@ -118,6 +126,7 @@ private:
             std::uint8_t sn_bits = 18;    // the DL PDCP SN length F1AP gave (P2 Q4)
             std::optional<std::uint32_t> highest_sn;   // of the DL PDCP PDUs sent to the UE
             bool report_due = false;      // a DDDS is armed
+            std::vector<std::uint8_t> qfis;   // P2 Q10: the QoS flows F1AP mapped to it
         };
         std::map<std::uint8_t, Drb> drbs;   // by DRB ID
         Millis last_ul = 0;                 // the last frame from the UE

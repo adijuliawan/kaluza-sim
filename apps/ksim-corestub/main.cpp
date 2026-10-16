@@ -132,6 +132,7 @@ Reply report(Stub& s) {
             out.set("ERROR_INDICATIONS", static_cast<std::int64_t>(s.amf->error_indications()));
             out.set("LAST_RELEASE_CAUSE", s.amf->last_release_cause().empty() ? std::string("-") : s.amf->last_release_cause());
             out.set("SESSIONS", static_cast<std::int64_t>(s.amf->smf().sessions()));
+            out.set("NOTIFIES", static_cast<std::int64_t>(s.amf->notifies()));   // P2 Q10
             out.set("SM_REQUESTS", static_cast<std::int64_t>(s.amf->smf().requests()));
             if (const auto* upf = s.amf->upf()) {
                 out.set("UPF_UL", static_cast<std::int64_t>(upf->stats().ul_packets));
@@ -139,6 +140,13 @@ Reply report(Stub& s) {
                 out.set("UPF_ECHO_REPLIES", static_cast<std::int64_t>(upf->stats().echo_replies));
                 out.set("UPF_ECHO_FROM_UE", static_cast<std::int64_t>(upf->stats().echo_from_ue));
                 out.set("UPF_ERROR_INDICATIONS", static_cast<std::int64_t>(upf->error_indications()));
+                // P2 Q10: the UPF's packets per QFI, as its classification of them found them.
+                for (const auto& [q, n] : upf->stats().ul_per_qfi) {
+                    out.set("UPF_UL_QFI." + std::to_string(q), static_cast<std::int64_t>(n));
+                }
+                for (const auto& [q, n] : upf->stats().dl_per_qfi) {
+                    out.set("UPF_DL_QFI." + std::to_string(q), static_cast<std::int64_t>(n));
+                }
             }
         }
         out.set("FAILURES", static_cast<std::int64_t>(all.size()));
@@ -388,6 +396,65 @@ static int run_main(int argc, char** argv) {
         Reply out;
         out.set("UP_INTEGRITY", in);
         out.set("UP_CONFIDENTIALITY", cp);
+        return out;
+    });
+    // P2 Q10: QoS flows. flows-add / flows-clear set the flows new sessions get beside the
+    // default one; add / del change a session of a UE by a network-requested modification.
+    server.post("/v1/stub/qos", [&s, find_ue, num](const ksim::api::Request& req) {
+        const std::string action = req.arg("action");
+        ksim::corestub::FlowSpec f;
+        if (action == "flows-add" || action == "add") {
+            f.qfi = static_cast<std::uint8_t>(num(req, "qfi", 2, 63));
+            f.five_qi = static_cast<std::uint16_t>(num(req, "5qi", 9, 255));
+            f.precedence = static_cast<std::uint8_t>(num(req, "precedence", 10, 255));
+            auto d = ksim::corestub::parse_direction(req.arg("direction", "bidirectional"));
+            f.filter = req.arg("filter", "all");
+            auto c = ksim::corestub::parse_filter(f.filter);
+            if (!d || !c || f.precedence == 80) {   // 80 is reserved (TS 24.501 9.11.4.13)
+                return Reply::fail(Exit::usage, "qos: --direction uplink|downlink|bidirectional, --filter COMPONENTS "
+                                                "(all, remote=A/N, local=A/N, proto=N, lport=N, lports=N-M, rport=N, "
+                                                "rports=N-M, spi=N, tos=V/M), --precedence not 80");
+            }
+            f.direction = *d;
+            f.components = std::move(*c);
+        } else if (action == "del") {
+            f.qfi = static_cast<std::uint8_t>(num(req, "qfi", 2, 63));
+        } else if (action != "flows-clear") {
+            return Reply::fail(Exit::usage, "qos flows-add|flows-clear|add|del");
+        }
+        const auto psi = static_cast<std::uint8_t>(num(req, "psi", 1, 15));
+        auto r = s.call<std::string>([&s, &req, find_ue, action, f, psi] {
+            if (action == "flows-add" || action == "flows-clear") {
+                for (auto* p : {&s.profile.session, s.amf ? &s.amf->smf().profile() : nullptr}) {
+                    if (p == nullptr) {
+                        continue;
+                    }
+                    if (action == "flows-clear") {
+                        p->flows.clear();
+                    } else {
+                        p->flows.erase(std::remove_if(p->flows.begin(), p->flows.end(), [&f](const auto& x) { return x.qfi == f.qfi; }),
+                                       p->flows.end());
+                        p->flows.push_back(f);
+                    }
+                }
+                return std::string();
+            }
+            auto* nas = find_ue(s, req);
+            if (nas == nullptr) {
+                return std::string("no such registered UE");
+            }
+            const auto done = action == "add" ? nas->qos_add(psi, f) : nas->qos_del(psi, f.qfi);
+            return done ? std::string() : std::string(done.error().what);
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        if (!r->empty()) {
+            return Reply::fail(Exit::wrong_state, *r);
+        }
+        Reply out;
+        out.set("QOS", action);
+        out.set("QFI", static_cast<std::int64_t>(f.qfi));
         return out;
     });
     server.post("/v1/stub/nas-alg", [&s, num](const ksim::api::Request& req) {

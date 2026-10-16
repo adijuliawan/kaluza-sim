@@ -624,6 +624,7 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         cc.nia_preference = topo_.nia_pref;
         cc.t_reordering_ms = topo_.t_reordering_ms;
         cc.up_policy = topo_.up_policy;   // P2 Q9
+        cc.drb_map = topo_.drb_map;       // P2 Q10
         cc.slices.clear();
         for (const auto& s : slices) {
             cc.slices.push_back(ngap::Snssai{s.sst, s.sd});

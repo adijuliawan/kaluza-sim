@@ -118,6 +118,10 @@ struct DrbAdd {
     bool default_drb = true;
     std::vector<std::uint8_t> qfis;        // mappedQoS-FlowsToAdd
     PdcpSettings pdcp;
+    // P2 Q10: mappedQoS-FlowsToRelease; and false for a DRB already set up whose QoS flow
+    // mapping alone changes (no pdcp-Config: TS 38.331 DRB-ToAddMod, Cond PDCP, Need M).
+    std::vector<std::uint8_t> qfis_release;
+    bool setup = true;
     friend bool operator==(const DrbAdd&, const DrbAdd&) = default;
 };
 

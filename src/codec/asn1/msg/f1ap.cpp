@@ -87,6 +87,10 @@ constexpr int kDrbsToBeSetupItem = 34;
 constexpr int kDrbsToBeSetupList = 35;
 constexpr int kDrbsToBeSetupModItem = 36;
 constexpr int kDrbsToBeSetupModList = 37;
+constexpr int kDrbsModifiedItem = 20;        // P2 Q10
+constexpr int kDrbsModifiedList = 21;
+constexpr int kDrbsToBeModifiedItem = 30;
+constexpr int kDrbsToBeModifiedList = 31;
 constexpr int kDrbInformation = 164;
 constexpr int kDlPdcpSnLength = 161;
 constexpr int kUlPdcpSnLength = 192;
@@ -207,7 +211,8 @@ bool drbs_ok(const std::vector<DrbToSetup>& l) {
 }
 
 /// DRBs-ToBeSetup(-Mod)-Item: the DRB's QoS is its first flow's (TS 38.473 9.3.1.27).
-json drb_items(const std::vector<DrbToSetup>& l, int item_id, const char* item_type) {
+/// DRBs-ToBeModified-Item (`modify`, P2 Q10) has no RLC mode and keeps the SN lengths.
+json drb_items(const std::vector<DrbToSetup>& l, int item_id, const char* item_type, bool modify = false) {
     json out = json::array();
     for (const auto& d : l) {
         json snssai = {{"sST", octets(d.snssai.sst, 1)}};
@@ -227,10 +232,17 @@ json drb_items(const std::vector<DrbToSetup>& l, int item_id, const char* item_t
         if (d.ul_pdcp_sn_bits.has_value()) {
             ext.push_back(sn_length(kUlPdcpSnLength, d.ul_pdcp_sn_bits.value_or(18)));
         }
+        json qos = {{"choice-extension", {{"id", kDrbInformation}, {"criticality", "ignore"}, {"value", {{"DRB-Information", info}}}}}};
+        json ul = json::array({{{"uLUPTNLInformation", f1_tunnel(d.ul)}}});
+        if (modify) {
+            out.push_back(ie(item_id, "reject", item_type,
+                             {{"dRBID", d.drb_id}, {"qoSInformation", qos}, {"uLUPTNLInformation-ToBeSetup-List", ul}}));
+            continue;
+        }
         out.push_back(ie(item_id, "reject", item_type,
                          {{"dRBID", d.drb_id},
-                          {"qoSInformation", {{"choice-extension", {{"id", kDrbInformation}, {"criticality", "ignore"}, {"value", {{"DRB-Information", info}}}}}}},
-                          {"uLUPTNLInformation-ToBeSetup-List", json::array({{{"uLUPTNLInformation", f1_tunnel(d.ul)}}})},
+                          {"qoSInformation", qos},
+                          {"uLUPTNLInformation-ToBeSetup-List", ul},
                           {"rLCMode", "rlc-am"},
                           {"iE-Extensions", ext}}));
     }
@@ -442,6 +454,13 @@ Result<Bytes> build(const UeContextModificationRequest& m) {
         ies.push_back(ie(kDrbsToBeSetupModList, "reject", "DRBs-ToBeSetupMod-List",
                          drb_items(m.drbs, kDrbsToBeSetupModItem, "DRBs-ToBeSetupMod-Item")));
     }
+    if (!drbs_ok(m.modify_drbs)) {
+        return bad("F1AP: a DRB to modify is 1..32 and maps at least one flow");
+    }
+    if (!m.modify_drbs.empty()) {
+        ies.push_back(ie(kDrbsToBeModifiedList, "reject", "DRBs-ToBeModified-List",
+                         drb_items(m.modify_drbs, kDrbsToBeModifiedItem, "DRBs-ToBeModified-Item", true)));
+    }
     if (!m.release_drbs.empty()) {
         json l = json::array();
         for (std::uint8_t d : m.release_drbs) {
@@ -459,6 +478,9 @@ Result<Bytes> build(const UeContextModificationResponse& m) {
     }
     if (!m.drbs.empty()) {
         ies.push_back(ie(kDrbsSetupModList, "ignore", "DRBs-SetupMod-List", drb_setup_items(m.drbs, kDrbsSetupModItem, "DRBs-SetupMod-Item")));
+    }
+    if (!m.modified.empty()) {
+        ies.push_back(ie(kDrbsModifiedList, "ignore", "DRBs-Modified-List", drb_setup_items(m.modified, kDrbsModifiedItem, "DRBs-Modified-Item")));
     }
     return per(successful(kUeContextModification, "reject", "UEContextModificationResponse", ies));
 }
@@ -805,6 +827,9 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             if (const json* l = maybe(ies, kDrbsToBeSetupModList)) {
                 m.drbs = read_drbs(*l);
             }
+            if (const json* l = maybe(ies, kDrbsToBeModifiedList)) {
+                m.modify_drbs = read_drbs(*l);
+            }
             if (const json* l = maybe(ies, kDrbsToBeReleasedList)) {
                 for (const json* i : items(*l)) {
                     m.release_drbs.push_back(i->at("dRBID").get<std::uint8_t>());
@@ -821,6 +846,9 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             }
             if (const json* l = maybe(ies, kDrbsSetupModList)) {
                 m.drbs = read_drbs_setup(*l);
+            }
+            if (const json* l = maybe(ies, kDrbsModifiedList)) {
+                m.modified = read_drbs_setup(*l);
             }
             return Pdu{std::move(m)};
         }

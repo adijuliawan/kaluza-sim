@@ -42,7 +42,7 @@ inline std::vector<Sample> all() {
     BearerContextModificationRequest mod;
     mod.cu_cp_ue = 1;
     mod.cu_up_ue = 1;
-    mod.modify = {SessionToModify{1, {DrbToModify{1, GtpTunnel{{127, 0, 0, 3}, 0x30000001}}}}};
+    mod.modify = {SessionToModify{1, {DrbToModify{1, GtpTunnel{{127, 0, 0, 3}, 0x30000001}, std::nullopt}}, std::nullopt, {}, {}}};
     s.push_back({"BearerContextModificationRequest", mod});
     BearerContextModificationRequest add;
     add.cu_cp_ue = 1;
@@ -53,7 +53,25 @@ inline std::vector<Sample> all() {
     add.add = {second};
     add.remove = {1};
     s.push_back({"BearerContextModificationRequest.add-remove", add});
-    s.push_back({"BearerContextModificationResponse", BearerContextModificationResponse{1, 1, {}, {SessionModified{1, {1}}}}});
+    s.push_back({"BearerContextModificationResponse", BearerContextModificationResponse{1, 1, {}, {SessionModified{1, {1}, {}}}}});
+    // P2 Q10: a QoS flow added on a new DRB, another remapped, a DRB removed, the AMBR changed.
+    BearerContextModificationRequest qos;
+    qos.cu_cp_ue = 1;
+    qos.cu_up_ue = 1;
+    SessionToModify sm;
+    sm.psi = 1;
+    sm.dl_ambr = 500'000'000;
+    DrbToSetup drb3 = drb;
+    drb3.drb_id = 3;
+    drb3.default_drb = false;
+    drb3.flows = {QosFlow{3, 7, 8, false, true}};
+    sm.drbs_setup = {drb3};
+    sm.drbs = {DrbToModify{1, std::nullopt, std::vector<QosFlow>{QosFlow{1, 9, 8, false, true}, QosFlow{2, 9, 8, false, true}}}};
+    sm.drbs_remove = {2};
+    qos.modify = {sm};
+    s.push_back({"BearerContextModificationRequest.qos", qos});
+    s.push_back({"BearerContextModificationResponse.qos",
+                 BearerContextModificationResponse{1, 1, {}, {SessionModified{1, {1}, {DrbSetup{3, GtpTunnel{{127, 0, 0, 4}, 0x20000003}, {3}}}}}}});
     SessionSetup added = done;
     added.psi = 2;
     added.drbs[0].drb_id = 2;

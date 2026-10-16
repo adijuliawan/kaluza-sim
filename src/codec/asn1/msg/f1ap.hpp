@@ -167,6 +167,9 @@ struct UeContextModificationRequest {
     std::vector<DrbToSetup> drbs;
     std::vector<std::uint8_t> release_drbs;
     std::optional<Bytes> rrc;
+    // P2 Q10: DRBs-ToBeModified (TS 38.473 9.2.2.7), a DRB's QoS flows changed; the UL
+    // end stays the CU-UP's, the SN lengths as set up.
+    std::vector<DrbToSetup> modify_drbs;
     friend bool operator==(const UeContextModificationRequest&, const UeContextModificationRequest&) = default;
 };
 struct UeContextModificationResponse {
@@ -174,6 +177,7 @@ struct UeContextModificationResponse {
     std::uint32_t du_ue = 0;
     std::optional<Bytes> cell_group;
     std::vector<DrbSetup> drbs;
+    std::vector<DrbSetup> modified;   // P2 Q10: DRBs-Modified (the DU's F1-U DL end, unchanged)
     friend bool operator==(const UeContextModificationResponse&, const UeContextModificationResponse&) = default;
 };
 struct UeContextReleaseRequest {

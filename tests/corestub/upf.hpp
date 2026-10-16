@@ -12,6 +12,12 @@
 // session whose user plane is deactivated (the UE in CM-IDLE) is held, a few
 // packets per tunnel, and reported once so the AMF pages; the held packets go
 // when the gNB's end is known again.
+//
+// P2 Q10: with the session's QoS rules (from the SMF, once the gNB set the flows up) the
+// UPF classifies as TS 23.501 5.7.1.5 says the UPF does: an uplink packet's QFI must be the
+// one the rules' uplink filters give it (the UE's classifier checked from the core's side),
+// and a downlink packet goes on the QFI its downlink filters give it (the default rule's
+// otherwise). Packets are counted per QFI both ways.
 
 #pragma once
 
@@ -25,6 +31,7 @@
 
 #include "codec/asn1/msg/ngap.hpp"
 #include "codec/ip/ipv4.hpp"
+#include "codec/nas/ie/ie.hpp"
 #include "entity/gtpu/gtpu.hpp"
 #include "platform/transport.hpp"
 #include "verdict.hpp"
@@ -40,6 +47,8 @@ struct UpfStats {
     std::uint64_t echo_from_ue = 0;      // echo replies a UE sent to a DN ping
     std::uint64_t unknown_teid = 0;
     std::uint64_t held = 0;              // downlink held for a deactivated session
+    std::map<std::uint8_t, std::uint64_t> ul_per_qfi;   // P2 Q10
+    std::map<std::uint8_t, std::uint64_t> dl_per_qfi;
 };
 
 class Upf {
@@ -52,6 +61,8 @@ public:
     /// A new uplink tunnel for a UE address and its flow's QFI; its TEID.
     std::uint32_t open(ip::Addr ue, std::uint8_t qfi);
     void set_dl(std::uint32_t ul_teid, const ngap::GtpTunnel& dl);
+    /// P2 Q10: the session's QoS rules (as the UE has them), for both directions.
+    void set_rules(std::uint32_t ul_teid, std::vector<nas::ie::QosRules::Rule> rules);
     /// The user plane deactivated (TS 23.502 4.2.6): downlink is held from now on.
     void deactivate(std::uint32_t ul_teid);
     void close(std::uint32_t ul_teid);
@@ -71,6 +82,7 @@ private:
         std::uint8_t qfi = 1;
         std::optional<ngap::GtpTunnel> dl;
         std::vector<Bytes> held;
+        std::vector<nas::ie::QosRules::Rule> rules;
     };
     void on_ul(std::uint32_t teid, const entity::gtpu::UserData& d);
     void send_dl(Tunnel& t, Bytes packet);

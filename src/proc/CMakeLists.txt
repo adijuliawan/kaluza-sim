@@ -17,6 +17,7 @@ add_library(ksim_proc STATIC
     ran/du.cpp
     ran/cucp.cpp
     ran/up_security.cpp
+    ue/qos_classifier.cpp
     ran/cuup.cpp)
 add_library(ksim::proc ALIAS ksim_proc)
 target_include_directories(ksim_proc PUBLIC ${PROJECT_SOURCE_DIR}/src)

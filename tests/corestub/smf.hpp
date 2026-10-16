@@ -10,6 +10,14 @@
 // REQUEST with a RELEASE COMMAND; releases or modifies a session when a test
 // asks. Each UE message is checked (the PTI, the session type, the ePCO
 // requests, the release complete's PTI) and the checks are kept as verdicts.
+//
+// P2 Q10: a session can have QoS flows beyond the default one, each with a QoS rule
+// (precedence, packet filters) and a flow description (5QI): from the profile at
+// establishment, or added and deleted at run time by a network-requested modification
+// (the 5GSM command inside a PDU SESSION RESOURCE MODIFY REQUEST, TS 23.502 4.3.3.2).
+// The UPF gets the session's rules once the gNB answered, to check the uplink QFIs and
+// mark the downlink. A flow the gNB released itself (PDU SESSION RESOURCE NOTIFY) has
+// its rule deleted at the UE.
 
 #pragma once
 
@@ -33,6 +41,21 @@ namespace ksim::corestub {
 
 class Upf;
 
+/// A QoS flow beyond the session's default one (P2 Q10).
+struct FlowSpec {
+    std::uint8_t qfi = 2;
+    std::uint16_t five_qi = 9;
+    std::uint8_t precedence = 10;
+    std::uint8_t direction = 3;    // TS 24.501 9.11.4.13: 1 downlink only, 2 uplink only, 3 bidirectional
+    std::vector<nas::ie::QosRules::Component> components;
+    std::string filter;            // the components as written (parse_filter)
+};
+/// A packet filter written as comma-separated components (Table 9.11.4.13.1): all,
+/// remote=A.B.C.D[/N], local=A.B.C.D[/N], proto=N, lport=N, lports=N-M, rport=N,
+/// rports=N-M, spi=N, tos=V[/M] (numbers in decimal or 0x hex).
+Result<std::vector<nas::ie::QosRules::Component>> parse_filter(const std::string& text);
+/// "uplink", "downlink" or "bidirectional" as 9.11.4.13's direction value.
+Result<std::uint8_t> parse_direction(const std::string& text);
 
 struct SessionProfile {
     enum class Establishment : std::uint8_t { accept, reject, silent };
@@ -62,6 +85,9 @@ struct SessionProfile {
     std::string up_confidentiality = "required";
     std::optional<std::string> up_rate_ul;
     std::optional<std::string> up_rate_dl;
+    // P2 Q10: the flows every new session gets beside the default one
+    // (flows: [{qfi, five_qi, precedence, direction, filter}]).
+    std::vector<FlowSpec> flows;
 
     static SessionProfile from_yaml(const Yaml& y);
 };
@@ -72,6 +98,7 @@ struct SmAction {
     Bytes sm;                                        // the 5GSM message for DL NAS TRANSPORT
     std::optional<ngap::SessionSetupItem> setup;     // with it: PDU SESSION RESOURCE SETUP REQUEST
     bool release_resources = false;                  // PDU SESSION RESOURCE RELEASE COMMAND with it
+    std::optional<ngap::SessionModifyItem> modify;   // P2 Q10: with it, PDU SESSION RESOURCE MODIFY REQUEST
 };
 
 class Smf {
@@ -94,6 +121,16 @@ public:
     std::optional<SmAction> release(const std::string& supi, std::uint8_t psi, std::uint8_t cause);
     /// Network-requested modification (§6.3.2.2): a new session-AMBR.
     std::optional<SmAction> modify(const std::string& supi, std::uint8_t psi, std::uint32_t ambr_mbps);
+    /// P2 Q10: a network-requested modification adding a QoS flow with its rule, or deleting
+    /// one (not the default rule's); Errc::invalid_argument when the session cannot.
+    Result<SmAction> qos_add(const std::string& supi, std::uint8_t psi, const FlowSpec& f);
+    Result<SmAction> qos_del(const std::string& supi, std::uint8_t psi, std::uint8_t qfi);
+    /// The gNB's answer to a modification: the UPF takes the rules of the flows it set up.
+    void on_modify_response(const std::string& supi, std::uint8_t psi, const ngap::ModifyResponseTransfer& t);
+    void on_modify_failed(const std::string& supi, std::uint8_t psi);
+    /// QoS flows the gNB released itself (PDU SESSION RESOURCE NOTIFY, TS 23.502 4.3.3.2 1e):
+    /// the UE is told to delete their rules (a 5GSM command alone, no N2).
+    std::optional<SmAction> on_notify(const std::string& supi, std::uint8_t psi, const std::vector<std::uint8_t>& released);
     /// A DN ping to the UE's address in this session.
     Result<void> ping_ue(const std::string& supi, std::uint8_t psi, std::uint16_t seq);
 
@@ -122,6 +159,17 @@ public:
         std::optional<std::uint8_t> release_pti;   // a RELEASE COMMAND awaits its COMPLETE
         std::optional<ngap::SessionSetupItem> setup;   // as first set up, for a reactivation
         bool pending = false;                      // downlink waits (the UE is paged)
+        // P2 Q10: the QoS rules and flows the UE and the gNB have, and a modification on its way.
+        std::vector<nas::ie::QosRules::Rule> rules;
+        std::uint8_t next_rule = 2;
+        struct Pending {
+            std::vector<nas::ie::QosRules::Rule> rules;    // the session's rules once it is done
+            std::vector<ngap::QosFlowRequest> flows;
+            std::vector<std::uint8_t> added;
+            std::vector<std::uint8_t> released;
+        };
+        std::optional<Pending> modifying;
+        int modifications = 0;                     // answered by the gNB
     };
     const Session* session(const std::string& supi, std::uint8_t psi) const;
     std::size_t sessions() const;
@@ -137,6 +185,8 @@ private:
     void on_release_complete(const std::string& supi, std::uint8_t psi, const nas::Message& m);
     void check(bool ok, const char* clause, const char* what, std::string detail = {});
     ip::Addr next_address();
+    Result<SmAction> modification(Session& s, Session::Pending p, ngap::ModifyRequestTransfer t,
+                                  const nas::ie::QosRules& rules, const nas::ie::QosFlowDescriptions& flows);
 
     SessionProfile p_;
     Upf* upf_;

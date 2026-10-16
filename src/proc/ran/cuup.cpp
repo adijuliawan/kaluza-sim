@@ -153,6 +153,27 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
     out.security = e1ap::SecurityResult{sess.integrity, sess.ciphering};
     out.ng_dl = e1ap::GtpTunnel{cfg_.n3_addr, sess.ng_dl_teid};
     for (const auto& d : s.drbs) {
+        auto done = add_drb(c, sess, d);
+        if (!done) {
+            return done.error();
+        }
+        out.drbs.push_back(std::move(*done));
+    }
+    const auto& t_reord = s.drbs.empty() ? std::optional<int>{} : s.drbs.front().t_reordering_ms;
+    events_.emit("ran.cuup.bearer.setup", cfg_.id,
+                 {{"cu_up_ue", str(up_id)}, {"psi", str(psi)}, {"drbs", str(s.drbs.size())},
+                  {"integrity", sess.integrity ? "1" : "0"}, {"ciphering", sess.ciphering ? "1" : "0"},
+                  {"t_reordering", t_reord ? std::to_string(*t_reord) : "infinity"}});
+    return out;
+}
+
+Result<e1ap::DrbSetup> CuUp::add_drb(Context& c, Session& sess, const e1ap::DrbToSetup& d) {
+    const std::uint32_t up_id = c.cu_up_ue;
+    const std::uint8_t psi = sess.psi;
+    if (sess.drbs.count(d.drb_id) != 0) {
+        return make_error(Errc::invalid_argument, d.drb_id, "CU-UP: the DRB exists");
+    }
+    {
         Drb& drb = sess.drbs[d.drb_id];
         drb.id = d.drb_id;
         drb.sdap_ul = d.sdap_ul;
@@ -196,6 +217,7 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                 const auto u = entity::gtpu::UserData::nru(r.f1u_dl->teid, r.nru_sn, std::move(pdu));
                 r.nru_sn = (r.nru_sn + 1) & 0xFFFFFF;
                 ++stats_.dl_packets;
+                ++r.dl_packets;
                 activity(*cx);
                 (void)f1u_.send(at(*r.f1u_dl, cfg_.gtpu_port), u);
             },
@@ -209,7 +231,10 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                     return;
                 }
                 Session& ss = cx->sessions.at(psi);
-                const Drb& r = ss.drbs.at(drb_id);
+                if (ss.drbs.count(drb_id) == 0) {
+                    return;   // removed by a modification while the PDU was on its way
+                }
+                Drb& r = ss.drbs.at(drb_id);
                 std::uint8_t qfi = r.qfis.empty() ? 0 : r.qfis.front();
                 if (r.sdap_ul) {
                     if (sdu.empty()) {
@@ -224,6 +249,7 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                     sdu.erase(sdu.begin());
                 }
                 ++stats_.ul_packets;
+                ++r.ul_packets;
                 QfiTraffic& q = per_qfi_[qfi];
                 ++q.ul_packets;
                 q.ul_bytes += sdu.size();
@@ -232,10 +258,11 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                                entity::gtpu::UserData::ul_psc(ss.ng_ul.teid, qfi, std::move(sdu)));
             });
         const auto nea = static_cast<crypto::Nea>(sess.ciphering ? c.nea : 0);
-        const auto nia = static_cast<crypto::Nia>(sess.integrity ? *c.nia : 0);
+        const auto nia = static_cast<crypto::Nia>(sess.integrity ? c.nia.value_or(0) : 0);
         if (auto r = drb.pdcp->set_keys(nia, sess.integrity ? c.k_int.clone() : SecretBytes{}, nea,
                                         sess.ciphering ? c.k_enc.clone() : SecretBytes{});
             !r) {
+            sess.drbs.erase(d.drb_id);
             return r.error();
         }
         drb.pdcp->set_integrity(sess.integrity, sess.integrity);
@@ -245,14 +272,50 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
                 on_f1u(up_id, psi, drb_id, u);
             }
         });
-        out.drbs.push_back(e1ap::DrbSetup{d.drb_id, e1ap::GtpTunnel{cfg_.f1u_addr, drb.f1u_ul_teid}, drb.qfis});
+        return e1ap::DrbSetup{d.drb_id, e1ap::GtpTunnel{cfg_.f1u_addr, drb.f1u_ul_teid}, drb.qfis};
     }
-    const auto& t_reord = s.drbs.empty() ? std::optional<int>{} : s.drbs.front().t_reordering_ms;
-    events_.emit("ran.cuup.bearer.setup", cfg_.id,
-                 {{"cu_up_ue", str(up_id)}, {"psi", str(psi)}, {"drbs", str(s.drbs.size())},
-                  {"integrity", sess.integrity ? "1" : "0"}, {"ciphering", sess.ciphering ? "1" : "0"},
-                  {"t_reordering", t_reord ? std::to_string(*t_reord) : "infinity"}});
+}
+
+std::vector<CuUp::DrbStat> CuUp::drb_stats() const {
+    std::vector<DrbStat> out;
+    for (const auto& [up, c] : ctx_) {
+        for (const auto& [psi, s] : c.sessions) {
+            for (const auto& [id, d] : s.drbs) {
+                out.push_back(DrbStat{up, psi, id, s.default_drb == id, d.qfis, d.ul_packets, d.dl_packets});
+            }
+        }
+    }
     return out;
+}
+
+void CuUp::remove_drb(Session& s, std::uint8_t drb_id) {
+    auto it = s.drbs.find(drb_id);
+    if (it == s.drbs.end()) {
+        return;
+    }
+    f1u_.unbind(it->second.f1u_ul_teid);
+    for (auto q = s.qfi_to_drb.begin(); q != s.qfi_to_drb.end();) {
+        q = q->second == drb_id ? s.qfi_to_drb.erase(q) : std::next(q);
+    }
+    if (s.default_drb == drb_id) {
+        s.default_drb.reset();
+    }
+    s.drbs.erase(it);
+}
+
+void CuUp::remap(Session& s, Drb& d, const std::vector<e1ap::QosFlow>& flows) {
+    // P2 Q10: the DRB carries these flows from now on (TS 37.483 8.3.2.2, Flow Mapping
+    // Information); a flow it no longer lists goes from the map, unless it moved to another DRB.
+    for (std::uint8_t q : d.qfis) {
+        if (auto it = s.qfi_to_drb.find(q); it != s.qfi_to_drb.end() && it->second == d.id) {
+            s.qfi_to_drb.erase(it);
+        }
+    }
+    d.qfis.clear();
+    for (const auto& f : flows) {
+        d.qfis.push_back(f.qfi);
+        s.qfi_to_drb[f.qfi] = d.id;
+    }
 }
 
 void CuUp::release_session(Session& s) {
@@ -370,11 +433,46 @@ void CuUp::handle(const e1ap::BearerContextModificationRequest& m) {
         if (it == c->sessions.end()) {
             continue;
         }
-        e1ap::SessionModified done{s.psi, {}};
+        Session& sess = it->second;
+        e1ap::SessionModified done{s.psi, {}, {}};
+        if (s.dl_ambr) {
+            sess.dl_ambr = s.dl_ambr;
+        }
+        // P2 Q10 (TS 37.483 8.3.2.2): DRBs removed, then added, then modified.
+        for (std::uint8_t id : s.drbs_remove) {
+            remove_drb(sess, id);
+            events_.emit("ran.cuup.drb.release", cfg_.id, {{"cu_up_ue", str(m.cu_up_ue)}, {"psi", str(s.psi)}, {"drb", str(id)}});
+        }
+        for (const auto& d : s.drbs_setup) {
+            auto added = add_drb(*c, sess, d);
+            if (!added) {
+                send_e1(e1ap::BearerContextModificationFailure{m.cu_cp_ue, m.cu_up_ue, e1ap::Cause{"radioNetwork", "unspecified"}},
+                        true);
+                return;
+            }
+            events_.emit("ran.cuup.drb.setup", cfg_.id,
+                         {{"cu_up_ue", str(m.cu_up_ue)}, {"psi", str(s.psi)}, {"drb", str(d.drb_id)},
+                          {"qfis", str(d.flows.size())}});
+            done.drbs_setup.push_back(std::move(*added));
+        }
         for (const auto& d : s.drbs) {
-            auto dit = it->second.drbs.find(d.drb_id);
-            if (dit != it->second.drbs.end() && d.f1u_dl) {
+            auto dit = sess.drbs.find(d.drb_id);
+            if (dit == sess.drbs.end()) {
+                continue;
+            }
+            bool changed = false;
+            if (d.f1u_dl) {
                 dit->second.f1u_dl = d.f1u_dl;
+                changed = true;
+            }
+            if (d.flows) {
+                remap(sess, dit->second, *d.flows);
+                events_.emit("ran.cuup.drb.remap", cfg_.id,
+                             {{"cu_up_ue", str(m.cu_up_ue)}, {"psi", str(s.psi)}, {"drb", str(d.drb_id)},
+                              {"qfis", str(d.flows->size())}});
+                changed = true;
+            }
+            if (changed) {
                 done.drbs.push_back(d.drb_id);
             }
         }

@@ -3,6 +3,8 @@
 
 #include "node/ue/device.hpp"
 
+#include "proc/ue/qos_classifier.hpp"
+
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -110,6 +112,15 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
         if (ping_ && ping_->psi == psi) {
             ping_done("session released");
         }
+        // P2 Q10: the classifier's counts and once-only events are the session's.
+        for (auto it = ul_per_qfi_.begin(); it != ul_per_qfi_.end();) {
+            it = it->first.first == psi ? ul_per_qfi_.erase(it) : std::next(it);
+        }
+        for (auto it = classified_.begin(); it != classified_.end();) {
+            it = it->first == psi ? classified_.erase(it) : std::next(it);
+        }
+        unmatched_.erase(psi);
+        ul_unmatched_.erase(psi);
         session_down(psi);
     };
     sm_ = std::make_unique<proc::ue::Sm>(ex_, events, sc, [this](const proc::ue::SmUplink& u) { return mm_->send_sm(u); }, su);
@@ -221,7 +232,11 @@ void UeDevice::on_ul_ip(std::uint8_t psi, ByteView packet) {
         }
         return;
     }
-    if (rrc_->send_data(psi, s->default_qfi, Bytes(packet.begin(), packet.end()))) {
+    const auto qfi = ul_qfi(*s, packet);
+    if (!qfi) {
+        return;   // no QoS rule matches it (TS 23.501 5.7.1.5)
+    }
+    if (rrc_->send_data(psi, *qfi, Bytes(packet.begin(), packet.end()))) {
         ++ul_packets_;
         ++t->second.ul;
     } else {
@@ -540,12 +555,40 @@ Result<void> UeDevice::service_request() {
     return mm_->service_request(nas::ie::ServiceType::signalling, 0);
 }
 
+std::optional<std::uint8_t> UeDevice::ul_qfi(const proc::ue::SessionInfo& s, ByteView packet) {
+    // P2 Q10: the QoS rules' packet filters pick the QFI (TS 24.501 6.2.5.1.1.2, TS 23.501
+    // 5.7.1.5); without signalled rules, the default QoS rule's.
+    if (s.rules.empty()) {
+        return s.default_qfi;
+    }
+    const auto* r = proc::ue::classify(s.rules, packet, proc::ue::QosDirection::uplink);
+    if (r == nullptr || !r->qfi) {
+        if (unmatched_.insert(s.psi).second) {
+            events_.emit("ue.qos.unmatched", subject(), {{"psi", std::to_string(s.psi)}});
+        }
+        ++ul_unmatched_[s.psi];
+        return std::nullopt;
+    }
+    if (classified_.insert({s.psi, r->id}).second) {
+        events_.emit("ue.qos.classified", subject(),
+                     {{"psi", std::to_string(s.psi)}, {"rule", std::to_string(r->id)}, {"qfi", std::to_string(*r->qfi)},
+                      {"precedence", r->precedence ? std::to_string(*r->precedence) : "-"},
+                      {"default", r->default_rule ? "1" : "0"}});
+    }
+    ++ul_per_qfi_[{s.psi, *r->qfi}];
+    return r->qfi;
+}
+
 bool UeDevice::send_ul(std::uint8_t psi, Bytes packet) {
     const proc::ue::SessionInfo* s = sm_->session(psi);
     if (s == nullptr) {
         return false;
     }
-    if (rrc_->send_data(psi, s->default_qfi, packet)) {
+    const auto qfi = ul_qfi(*s, packet);
+    if (!qfi) {
+        return true;   // taken, not sent: no QoS rule matches it (TS 23.501 5.7.1.5)
+    }
+    if (rrc_->send_data(psi, *qfi, packet)) {
         ++ul_packets_;
         return true;
     }
@@ -564,7 +607,8 @@ void UeDevice::flush_held() {
     for (auto& [psi, q] : held) {
         const proc::ue::SessionInfo* s = sm_->session(psi);
         for (auto& p : q) {
-            if (s != nullptr && rrc_->send_data(psi, s->default_qfi, p)) {
+            const auto qfi = s != nullptr ? ul_qfi(*s, p) : std::nullopt;
+            if (qfi && rrc_->send_data(psi, *qfi, p)) {
                 ++ul_packets_;
                 if (auto t = tuns_.find(psi); t != tuns_.end()) {
                     ++t->second.ul;
@@ -710,7 +754,8 @@ void UeDevice::on_dl_ip(std::uint8_t psi, Bytes packet) {
             out.src = p->dst;
             out.dst = p->src;
             out.payload = ip::encode_icmp(r);
-            if (rrc_->send_data(psi, s->default_qfi, ip::encode(out))) {
+            const Bytes reply = ip::encode(out);
+            if (const auto qfi = ul_qfi(*s, reply); qfi && rrc_->send_data(psi, *qfi, reply)) {
                 ++ul_packets_;
             }
             events_.emit("ue.ping.answered", subject(),

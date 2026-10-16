@@ -18,6 +18,7 @@
 //                                            # P2 Q9: up_policy: {preferred_integrity: true, preferred_confidentiality:
 //                                            #        true, absent_integrity: false, absent_confidentiality: true,
 //                                            #        integrity_possible: true} (the defaults)
+//                                            # P2 Q10: drb_map: per-5qi | per-session (default per-5qi)
 //       cuup: {n3_bind: 127.0.0.2}          # N3 (GTP-U 2152); default: the ng_bind address
 //       dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
 //   ues:
@@ -59,6 +60,7 @@
 #include <vector>
 
 #include "node/aio/capture.hpp"
+#include "proc/ran/drb_map.hpp"
 #include "proc/ran/up_security.hpp"
 
 #include "platform/result.hpp"
@@ -149,7 +151,8 @@ struct Topology {
     bool alg_pref_given = false;
     std::optional<int> t_reordering_ms;            // P2 Q8: cucp: {t_reordering_ms: N}; absent: infinity
     UserPlaneCapture capture_up = UserPlaneCapture::full;   // P2 Q8: capture: {user_plane: full|headers|off}
-    proc::ran::UpPolicy up_policy;                 // P2 Q9: cucp: {up_policy: {...}}   // a listed 0 needs allow_null (the default NEA0 is skipped without it)
+    proc::ran::UpPolicy up_policy;                 // P2 Q9: cucp: {up_policy: {...}}
+    proc::ran::DrbMap drb_map = proc::ran::DrbMap::per_5qi;   // P2 Q10: cucp: {drb_map: per-5qi|per-session}   // a listed 0 needs allow_null (the default NEA0 is skipped without it)
     /// NAS in clear in the Uu capture (KS-CTL-004: only when asked for; ksim
     /// run --plain-nas). Without it the Uu capture holds RRC, and the NAS
     /// inside it as it went over the air.

@@ -851,6 +851,7 @@ e1ap::GtpTunnel e1_tunnel(const ngap::GtpTunnel& t) { return {t.addr, t.teid}; }
 ngap::GtpTunnel ng_tunnel(const e1ap::GtpTunnel& t) { return {t.addr, t.teid}; }
 f1ap::GtpTunnel f1_tunnel(const e1ap::GtpTunnel& t) { return {t.addr, t.teid}; }
 e1ap::GtpTunnel e1_from_f1(const f1ap::GtpTunnel& t) { return {t.addr, t.teid}; }
+bool is_in(const std::vector<std::uint8_t>& v, std::uint8_t x) { return std::find(v.begin(), v.end(), x) != v.end(); }
 
 } // namespace
 
@@ -993,25 +994,160 @@ void CuCp::handle(const ngap::PduSessionResourceModifyRequest& m) {
         error_indication(ngap::UeIds{m.amf, m.ran}, "radioNetwork", "unknown-local-UE-NGAP-ID");
         return;
     }
-    // P1 applies no QoS change to the DRB mapping (KS-NGAP-G4); the NAS PDU goes to
-    // the UE and the flows are acknowledged as asked.
-    ngap::PduSessionResourceModifyResponse r{m.amf, m.ran, {}, {}};
-    for (const auto& s : m.sessions) {
-        if (ue->sessions.count(s.psi) == 0) {
-            r.failed.push_back(ngap::SessionCause{s.psi, ngap::Cause{"radioNetwork", "unknown-PDU-session-ID"}});
-            continue;
+    if (KSIM_MUTANT("modify_ack_only")) {
+        // The mutant (row ksim-p2.modify-add-flow): P1's way, no QoS change to the DRBs;
+        // the NAS PDU goes to the UE and the flows are acknowledged as asked.
+        ngap::PduSessionResourceModifyResponse r{m.amf, m.ran, {}, {}};
+        for (const auto& s : m.sessions) {
+            if (ue->sessions.count(s.psi) == 0) {
+                r.failed.push_back(ngap::SessionCause{s.psi, ngap::Cause{"radioNetwork", "unknown-PDU-session-ID"}});
+                continue;
+            }
+            ngap::ModifyResponseTransfer t;
+            for (const auto& f : s.transfer.add_or_modify) {
+                t.added_or_modified.push_back(f.qfi);
+            }
+            r.sessions.push_back(ngap::SessionModifyOk{s.psi, t});
+            if (const auto& nas = s.nas) {
+                dl_dcch(*ue, rrc::encode(rrc::DlInformationTransfer{next_tid(*ue), *nas}), ue->srb2 ? 2 : 1);
+            }
         }
-        ngap::ModifyResponseTransfer t;
-        for (const auto& f : s.transfer.add_or_modify) {
-            t.added_or_modified.push_back(f.qfi);
-        }
-        r.sessions.push_back(ngap::SessionModifyOk{s.psi, t});
-        if (const auto& nas = s.nas) {
-            dl_dcch(*ue, rrc::encode(rrc::DlInformationTransfer{next_tid(*ue), *nas}), ue->srb2 ? 2 : 1);
+        send_ngap(r, ue->ran_ue);
+        return;
+    }
+    // P2 Q10 (TS 38.413 8.2.3.2): a job of its own, after any procedure the UE has running.
+    Ue::Job j;
+    j.kind = Ue::Job::Kind::modify;
+    // Copy-constructed and moved in: GCC's -Wnull-dereference misreads the vector's copy-assignment.
+    j.modify = std::vector<ngap::SessionModifyItem>(m.sessions.begin(), m.sessions.end());
+    ue->jobs.push_back(std::move(j));
+    start_job(*ue);
+}
+
+Result<void> CuCp::release_flow(std::uint32_t ran_ue, std::uint8_t psi, std::uint8_t qfi) {
+    Ue* ue = by_ran(ran_ue);
+    if (ue == nullptr || !ue->amf_ue) {
+        return make_error(Errc::invalid_argument, ran_ue, "CU-CP: no such UE known to the AMF");
+    }
+    auto s = ue->sessions.find(psi);
+    if (s == ue->sessions.end()) {
+        return make_error(Errc::invalid_argument, psi, "CU-CP: no such PDU session");
+    }
+    const auto& flows = s->second.item.transfer.flows;
+    if (std::none_of(flows.begin(), flows.end(), [qfi](const auto& f) { return f.qfi == qfi; })) {
+        return make_error(Errc::invalid_argument, qfi, "CU-CP: no such QoS flow in the session");
+    }
+    Ue::Job j;
+    j.kind = Ue::Job::Kind::modify;
+    j.notify = true;
+    ngap::SessionModifyItem item;
+    item.psi = psi;
+    item.transfer.release = {qfi};
+    j.modify.push_back(std::move(item));
+    ue->jobs.push_back(std::move(j));
+    start_job(*ue);
+    return {};
+}
+
+// ---- QoS flows to DRBs (P2 Q10) ---------------------------------------------------------------
+
+const char* drb_map_name(DrbMap m) noexcept { return m == DrbMap::per_session ? "per-session" : "per-5qi"; }
+
+namespace {
+
+// The DU gives DRB n LCID n+3, so DRBs 1..29 (TS 38.321 Table 6.2.1-1: LCIDs 4..32).
+constexpr std::uint8_t kMaxDrbId = 29;
+
+e1ap::QosFlow e1_flow(const ngap::QosFlowRequest& f) {
+    return {f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable};
+}
+f1ap::Flow f1_flow(const ngap::QosFlowRequest& f) { return {f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable}; }
+
+std::string qfi_list(const std::vector<std::uint8_t>& v) {
+    std::string out;
+    for (std::uint8_t q : v) {
+        out += (out.empty() ? "" : ",") + std::to_string(q);
+    }
+    return out.empty() ? "-" : out;
+}
+
+template <typename D>
+std::string drb_list(const std::vector<D>& drbs) {
+    std::string out;
+    for (const auto& d : drbs) {
+        out += (out.empty() ? "" : ",") + std::to_string(d.id);
+    }
+    return out.empty() ? "-" : out;
+}
+
+} // namespace
+
+bool CuCp::one_drb() const {
+    // The mutant single_drb (row ksim-p2.multi-drb): every flow on the session's first DRB.
+    return cfg_.drb_map == DrbMap::per_session || KSIM_MUTANT("single_drb");
+}
+
+std::set<std::uint8_t> CuCp::drbs_in_use(const Ue& ue) const {
+    std::set<std::uint8_t> used;
+    for (const auto& [psi, s] : ue.sessions) {
+        for (const auto& d : s.drbs) {
+            used.insert(d.id);
         }
     }
-    send_ngap(r, ue->ran_ue);
+    if (!ue.jobs.empty()) {
+        for (const auto& [psi, s] : ue.jobs.front().pending) {
+            for (const auto& d : s.drbs) {
+                used.insert(d.id);
+            }
+        }
+    }
+    return used;
 }
+
+std::optional<std::uint8_t> CuCp::take_drb(std::set<std::uint8_t>& used) {
+    for (std::uint8_t d = 1; d <= kMaxDrbId; ++d) {
+        if (used.insert(d).second) {
+            return d;
+        }
+    }
+    return std::nullopt;
+}
+
+CuCp::Ue::Drb* CuCp::drb_for(Ue::Session& s, std::uint16_t five_qi) const {
+    // Per 5QI: the DRB that carries that 5QI. On one DRB: the default DRB (or the first).
+    for (auto& d : s.drbs) {
+        if (one_drb() ? d.default_drb : d.five_qi == five_qi) {
+            return &d;
+        }
+    }
+    if (one_drb() && !s.drbs.empty()) {
+        return &s.drbs.front();
+    }
+    return nullptr;
+}
+
+std::vector<CuCp::DrbView> CuCp::drbs_of(std::uint32_t ran_ue, std::uint8_t psi) const {
+    std::vector<DrbView> out;
+    for (const auto& [cu, ue] : ues_) {
+        if (ue.ran_ue != ran_ue) {
+            continue;
+        }
+        auto s = ue.sessions.find(psi);
+        if (s == ue.sessions.end()) {
+            break;
+        }
+        for (const auto& d : s->second.drbs) {
+            DrbView v{d.id, d.default_drb, d.five_qi, {}};
+            for (const auto& f : d.flows) {
+                v.qfis.push_back(f.qfi);
+            }
+            out.push_back(std::move(v));
+        }
+    }
+    return out;
+}
+
+// ---- the session jobs ------------------------------------------------------------------------
 
 void CuCp::start_job(Ue& ue) {
     if (ue.jobs.empty() || ue.jobs.front().stage != Ue::Job::Stage::waiting || ue.phase != Phase::active) {
@@ -1026,9 +1162,11 @@ void CuCp::start_job(Ue& ue) {
             if (it == ue.sessions.end()) {
                 continue;
             }
-            b.drb_release.push_back(it->second.drb_id);
-            if (it->second.du && it->second.du->lcid) {
-                cg.release_lcids.push_back(*it->second.du->lcid);
+            for (const auto& d : it->second.drbs) {
+                b.drb_release.push_back(d.id);
+                if (d.du && d.du->lcid) {
+                    cg.release_lcids.push_back(*d.du->lcid);
+                }
             }
         }
         rrc::Reconfiguration r;
@@ -1044,36 +1182,20 @@ void CuCp::start_job(Ue& ue) {
         dl_dcch(ue, rrc::encode(r), ue.srb2 ? 2 : 1);
         return;
     }
-    // Setup: a DRB per session, every flow on it, the default DRB.
+    if (j.kind == Ue::Job::Kind::modify) {
+        start_modify(ue);
+        return;
+    }
+    // Setup: the session's flows on DRBs by the mapping (P2 Q10), the first DRB the default.
     if (e1_ == nullptr || !e1_ready_ || !ue.nea || !ue.nia) {
         job_failed(ue, "radioNetwork", "unspecified");
         return;
     }
-    std::uint8_t next_drb = 1;
-    auto drb_free = [&](std::uint8_t d) {
-        for (const auto& [psi, s] : ue.sessions) {
-            if (s.drb_id == d) {
-                return false;
-            }
-        }
-        for (const auto& [psi, s] : j.pending) {
-            if (s.drb_id == d) {
-                return false;
-            }
-        }
-        return true;
-    };
+    std::set<std::uint8_t> used = drbs_in_use(ue);
     std::vector<e1ap::SessionToSetup> up;
     for (const auto& item : j.items) {
         if (ue.sessions.count(item.psi) != 0 || j.pending.count(item.psi) != 0) {
             j.failed.push_back(ngap::SessionCause{item.psi, ngap::Cause{"radioNetwork", "multiple-PDU-session-ID-instances"}});
-            continue;
-        }
-        while (next_drb <= 32 && !drb_free(next_drb)) {
-            ++next_drb;
-        }
-        if (next_drb > 32) {
-            j.failed.push_back(ngap::SessionCause{item.psi, ngap::Cause{"radioNetwork", "unspecified"}});
             continue;
         }
         // P2 Q9: the UP security decision (TS 33.501 6.6.1, TS 38.413 8.2.1.2; up_security.hpp).
@@ -1092,10 +1214,36 @@ void CuCp::start_job(Ue& ue) {
         }
         Ue::Session s;
         s.item = item;
-        s.drb_id = next_drb;
         s.integrity = upd.integrity;
         s.confidentiality = upd.confidentiality;
         s.report = upd.report;
+        std::set<std::uint8_t> mine;
+        bool fit = !item.transfer.flows.empty();
+        for (const auto& f : item.transfer.flows) {
+            Ue::Drb* d = drb_for(s, f.five_qi);
+            if (d == nullptr) {
+                const auto id = take_drb(used);
+                if (!id) {
+                    fit = false;
+                    break;
+                }
+                mine.insert(*id);
+                Ue::Drb fresh;
+                fresh.id = *id;
+                fresh.five_qi = f.five_qi;
+                fresh.default_drb = s.drbs.empty();
+                s.drbs.push_back(std::move(fresh));
+                d = &s.drbs.back();
+            }
+            d->flows.push_back(f);
+        }
+        if (!fit) {
+            for (std::uint8_t id : mine) {
+                used.erase(id);
+            }
+            j.failed.push_back(ngap::SessionCause{item.psi, ngap::Cause{"radioNetwork", "radio-resources-not-available"}});
+            continue;
+        }
         e1ap::SessionToSetup t;
         t.psi = item.psi;
         t.type = item.transfer.type;
@@ -1103,17 +1251,18 @@ void CuCp::start_job(Ue& ue) {
         t.security = e1ap::SecurityIndication{s.integrity ? "required" : "not-needed",
                                               s.confidentiality ? "required" : "not-needed"};
         t.ng_ul = e1_tunnel(item.transfer.ul);
-        e1ap::DrbToSetup d;
-        d.drb_id = next_drb;
-        // The PDCP timers of the PDCP-Config the UE gets (rrc::PdcpSettings): the CU-UP's
-        // entity runs with the same (P2 Q5).
-        rrc::PdcpSettings pdcp;
-        pdcp.t_reordering_ms = cfg_.t_reordering_ms;   // P2 Q8: the topology's, as the UE gets it
-        d.t_reordering_ms = pdcp.t_reordering_ms;
-        for (const auto& f : item.transfer.flows) {
-            d.flows.push_back(e1ap::QosFlow{f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable});
+        for (const auto& drb : s.drbs) {
+            e1ap::DrbToSetup d;
+            d.drb_id = drb.id;
+            d.default_drb = drb.default_drb;
+            // The PDCP timers of the PDCP-Config the UE gets (rrc::PdcpSettings): the CU-UP's
+            // entity runs with the same (P2 Q5); t-Reordering the topology's (P2 Q8).
+            d.t_reordering_ms = cfg_.t_reordering_ms;
+            for (const auto& f : drb.flows) {
+                d.flows.push_back(e1_flow(f));
+            }
+            t.drbs.push_back(std::move(d));
         }
-        t.drbs = {d};
         up.push_back(std::move(t));
         j.pending.emplace(item.psi, std::move(s));
     }
@@ -1174,34 +1323,49 @@ void CuCp::handle(const e1ap::BearerContextModificationResponse& m) {
     if (j.stage != Ue::Job::Stage::e1) {
         return;
     }
+    if (j.kind == Ue::Job::Kind::modify) {
+        modify_e1_done(*ue, m);
+        return;
+    }
     for (const auto& s : m.added) {
         auto it = j.pending.find(s.psi);
-        if (it != j.pending.end() && !s.drbs.empty()) {
-            it->second.up = s;
+        if (it == j.pending.end()) {
+            continue;
+        }
+        it->second.ng_dl = s.ng_dl;
+        for (auto& d : it->second.drbs) {
+            for (const auto& u : s.drbs) {
+                if (u.drb_id == d.id) {
+                    d.f1u_ul = u.f1u_ul;
+                }
+            }
         }
     }
     f1ap::UeContextModificationRequest r;
     r.cu_ue = ue->cu_ue;
     r.du_ue = ue->du_ue;
+    const rrc::PdcpSettings pdcp;   // the DRBs' PDCP-Config towards the UE
     for (auto it = j.pending.begin(); it != j.pending.end();) {
         const auto& item = it->second.item;
-        f1ap::DrbToSetup d;
-        d.drb_id = it->second.drb_id;
-        d.snssai = f1ap::Snssai{item.snssai.sst, item.snssai.sd};
-        for (const auto& f : item.transfer.flows) {
-            d.flows.push_back(f1ap::Flow{f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable});
-        }
-        const auto& up = it->second.up;
-        if (!up || up->drbs.empty()) {
+        const bool complete = it->second.ng_dl && std::all_of(it->second.drbs.begin(), it->second.drbs.end(),
+                                                              [](const Ue::Drb& d) { return d.f1u_ul.has_value(); });
+        if (!complete) {
             j.failed.push_back(ngap::SessionCause{it->first, ngap::Cause{"radioNetwork", "unspecified"}});
             it = j.pending.erase(it);
             continue;
         }
-        d.ul = f1_tunnel(up->drbs.front().f1u_ul);
-        const rrc::PdcpSettings pdcp;   // the DRB's PDCP-Config towards the UE
-        d.dl_pdcp_sn_bits = pdcp.sn18_dl ? 18 : 12;
-        d.ul_pdcp_sn_bits = static_cast<std::uint8_t>(pdcp.sn18_ul ? 18 : 12);
-        r.drbs.push_back(std::move(d));
+        for (const auto& drb : it->second.drbs) {
+            f1ap::DrbToSetup d;
+            d.drb_id = drb.id;
+            d.snssai = f1ap::Snssai{item.snssai.sst, item.snssai.sd};
+            for (const auto& f : drb.flows) {
+                d.flows.push_back(f1_flow(f));
+            }
+            d.ul = f1_tunnel(drb.f1u_ul.value_or(e1ap::GtpTunnel{}));   // set: the session is complete
+            d.dl_pdcp_sn_bits = pdcp.sn18_dl ? 18 : 12;
+            d.ul_pdcp_sn_bits = static_cast<std::uint8_t>(pdcp.sn18_ul ? 18 : 12);
+            r.drbs.push_back(std::move(d));
+        }
         ++it;
     }
     if (r.drbs.empty()) {
@@ -1226,12 +1390,47 @@ void CuCp::handle(const f1ap::UeContextModificationResponse& m) {
     e1ap::BearerContextModificationRequest r;
     r.cu_cp_ue = ue->cu_ue;
     r.cu_up_ue = ue->cu_up_ue.value_or(0);
-    for (auto& [psi, s] : j.pending) {
-        for (const auto& d : m.drbs) {
-            if (d.drb_id == s.drb_id) {
-                s.du = d;
-                r.modify.push_back(e1ap::SessionToModify{psi, {e1ap::DrbToModify{d.drb_id, e1_from_f1(d.dl)}}});
+    if (j.kind == Ue::Job::Kind::modify) {
+        // P2 Q10: the DU's F1-U ends of the DRBs the modification added go to the CU-UP.
+        for (auto& [psi, c] : j.changes) {
+            e1ap::SessionToModify sm;
+            sm.psi = psi;
+            for (auto& d : c.after.drbs) {
+                if (std::find(c.added.begin(), c.added.end(), d.id) == c.added.end()) {
+                    continue;
+                }
+                for (const auto& x : m.drbs) {
+                    if (x.drb_id == d.id) {
+                        d.du = x;
+                        sm.drbs.push_back(e1ap::DrbToModify{d.id, e1_from_f1(x.dl), std::nullopt});
+                    }
+                }
             }
+            if (!sm.drbs.empty()) {
+                r.modify.push_back(std::move(sm));
+            }
+        }
+        if (r.modify.empty()) {
+            job_rrc(*ue);
+            return;
+        }
+        j.stage = Ue::Job::Stage::e1_mod;
+        send_e1(r, true);
+        return;
+    }
+    for (auto& [psi, s] : j.pending) {
+        e1ap::SessionToModify sm;
+        sm.psi = psi;
+        for (auto& drb : s.drbs) {
+            for (const auto& d : m.drbs) {
+                if (d.drb_id == drb.id) {
+                    drb.du = d;
+                    sm.drbs.push_back(e1ap::DrbToModify{d.drb_id, e1_from_f1(d.dl), std::nullopt});
+                }
+            }
+        }
+        if (!sm.drbs.empty()) {
+            r.modify.push_back(std::move(sm));
         }
     }
     if (r.modify.empty() || !ue->cu_up_ue) {
@@ -1242,25 +1441,307 @@ void CuCp::handle(const f1ap::UeContextModificationResponse& m) {
     send_e1(r, true);
 }
 
+// ---- PDU SESSION RESOURCE MODIFY (P2 Q10) ----------------------------------------------------
+
+void CuCp::start_modify(Ue& ue) {
+    Ue::Job& j = ue.jobs.front();
+    std::set<std::uint8_t> used = drbs_in_use(ue);
+    for (const auto& item : j.modify) {
+        auto it = ue.sessions.find(item.psi);
+        if (it == ue.sessions.end()) {
+            j.failed.push_back(ngap::SessionCause{item.psi, ngap::Cause{"radioNetwork", "unknown-PDU-session-ID"}});
+            continue;
+        }
+        Ue::Job::Change c;
+        c.after = it->second;
+        c.nas = item.nas;
+        if (const auto& a = item.transfer.session_ambr) {
+            c.dl_ambr = a->dl;
+            c.after.item.transfer.session_ambr = a;
+        }
+        auto& flows = c.after.item.transfer.flows;
+        auto find_drb = [&c](std::uint8_t id) -> Ue::Drb* {
+            for (auto& d : c.after.drbs) {
+                if (d.id == id) {
+                    return &d;
+                }
+            }
+            return nullptr;
+        };
+        auto drb_of = [&c](std::uint8_t qfi) -> Ue::Drb* {
+            for (auto& d : c.after.drbs) {
+                for (const auto& f : d.flows) {
+                    if (f.qfi == qfi) {
+                        return &d;
+                    }
+                }
+            }
+            return nullptr;
+        };
+        auto is_new = [&c](std::uint8_t id) { return std::find(c.added.begin(), c.added.end(), id) != c.added.end(); };
+        // A flow off its DRB; noted for the UE unless the DRB is new.
+        auto unmap = [&](std::uint8_t qfi) {
+            Ue::Drb* d = drb_of(qfi);
+            if (d == nullptr) {
+                return;
+            }
+            d->flows.erase(std::remove_if(d->flows.begin(), d->flows.end(), [qfi](const auto& f) { return f.qfi == qfi; }),
+                           d->flows.end());
+            if (!is_new(d->id)) {
+                c.remapped[d->id].second.push_back(qfi);
+            }
+        };
+        for (std::uint8_t q : item.transfer.release) {
+            flows.erase(std::remove_if(flows.begin(), flows.end(), [q](const auto& f) { return f.qfi == q; }), flows.end());
+            unmap(q);
+        }
+        for (const auto& f : item.transfer.add_or_modify) {
+            auto fl = std::find_if(flows.begin(), flows.end(), [&f](const auto& x) { return x.qfi == f.qfi; });
+            Ue::Drb* cur = drb_of(f.qfi);
+            if (fl != flows.end() && cur != nullptr && (one_drb() || cur->five_qi == f.five_qi)) {
+                // Modified where it is: its QoS parameters change, its DRB stays.
+                *fl = f;
+                for (auto& x : cur->flows) {
+                    if (x.qfi == f.qfi) {
+                        x = f;
+                    }
+                }
+                if (!is_new(cur->id)) {
+                    (void)c.remapped[cur->id];
+                }
+                c.ok.push_back(f.qfi);
+                continue;
+            }
+            if (fl != flows.end()) {
+                flows.erase(fl);   // a new 5QI: the flow moves to that 5QI's DRB
+            }
+            unmap(f.qfi);
+            Ue::Drb* d = drb_for(c.after, f.five_qi);
+            if (d == nullptr) {
+                const auto id = take_drb(used);
+                if (!id) {
+                    c.failed.push_back(ngap::QosFlowCause{f.qfi, ngap::Cause{"radioNetwork", "radio-resources-not-available"}});
+                    continue;
+                }
+                Ue::Drb fresh;
+                fresh.id = *id;
+                fresh.five_qi = f.five_qi;
+                fresh.default_drb = c.after.drbs.empty();
+                c.after.drbs.push_back(std::move(fresh));
+                c.added.push_back(*id);
+                d = find_drb(*id);
+            }
+            d->flows.push_back(f);
+            flows.push_back(f);
+            if (!is_new(d->id)) {
+                c.remapped[d->id].first.push_back(f.qfi);
+            }
+            c.ok.push_back(f.qfi);
+        }
+        // A DRB left with no flow goes (TS 37.324 5.3: a DRB carries at least one).
+        for (auto d = c.after.drbs.begin(); d != c.after.drbs.end();) {
+            if (!d->flows.empty()) {
+                ++d;
+                continue;
+            }
+            if (is_new(d->id)) {
+                c.added.erase(std::find(c.added.begin(), c.added.end(), d->id));
+            } else {
+                c.removed.push_back(d->id);
+                c.remapped.erase(d->id);
+            }
+            d = c.after.drbs.erase(d);
+        }
+        j.changes.emplace(item.psi, std::move(c));
+    }
+    // E1 first: the CU-UP's DRBs set up, remapped and removed, and the session-AMBR.
+    e1ap::BearerContextModificationRequest r;
+    r.cu_cp_ue = ue.cu_ue;
+    r.cu_up_ue = ue.cu_up_ue.value_or(0);
+    for (auto& [psi, c] : j.changes) {
+        e1ap::SessionToModify sm;
+        sm.psi = psi;
+        sm.dl_ambr = c.dl_ambr;
+        for (const auto& d : c.after.drbs) {
+            std::vector<e1ap::QosFlow> fl;
+            fl.reserve(d.flows.size());
+            for (const auto& f : d.flows) {
+                fl.push_back(e1_flow(f));
+            }
+            if (is_in(c.added, d.id)) {
+                e1ap::DrbToSetup x;
+                x.drb_id = d.id;
+                x.default_drb = d.default_drb;
+                x.t_reordering_ms = cfg_.t_reordering_ms;
+                x.flows = std::move(fl);
+                sm.drbs_setup.push_back(std::move(x));
+            } else if (c.remapped.count(d.id) != 0) {
+                sm.drbs.push_back(e1ap::DrbToModify{d.id, std::nullopt, std::move(fl)});
+            }
+        }
+        sm.drbs_remove = c.removed;
+        if (sm.dl_ambr || !sm.drbs_setup.empty() || !sm.drbs.empty() || !sm.drbs_remove.empty()) {
+            r.modify.push_back(std::move(sm));
+        }
+    }
+    if (r.modify.empty()) {
+        modify_f1(ue);   // nothing for the CU-UP
+        return;
+    }
+    if (!ue.cu_up_ue || e1_ == nullptr || !e1_ready_) {
+        job_failed(ue, "radioNetwork", "unspecified");
+        return;
+    }
+    j.stage = Ue::Job::Stage::e1;
+    send_e1(r, true);
+}
+
+void CuCp::modify_e1_done(Ue& ue, const e1ap::BearerContextModificationResponse& m) {
+    Ue::Job& j = ue.jobs.front();
+    for (const auto& s : m.modified) {
+        auto c = j.changes.find(s.psi);
+        if (c == j.changes.end()) {
+            continue;
+        }
+        for (auto& d : c->second.after.drbs) {
+            for (const auto& u : s.drbs_setup) {
+                if (u.drb_id == d.id) {
+                    d.f1u_ul = u.f1u_ul;
+                }
+            }
+        }
+    }
+    for (const auto& [psi, c] : j.changes) {
+        for (const auto& d : c.after.drbs) {
+            if (is_in(c.added, d.id) && !d.f1u_ul) {
+                job_failed(ue, "radioNetwork", "unspecified");   // the CU-UP set up no F1-U end for it
+                return;
+            }
+        }
+    }
+    modify_f1(ue);
+}
+
+void CuCp::modify_f1(Ue& ue) {
+    Ue::Job& j = ue.jobs.front();
+    f1ap::UeContextModificationRequest r;
+    r.cu_ue = ue.cu_ue;
+    r.du_ue = ue.du_ue;
+    const rrc::PdcpSettings pdcp;
+    for (const auto& [psi, c] : j.changes) {
+        const auto& item = c.after.item;
+        for (const auto& drb : c.after.drbs) {
+            const bool fresh = is_in(c.added, drb.id);
+            if (!fresh && c.remapped.count(drb.id) == 0) {
+                continue;
+            }
+            f1ap::DrbToSetup d;
+            d.drb_id = drb.id;
+            d.snssai = f1ap::Snssai{item.snssai.sst, item.snssai.sd};
+            for (const auto& f : drb.flows) {
+                d.flows.push_back(f1_flow(f));
+            }
+            d.ul = f1_tunnel(drb.f1u_ul.value_or(e1ap::GtpTunnel{}));   // none: the DU keeps the end it has
+            if (fresh) {
+                d.dl_pdcp_sn_bits = pdcp.sn18_dl ? 18 : 12;
+                d.ul_pdcp_sn_bits = static_cast<std::uint8_t>(pdcp.sn18_ul ? 18 : 12);
+                r.drbs.push_back(std::move(d));
+            } else {
+                d.ul_pdcp_sn_bits.reset();
+                r.modify_drbs.push_back(std::move(d));
+            }
+        }
+        r.release_drbs.insert(r.release_drbs.end(), c.removed.begin(), c.removed.end());
+    }
+    if (r.drbs.empty() && r.modify_drbs.empty() && r.release_drbs.empty()) {
+        job_rrc(ue);   // the AMBR alone, or nothing: the UE gets its NAS
+        return;
+    }
+    j.stage = Ue::Job::Stage::f1;
+    send_f1(r, true);
+}
+
 void CuCp::job_rrc(Ue& ue) {
     Ue::Job& j = ue.jobs.front();
     rrc::Reconfiguration r;
-    r.tid = next_tid(ue);
     rrc::RadioBearers b;
-    for (const auto& [psi, s] : j.pending) {
+    const auto drb_add = [this](const Ue::Session& s, const Ue::Drb& drb, std::uint8_t psi) {
         rrc::DrbAdd d;
-        d.drb_id = s.drb_id;
+        d.drb_id = drb.id;
         d.pdu_session = psi;
         d.sdap_header_dl = true;
         d.sdap_header_ul = true;
-        d.default_drb = true;
-        for (const auto& f : s.item.transfer.flows) {
+        d.default_drb = drb.default_drb;
+        for (const auto& f : drb.flows) {
             d.qfis.push_back(f.qfi);
         }
         d.pdcp.integrity = s.integrity;
         d.pdcp.ciphering_disabled = !s.confidentiality;   // P2 Q9: TS 38.331 cipheringDisabled
         d.pdcp.t_reordering_ms = cfg_.t_reordering_ms;   // P2 Q8: as the CU-UP's entity runs it (E1)
-        b.drbs.push_back(std::move(d));
+        return d;
+    };
+    if (j.kind == Ue::Job::Kind::modify) {
+        // P2 Q10: the new DRBs, the mappings that changed, the DRBs that go; the sessions' NAS.
+        for (const auto& [psi, c] : j.changes) {
+            for (const auto& drb : c.after.drbs) {
+                if (is_in(c.added, drb.id)) {
+                    b.drbs.push_back(drb_add(c.after, drb, psi));
+                    continue;
+                }
+                auto m = c.remapped.find(drb.id);
+                if (m == c.remapped.end() || (m->second.first.empty() && m->second.second.empty())) {
+                    continue;   // its flows' QoS changed, not the mapping: nothing for the UE
+                }
+                rrc::DrbAdd d;
+                d.drb_id = drb.id;
+                d.pdu_session = psi;
+                d.sdap_header_dl = true;
+                d.sdap_header_ul = true;
+                d.default_drb = drb.default_drb;
+                d.qfis = m->second.first;
+                // A flow moved to another DRB of the session is the new DRB's (TS 37.324 5.3.1).
+                for (std::uint8_t q : m->second.second) {
+                    const bool moved = std::any_of(c.after.drbs.begin(), c.after.drbs.end(), [q](const Ue::Drb& o) {
+                        return std::any_of(o.flows.begin(), o.flows.end(), [q](const auto& f) { return f.qfi == q; });
+                    });
+                    if (!moved) {
+                        d.qfis_release.push_back(q);
+                    }
+                }
+                d.setup = false;
+                if (!d.qfis.empty() || !d.qfis_release.empty()) {
+                    b.drbs.push_back(std::move(d));
+                }
+            }
+            b.drb_release.insert(b.drb_release.end(), c.removed.begin(), c.removed.end());
+        }
+        std::vector<Bytes> nas;
+        for (const auto& [psi, c] : j.changes) {
+            if (c.nas) {
+                nas.push_back(*c.nas);
+            }
+        }
+        if (b.drbs.empty() && b.drb_release.empty() && !j.cell_group) {
+            // Nothing for the radio (the AMBR, a flow's QoS): the NAS goes on its own.
+            for (const auto& n : nas) {
+                dl_dcch(ue, rrc::encode(rrc::DlInformationTransfer{next_tid(ue), n}), ue.srb2 ? 2 : 1);
+            }
+            job_done(ue);
+            return;
+        }
+        r.tid = next_tid(ue);
+        r.nas = std::move(nas);
+        r.bearers = b;
+        r.cell_group = j.cell_group;
+        j.stage = Ue::Job::Stage::rrc;
+        dl_dcch(ue, rrc::encode(r), ue.srb2 ? 2 : 1);
+        return;
+    }
+    r.tid = next_tid(ue);
+    for (const auto& [psi, s] : j.pending) {
+        for (const auto& drb : s.drbs) {
+            b.drbs.push_back(drb_add(s, drb, psi));
+        }
         if (s.item.nas) {
             r.nas.push_back(*s.item.nas);
         }
@@ -1274,9 +1755,52 @@ void CuCp::job_rrc(Ue& ue) {
     dl_dcch(ue, rrc::encode(r), ue.srb2 ? 2 : 1);
 }
 
+void CuCp::modify_done(Ue& ue, Ue::Job j) {
+    ngap::PduSessionResourceModifyResponse resp{ue.amf_ue.value_or(0), ue.ran_ue, {}, std::move(j.failed)};
+    ngap::PduSessionResourceNotify notify{ue.amf_ue.value_or(0), ue.ran_ue, {}, {}};
+    for (auto& [psi, c] : j.changes) {
+        std::vector<std::uint8_t> released;
+        for (const auto& item : j.modify) {
+            if (item.psi == psi) {
+                released = item.transfer.release;
+            }
+        }
+        events_.emit("ran.session.modify", cfg_.id,
+                     {{"ran_ue", str(ue.ran_ue)}, {"psi", str(psi)}, {"drbs", drb_list(c.after.drbs)},
+                      {"added", qfi_list(c.ok)}, {"released", qfi_list(released)},
+                      {"drbs_added", qfi_list(c.added)}, {"drbs_removed", qfi_list(c.removed)},
+                      {"failed", str(static_cast<std::int64_t>(c.failed.size()))}, {"by", j.notify ? "gnb" : "amf"}});
+        if (j.notify) {
+            ngap::NotifyTransfer t;
+            for (std::uint8_t q : released) {
+                t.released.push_back(ngap::QosFlowCause{q, ngap::Cause{"radioNetwork", "release-due-to-ngran-generated-reason"}});
+            }
+            notify.sessions.push_back(ngap::SessionNotify{psi, std::move(t)});
+        } else {
+            resp.sessions.push_back(ngap::SessionModifyOk{psi, ngap::ModifyResponseTransfer{c.ok, c.failed}});
+        }
+        ue.sessions[psi] = std::move(c.after);
+    }
+    if (!ue.amf_ue) {
+        return;
+    }
+    if (j.notify) {
+        if (!notify.sessions.empty()) {
+            send_ngap(notify, ue.ran_ue);
+        }
+        return;
+    }
+    send_ngap(resp, ue.ran_ue);
+}
+
 void CuCp::job_done(Ue& ue) {
     Ue::Job j = std::move(ue.jobs.front());
     ue.jobs.pop_front();
+    if (j.kind == Ue::Job::Kind::modify) {
+        modify_done(ue, std::move(j));
+        start_job(ue);
+        return;
+    }
     if (j.kind == Ue::Job::Kind::release) {
         std::vector<std::uint8_t> released;
         f1ap::UeContextModificationRequest f1;
@@ -1288,7 +1812,9 @@ void CuCp::job_done(Ue& ue) {
             if (it == ue.sessions.end()) {
                 continue;
             }
-            f1.release_drbs.push_back(it->second.drb_id);
+            for (const auto& d : it->second.drbs) {
+                f1.release_drbs.push_back(d.id);
+            }
             remove.push_back(s.psi);
             released.push_back(s.psi);
             ue.sessions.erase(it);
@@ -1317,8 +1843,8 @@ void CuCp::job_done(Ue& ue) {
     std::vector<ngap::SessionSetupOk> ok;
     for (auto& [psi, s] : j.pending) {
         ngap::SetupResponseTransfer t;
-        if (s.up) {
-            t.dl = ng_tunnel(s.up->ng_dl);
+        if (s.ng_dl) {
+            t.dl = ng_tunnel(*s.ng_dl);
         }
         for (const auto& f : s.item.transfer.flows) {
             t.qfis.push_back(f.qfi);
@@ -1329,7 +1855,8 @@ void CuCp::job_done(Ue& ue) {
         }
         ok.push_back(ngap::SessionSetupOk{psi, std::move(t)});
         events_.emit("ran.session.setup", cfg_.id,
-                     {{"ran_ue", str(ue.ran_ue)}, {"psi", str(psi)}, {"drb", str(s.drb_id)}, {"integrity", s.integrity ? "1" : "0"},
+                     {{"ran_ue", str(ue.ran_ue)}, {"psi", str(psi)}, {"drb", str(s.drbs.empty() ? 0 : s.drbs.front().id)},
+                      {"drbs", drb_list(s.drbs)}, {"integrity", s.integrity ? "1" : "0"},
                       {"confidentiality", s.confidentiality ? "1" : "0"}});
         ue.sessions.emplace(psi, std::move(s));
     }
@@ -1359,6 +1886,19 @@ void CuCp::job_failed(Ue& ue, const char* group, const char* value) {
             finish_ics(ue, {}, std::move(j.failed));
         } else if (ue.amf_ue) {
             send_ngap(ngap::PduSessionResourceSetupResponse{*ue.amf_ue, ue.ran_ue, {}, std::move(j.failed)}, ue.ran_ue);
+        }
+    } else if (j.kind == Ue::Job::Kind::modify) {
+        // P2 Q10: the sessions stay as they were set up (TS 38.413 8.2.3.2: Failed to Modify List).
+        events_.emit("ran.session.modify_failure", cfg_.id,
+                     {{"ran_ue", str(ue.ran_ue)}, {"cause", std::string(group) + "/" + value}});
+        if (ue.amf_ue && !j.notify) {
+            for (const auto& item : j.modify) {
+                const bool listed = std::any_of(j.failed.begin(), j.failed.end(), [&](const auto& f) { return f.psi == item.psi; });
+                if (!listed) {
+                    j.failed.push_back(ngap::SessionCause{item.psi, ngap::Cause{group, value}});
+                }
+            }
+            send_ngap(ngap::PduSessionResourceModifyResponse{*ue.amf_ue, ue.ran_ue, {}, std::move(j.failed)}, ue.ran_ue);
         }
     }
     start_job(ue);
