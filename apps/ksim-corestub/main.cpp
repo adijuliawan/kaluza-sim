@@ -35,7 +35,9 @@
 #include <thread>
 
 #include "api/http.hpp"
+#include "net/netd.hpp"
 #include "net/sctp.hpp"
+#include "net/tun.hpp"
 #include "net/udp.hpp"
 #include "ngap_amf.hpp"
 #include "platform/clock.hpp"
@@ -64,6 +66,7 @@ struct Stub {
     std::array<std::uint8_t, 4> n3_addr{127, 0, 0, 1};
     std::unique_ptr<ksim::IAssoc> assoc;
     std::unique_ptr<ksim::corestub::NgapAmf> amf;
+    std::unique_ptr<ksim::net::TunPort> dn;      // P2 Q12: the DN namespace's TUN, when --dn-netd
     std::vector<ksim::corestub::Verdict> past;   // the verdicts of associations that ended
     std::map<std::string, bool> sms_sub;         // N13: per-UE SMS subscription, before the AMF exists
     std::uint64_t associations = 0;
@@ -147,6 +150,10 @@ Reply report(Stub& s) {
                 out.set("UPF_UDP_TO_UE", static_cast<std::int64_t>(upf->stats().udp_to_ue));   // P2 Q11
                 out.set("UPF_UDP_FROM_UE", static_cast<std::int64_t>(upf->stats().udp_from_ue));
                 out.set("UPF_RQI_MARKED", static_cast<std::int64_t>(upf->stats().rqi_marked));
+                out.set("UPF_DN_TX", static_cast<std::int64_t>(upf->stats().dn_tx));   // P2 Q12
+                out.set("UPF_DL_BYTES", static_cast<std::int64_t>(upf->stats().dl_bytes));
+                out.set("UPF_DN_RX", static_cast<std::int64_t>(upf->stats().dn_rx));
+                out.set("UPF_DN_NO_UE", static_cast<std::int64_t>(upf->stats().dn_no_ue));
                 // P2 Q10: the UPF's packets per QFI, as its classification of them found them.
                 for (const auto& [q, n] : upf->stats().ul_per_qfi) {
                     out.set("UPF_UL_QFI." + std::to_string(q), static_cast<std::int64_t>(n));
@@ -177,7 +184,11 @@ static int run_main(int argc, char** argv) {
     std::string profile_file;
     std::string plmn = "00101";
     std::string n3 = "127.0.0.1:2152";
+    std::string dn_netd;
+    std::string dn_ns = "ksim-dn-stub";
     app.add_option("--listen", listen, "the NG-C address, 127.0.0.0/8 only");
+    app.add_option("--dn-netd", dn_netd, "P2 Q12: ksim-netd's socket; the UPF forwards to a DN namespace's TUN (10.60.0.1)");
+    app.add_option("--dn-ns", dn_ns, "the DN namespace's name (ksim-dn-...)");
     app.add_option("--n3", n3, "the UPF's GTP-U address, 127.0.0.0/8 only");
     app.add_option("--master", master, "the range master file (0600)")->required();
     app.add_option("--block", block, "the subscribers: <first IMSI>/<count>")->required();
@@ -220,8 +231,39 @@ static int run_main(int argc, char** argv) {
         std::cerr << "ksim-corestub: " << why << "\n";
         return 2;
     }
+    // P2 Q12: a DN namespace with its TUN dn0 (10.60.0.1, a route to the UE pool 10.60.0.0/24),
+    // made by ksim-netd; the UPF forwards to it, and a traffic server runs in it.
+    std::optional<ksim::net::netd::Client> netd;
+    ksim::Fd dn_fd;
+    if (!dn_netd.empty()) {
+        auto c = ksim::net::netd::Client::connect(dn_netd);
+        if (!c) {
+            std::cerr << "ksim-corestub: ksim-netd at " << dn_netd << ": " << c.error().what << "\n";
+            return 1;
+        }
+        netd = std::move(*c);
+        (void)netd->teardown(dn_ns);   // one left by a run that did not end cleanly
+        if (auto r = netd->setup_dn(dn_ns); !r) {
+            std::cerr << "ksim-corestub: setup_dn " << dn_ns << ": " << netd->last_error() << "\n";
+            return 1;
+        }
+        auto t = netd->dn_tun(dn_ns, ksim::net::netd::DnTunSpec{{10, 60, 0, 1}, 1500, {10, 60, 0, 0}, 24});
+        if (!t) {
+            std::cerr << "ksim-corestub: dn_tun " << dn_ns << ": " << netd->last_error() << "\n";
+            (void)netd->teardown(dn_ns);
+            return 1;
+        }
+        dn_fd = std::move(*t);
+    }
     s.shard.start();
-    auto started = s.call<std::string>([&s, &ep, &n3_ep] {
+    auto started = s.call<std::string>([&s, &ep, &n3_ep, &dn_fd] {
+        if (dn_fd) {
+            auto p = ksim::net::TunPort::adopt(s.shard.reactor(), std::move(dn_fd));
+            if (!p) {
+                return "the DN TUN: " + std::string(p.error().what);
+            }
+            s.dn = std::move(*p);
+        }
         auto u = ksim::net::UdpSocket::bind(s.shard.reactor(), *n3_ep);
         if (!u) {
             return "N3 " + n3_ep->to_string() + ": " + std::string(u.error().what);
@@ -239,6 +281,9 @@ static int run_main(int argc, char** argv) {
             } else {
                 s.amf = std::make_unique<ksim::corestub::NgapAmf>(s.shard, s.home, s.plmn, s.profile, *s.assoc, s.n3.get(),
                                                                   s.n3_addr);
+                if (s.dn && s.amf->upf() != nullptr) {
+                    s.amf->upf()->attach_dn(s.dn.get());   // P2 Q12
+                }
                 for (const auto& [supi, on] : s.sms_sub) {
                     s.amf->set_sms_subscribed(supi, on);
                 }
@@ -587,6 +632,9 @@ static int run_main(int argc, char** argv) {
         std::cerr << "ksim-corestub: " << ctl << ": " << r.error().what << "\n";
         return 1;
     }
+    if (netd) {
+        std::cout << "DN_NS=" << dn_ns << "\n";
+    }
     std::cout << "STUB_LISTEN=" << ep->to_string() << "\nCTL=" << ctl << "\n" << std::flush;
     while (g_signal == 0 && !stop.load()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -597,10 +645,14 @@ static int run_main(int argc, char** argv) {
         s.assoc.reset();
         s.listener.reset();
         s.n3.reset();
+        s.dn.reset();
         return true;
     });
     s.shard.stop();
     s.shard.join();
+    if (netd) {
+        (void)netd->teardown(dn_ns);   // P2 Q12: the DN namespace and its TUN go
+    }
     return 0;
 }
 

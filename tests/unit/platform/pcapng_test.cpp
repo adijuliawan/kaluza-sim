@@ -150,3 +150,29 @@ TEST(Pcapng, TsharkRefusesADamagedBlock) {
 
 } // namespace
 } // namespace ksim::pcap
+
+namespace ksim::pcap {
+namespace {
+
+// P2 Q12: a headers-only frame is the full frame's first octets, its lengths and checksum
+// the whole frame's.
+TEST(Pcapng, AHeadOnlyFrameIsTheFullFramesPrefixWithItsLengths) {
+    Udp4 u;
+    u.src = {10, 0, 0, 1};
+    u.dst = {10, 0, 0, 2};
+    u.src_port = 2152;
+    u.dst_port = 2152;
+    const Bytes pdu(1400, 0x5A);
+    auto full = ipv4_udp(u, pdu);
+    auto head = ipv4_udp_head(u, pdu, 100);
+    ASSERT_TRUE(full && head);
+    ASSERT_EQ(head->size(), 128u);
+    EXPECT_TRUE(std::equal(head->begin(), head->end(), full->begin()));
+    EXPECT_EQ(((*head)[2] << 8) | (*head)[3], 1428);   // the IPv4 total length: the whole frame's
+    auto all = ipv4_udp_head(u, pdu, 5000);
+    ASSERT_TRUE(all);
+    EXPECT_EQ(*all, *full);
+}
+
+} // namespace
+} // namespace ksim::pcap

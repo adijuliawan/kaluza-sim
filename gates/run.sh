@@ -117,7 +117,8 @@ if [ "${STUB:-0}" = 1 ]; then
     # The gates reach the stub's network-side triggers here (STUB_CTL).
     STUB_CTL="$KSIM_RUNS/$core-stub.sock"; export STUB_CTL
     "$STUB_BIN" --listen "$STUB_LISTEN" --master "$KSIM_MASTER" --block "$STUB_BLOCK" \
-        --ctl "$STUB_CTL" ${STUB_N3:+--n3 "$STUB_N3"} > "$KSIM_RUNS/$core-stub.out" 2>&1 &
+        --ctl "$STUB_CTL" ${STUB_N3:+--n3 "$STUB_N3"} ${STUB_DN_NETD:+--dn-netd "$STUB_DN_NETD"} \
+        > "$KSIM_RUNS/$core-stub.out" 2>&1 &
     stub_pid=$!
     i=0
     until grep -q '^CTL=' "$KSIM_RUNS/$core-stub.out" 2>/dev/null; do

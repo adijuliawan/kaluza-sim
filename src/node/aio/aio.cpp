@@ -176,7 +176,7 @@ Result<void> AllInOne::build(std::string& why) {
 
     // The system's side, made once: netd's namespaces, the N3 socket, the air.
     Capture* cap = capture_.get();
-    link_ = MemLinkConfig{1, 0, topo_.seed};
+    link_ = MemLinkConfig{topo_.link_delay_ms, topo_.link_jitter_ms, topo_.seed};   // P2 Q12: the topology's
     const MemLinkConfig link = link_;
     // P2 Q3: in a split run each role asks netd for what it hosts: the UEs' namespaces
     // (the farm), the CU-CP's or the CU-UP's (ADR 0011 point 1).

@@ -102,6 +102,7 @@ json manifest(const ksim::node::Topology& t, const std::string& run_dir, bool la
     m["capture"] = {{"user_plane", t.capture_up == ksim::node::UserPlaneCapture::full      ? "full"
                                    : t.capture_up == ksim::node::UserPlaneCapture::headers ? "headers"
                                                                                            : "off"}};
+    m["link"] = {{"delay_ms", t.link_delay_ms}, {"jitter_ms", t.link_jitter_ms}};   // P2 Q12
     m["amf"] = t.amf.to_string();
     m["ues"] = 0;
     for (const auto& g : t.ues) {

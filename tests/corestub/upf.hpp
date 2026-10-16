@@ -18,6 +18,11 @@
 // one the rules' uplink filters give it (the UE's classifier checked from the core's side),
 // and a downlink packet goes on the QFI its downlink filters give it (the default rule's
 // otherwise). Packets are counted per QFI both ways.
+//
+// P2 Q12: with a DN port (a TUN in a DN namespace netd made, ksim-corestub --dn-netd), the
+// UPF forwards: an uplink T-PDU goes out on the TUN once checked, instead of to the
+// reflector, and a packet the TUN gives goes down the tunnel of the UE it is addressed to.
+// A traffic server in the DN namespace (iperf3) is then the far end.
 
 #pragma once
 
@@ -52,6 +57,10 @@ struct UpfStats {
     std::uint64_t udp_to_ue = 0;         // P2 Q11: udp_ue datagrams sent
     std::uint64_t udp_from_ue = 0;       // and UDP datagrams the UEs sent
     std::uint64_t rqi_marked = 0;        // DL packets sent with the RQI
+    std::uint64_t dn_tx = 0;             // P2 Q12: uplink T-PDUs out on the DN port
+    std::uint64_t dn_rx = 0;             // and packets from it
+    std::uint64_t dn_no_ue = 0;          // from it, addressed to no session's UE
+    std::uint64_t dl_bytes = 0;          // T-PDU octets sent down (the perf runs' own check)
 };
 
 class Upf {
@@ -64,6 +73,8 @@ public:
     /// A new uplink tunnel for a UE address and its flow's QFI; its TEID.
     std::uint32_t open(ip::Addr ue, std::uint8_t qfi);
     void set_dl(std::uint32_t ul_teid, const ngap::GtpTunnel& dl);
+    /// P2 Q12: the DN behind the UPF (see above); null for the reflector.
+    void attach_dn(IPacketPort* dn);
     /// P2 Q10: the session's QoS rules (as the UE has them), for both directions.
     void set_rules(std::uint32_t ul_teid, std::vector<nas::ie::QosRules::Rule> rules);
     /// The user plane deactivated (TS 23.502 4.2.6): downlink is held from now on.
@@ -81,7 +92,8 @@ public:
 
     ngap::GtpTunnel tunnel(std::uint32_t ul_teid) const { return {addr_, ul_teid}; }
     const UpfStats& stats() const noexcept { return stats_; }
-    const std::vector<Verdict>& verdicts() const noexcept { return verdicts_; }
+    const std::vector<Verdict>& verdicts() const noexcept { return verdicts_; }   // the failed ones
+    std::uint64_t checks_passed() const noexcept { return checks_passed_; }
     std::uint64_t error_indications() const noexcept { return gtpu_.stats().error_indications; }
 
 private:
@@ -101,9 +113,12 @@ private:
     std::array<std::uint8_t, 4> addr_;
     std::uint16_t port_;
     std::map<std::uint32_t, Tunnel> tunnels_;
+    std::map<ip::Addr, std::uint32_t> by_ue_;   // P2 Q12: a UE's address -> its uplink TEID
+    IPacketPort* dn_ = nullptr;
     std::function<void(std::uint32_t)> on_pending_;
     UpfStats stats_;
     std::vector<Verdict> verdicts_;
+    std::uint64_t checks_passed_ = 0;
 };
 
 } // namespace ksim::corestub

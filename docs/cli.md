@@ -27,6 +27,9 @@
     - `--gfbr K --mfbr K [--notify]` for a GBR flow (kbit/s, the same both ways, notification control);
     - `stub qos mod --ue SUPI --psi N --qfi N --5qi N` to change a flow where it is;
     - `stub qos rq-timer --seconds N` for the RQ timer the next accepts give a UE that offered RqoS (0: none).
+  - `ksim-corestub --dn-netd <socket> [--dn-ns ksim-dn-…]` (P2 Q12): the UPF forwards to a DN namespace's TUN `dn0`, 10.60.0.1, made by that ksim-netd and removed at exit. `gates/run.sh` passes it from `STUB_DN_NETD`.
+    - The report adds `UPF_DN_TX`, `UPF_DN_RX`, `UPF_DN_NO_UE` and `UPF_DL_BYTES`.
+    - `tools/perf/perf.sh [nea2] [nea1] [split] [many]` runs the performance harness with it (KS-PLAT-B53).
   - `stub udp-ue --ue SUPI --psi N [--src A] [--sport N] [--qfi N] [--rqi]` (P2 Q11): a UDP datagram from the DN to the UE's port 7, which inject mode echoes. It goes on the QFI given, else as the UPF classifies it, with the RQI when asked.
     - The report adds `UPF_UDP_TO_UE`, `UPF_UDP_FROM_UE`, `UPF_RQI_MARKED`, `SM_RQOS`, `NOTIFY_FULFILLED`, `NOTIFY_NOT_FULFILLED` and `SETUPS_WITH_REFUSED_FLOWS`.
 - **The run:** `--run D`, else `$KSIM_RUN`, else `$KSIM_RUNS/latest` (`runs/latest`); `--socket S` reaches any control socket, e.g. `ksim-corestub`'s, with `stub`.

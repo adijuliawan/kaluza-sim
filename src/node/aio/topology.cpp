@@ -54,7 +54,7 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
     try {
         const Yaml y = Yaml::load_file(file);
         y.only({"plmn", "seed", "amf", "gnbs", "ues", "secrets", "peer", "security", "netd", "mode", "watchdog_ms", "farm",
-                "capture"});
+                "capture", "link"});
         const std::string base = std::filesystem::path(file).parent_path().string();
         Topology t;
         t.file = file;
@@ -356,6 +356,16 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
                 t.capture_up = UserPlaneCapture::off;
             } else {
                 y.at("capture").at("user_plane").fail("full, headers or off");
+            }
+        }
+        if (y.has("link")) {
+            // P2 Q12 (architecture §5): the ideal link's in-memory hops, 1 ms each by default
+            // plus a seeded jitter; the performance runs set 0 (§3.5 excludes it).
+            y.at("link").only({"delay_ms", "jitter_ms"});
+            t.link_delay_ms = y.at("link").get<int>("delay_ms", t.link_delay_ms);
+            t.link_jitter_ms = y.at("link").get<int>("jitter_ms", t.link_jitter_ms);
+            if (t.link_delay_ms < 0 || t.link_delay_ms > 1000 || t.link_jitter_ms < 0 || t.link_jitter_ms > 1000) {
+                y.at("link").fail("delay_ms and jitter_ms 0..1000");
             }
         }
         if (y.has("farm")) {

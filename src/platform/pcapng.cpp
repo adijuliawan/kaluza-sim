@@ -3,6 +3,8 @@
 
 #include "platform/pcapng.hpp"
 
+#include <algorithm>
+
 namespace ksim::pcap {
 
 namespace {
@@ -128,14 +130,15 @@ Bytes exported_pdu(std::string_view dissector, ByteView pdu) {
     return b;
 }
 
-Result<Bytes> ipv4_udp(const Udp4& a, ByteView payload) {
+Result<Bytes> ipv4_udp_head(const Udp4& a, ByteView payload, std::size_t keep) {
     // The size is checked before the addition, which could otherwise wrap and
     // leave a short buffer (GCC 15 -O3 rightly flagged that path).
     if (payload.size() > 0xFFFF - 28) {
         return make_error(Errc::overflow, 0, "ipv4_udp: payload over 65507 octets");
     }
     const std::size_t total = 28 + payload.size();
-    Bytes b(total, 0);
+    const std::size_t kept = std::min(keep, payload.size());
+    Bytes b(28 + kept, 0);
     const auto put16 = [&b](std::size_t at, std::size_t v) {
         b[at] = static_cast<std::uint8_t>(v >> 8);
         b[at + 1] = static_cast<std::uint8_t>(v);
@@ -152,9 +155,7 @@ Result<Bytes> ipv4_udp(const Udp4& a, ByteView payload) {
     put16(20, a.src_port);
     put16(22, a.dst_port);
     put16(24, 8 + payload.size());   // UDP checksum (26-27) left 0: none
-    for (std::size_t i = 0; i < payload.size(); ++i) {
-        b[28 + i] = payload[i];
-    }
+    std::copy(payload.begin(), payload.begin() + static_cast<std::ptrdiff_t>(kept), b.begin() + 28);
     std::uint32_t sum = 0;
     for (std::size_t i = 0; i < 20; i += 2) {
         sum += (std::uint32_t{b[i]} << 8) | b[i + 1];
@@ -165,6 +166,8 @@ Result<Bytes> ipv4_udp(const Udp4& a, ByteView payload) {
     put16(10, static_cast<std::uint16_t>(~sum));
     return b;
 }
+
+Result<Bytes> ipv4_udp(const Udp4& a, ByteView payload) { return ipv4_udp_head(a, payload, payload.size()); }
 
 Bytes gsmtap(std::uint8_t type, std::uint8_t sub_type, ByteView payload) {
     // version 2, header length 4 words, type, timeslot, ARFCN (2), signal dBm,

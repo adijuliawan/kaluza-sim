@@ -30,6 +30,7 @@
 //   peer: {name: stub}                      # free-form pins for the manifest
 //   security: {allow_null: false}            # D1: the bisect switch only
 //   capture: {user_plane: full}              # P2 Q8: full | headers | off (gtpu.pcapng)
+//   link: {delay_ms: 1, jitter_ms: 0}         # P2 Q12: the in-memory hops' delay (the defaults)
 //   watchdog_ms: 250                         # P2 Q7: platform.loop_lag above this; 0 = off
 //   farm: {shards: 4}                        # P2 Q7, split only: the UE farm on 4 shards
 //   mode: split                              # P2 Q3: aio (default) or split, the roles as processes
@@ -152,6 +153,8 @@ struct Topology {
     bool alg_pref_given = false;
     std::optional<int> t_reordering_ms;            // P2 Q8: cucp: {t_reordering_ms: N}; absent: infinity
     UserPlaneCapture capture_up = UserPlaneCapture::full;   // P2 Q8: capture: {user_plane: full|headers|off}
+    int link_delay_ms = 1;                                   // P2 Q12: link: {delay_ms: N, jitter_ms: M}
+    int link_jitter_ms = 0;
     proc::ran::UpPolicy up_policy;                 // P2 Q9: cucp: {up_policy: {...}}
     proc::ran::DrbMap drb_map = proc::ran::DrbMap::per_5qi;   // P2 Q10: cucp: {drb_map: per-5qi|per-session}
     std::uint64_t gbr_budget_kbps = 100'000;                  // P2 Q11: cucp: {gbr_budget_kbps: N}   // a listed 0 needs allow_null (the default NEA0 is skipped without it)

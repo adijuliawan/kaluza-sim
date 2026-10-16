@@ -100,6 +100,31 @@ TEST(MemNet, DeliversAfterAHopInOrderAndDropsTheUnbound) {
     EXPECT_TRUE(net.bind(loop, Endpoint::v4(10, 0, 0, 2, 2152)));
 }
 
+// P2 Q12: with no delay a datagram comes with no timer, at once; with a seeded jitter that
+// puts some at 0 ms and some later, none overtakes one still waiting in a timer.
+TEST(MemNet, ANoDelayLinkDeliversAtOnceAndAJitterStillKeepsTheOrder) {
+    for (const MemLinkConfig cfg : {MemLinkConfig{0, 0, 3}, MemLinkConfig{0, 2, 5}}) {
+        SimLoop loop(0);
+        MemNet net(cfg);
+        auto a = net.bind(loop, Endpoint::v4(10, 0, 0, 1, 2152));
+        auto b = net.bind(loop, Endpoint::v4(10, 0, 0, 2, 2152));
+        ASSERT_TRUE(a && b);
+        std::vector<std::pair<Millis, std::uint8_t>> got;
+        (*b)->set_handler([&](ByteView p, const Endpoint&) { got.emplace_back(loop.now(), p[0]); });
+        for (std::uint8_t i = 0; i < 50; ++i) {
+            ASSERT_TRUE((*a)->send_to(Bytes{i}, Endpoint::v4(10, 0, 0, 2, 2152)));
+        }
+        loop.run_until(100);
+        ASSERT_EQ(got.size(), 50u) << cfg.jitter_ms;
+        for (std::size_t i = 0; i < got.size(); ++i) {
+            EXPECT_EQ(got[i].second, i) << cfg.jitter_ms;
+            if (cfg.jitter_ms == 0) {
+                EXPECT_EQ(got[i].first, 0);
+            }
+        }
+    }
+}
+
 TEST(Udp, CarriesDatagramsOverLoopbackWithTheirSender) {
     MonotonicClock clock;
     Shard shard{5, 1024, clock};

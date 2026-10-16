@@ -117,6 +117,8 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
     sudo systemctl daemon-reload && sudo systemctl restart ksim-netd
     ```
 
+    Done by the user on 2026-10-16 at 19:33 KST: netd v3 from the release build of 45bbae7's tree, with the `ksim-netd-devpc.service` unit (`--uid 1000 --dn 10.60.0.0/24`). The P2 Q12 performance harness (`tools/perf/perf.sh`, KS-PLAT-B53) uses it for the UE and DN namespaces. For Q12's profile the user also set `kernel.perf_event_paranoid=1` with sysctl, until the next reboot (it was 4).
+
     The privileged hooks (`KSIM_CI_PRIV=1 tools/ci.d/66-netd-priv.sh full`, `67-netns.sh full`) start their own netd from `build/dev` and need no install. From Q6 they check the DN namespace's TUN with an echo, and the data plane in split mode.
   - **The VM's is mine in a window (LW1's setup, D6):** the deploy prints the same steps.
 - **Deploy v3 (P2 Q6):** `tools/deploy-uesim.sh` also ships the role apps and `ksim-corestub`, and with `--peers` OCUDU's `ocucp`/`ocuup` and their PIN.

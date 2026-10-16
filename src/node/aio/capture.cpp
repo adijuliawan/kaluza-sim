@@ -112,15 +112,17 @@ void Capture::gtpu(const Endpoint& from, const Endpoint& to, ByteView pdu) {
     std::copy(to.addr.begin(), to.addr.begin() + 4, u.dst.begin());
     u.src_port = from.port;
     u.dst_port = to.port;
-    auto frame = pcap::ipv4_udp(u, pdu);
+    // P2 Q12: in headers mode only the octets kept are built (the outer headers' lengths are
+    // the whole frame's), so a 1400-octet PDU is not copied to keep 128.
+    const bool heads = up_ == UserPlaneCapture::headers;
+    auto frame = heads ? pcap::ipv4_udp_head(u, pdu, kHeaderOctets - 28) : pcap::ipv4_udp(u, pdu);
     const std::lock_guard lock(mu_);
     if (!frame || gtpu_.f == nullptr) {
         return;
     }
     ++stats_.gtpu;
-    if (up_ == UserPlaneCapture::headers) {
-        const ByteView head(frame->data(), std::min(frame->size(), kHeaderOctets));
-        (void)gtpu_.w->write(gtpu_.ifc, wall_ns(), head, {}, frame->size());
+    if (heads) {
+        (void)gtpu_.w->write(gtpu_.ifc, wall_ns(), *frame, {}, 28 + pdu.size());
         if (++unflushed_ >= 1024) {
             unflushed_ = 0;
             std::fflush(gtpu_.f);

@@ -36,6 +36,13 @@ Result<std::unique_ptr<UdpSocket>> UdpSocket::bind(Reactor& reactor, Fd fd, cons
 }
 
 Result<std::unique_ptr<UdpSocket>> UdpSocket::adopt(Reactor& reactor, Fd fd) {
+    // P2 Q12: room for a burst. The user plane's UDP hops (N3, F1-U in a split run) have no
+    // retransmission below PDCP, so a datagram the kernel drops is a hole the receiver's
+    // reordering waits on. The kernel caps these at net.core.{r,w}mem_max, quietly.
+    const int rcv = 8 << 20;
+    const int snd = 4 << 20;
+    (void)::setsockopt(fd.get(), SOL_SOCKET, SO_RCVBUF, &rcv, sizeof rcv);
+    (void)::setsockopt(fd.get(), SOL_SOCKET, SO_SNDBUF, &snd, sizeof snd);
     sockaddr_storage ss{};
     socklen_t n = sizeof ss;
     if (getsockname(fd.get(), reinterpret_cast<sockaddr*>(&ss), &n) != 0) {

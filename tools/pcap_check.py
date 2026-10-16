@@ -115,13 +115,24 @@ def main() -> int:
         if not f.is_file():
             bad.append(f"{cap}: missing")
             continue
-        packets = tshark.decode(f.read_bytes())
+        raw = f.read_bytes()
+        packets = tshark.decode(raw)
         if not packets:
             bad.append(f"{cap}: no frames")
             continue
         frames += len(packets)
+        # P2 Q12: an F1-U frame (an NR RAN container, nrup) carries a ciphered PDCP PDU,
+        # which tshark's T-PDU heuristic may take for something else: at 1 in 65536 a
+        # ciphertext has 0x86dd at offset 12 and reads as an Ethernet frame. Such a frame
+        # is judged again with the T-PDU not dissected, on its GTP-U and NR-U headers.
+        plain = None
         for i, p in enumerate(packets, start=1):
             errs = tshark.errors(p)
+            f1u = any(lf.name == "gtp.ext_hdr" and "NR RAN container" in lf.show for lf in p.leaves)
+            if errs and f1u:
+                if plain is None:
+                    plain = tshark.decode(raw, prefs=["gtp.dissect_tpdu_as:none"])
+                errs = tshark.errors(plain[i - 1]) if i - 1 < len(plain) else errs
             if errs:
                 malformed += 1
                 bad.append(f"{cap} frame {i}: tshark: {'; '.join(errs)[:160]}")

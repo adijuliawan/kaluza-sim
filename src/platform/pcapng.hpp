@@ -65,6 +65,9 @@ struct Udp4 {
 
 /// An IPv4 header (with its checksum) and a UDP header (checksum 0) around payload.
 Result<Bytes> ipv4_udp(const Udp4& a, ByteView payload);
+/// P2 Q12: the same frame cut to its first `keep` octets of payload (a headers-only
+/// capture), its IPv4 and UDP lengths still the whole payload's; nothing past them copied.
+Result<Bytes> ipv4_udp_head(const Udp4& a, ByteView payload, std::size_t keep);
 
 /// A GSMTAP version 2 header (16 octets) before payload.
 Bytes gsmtap(std::uint8_t type, std::uint8_t sub_type, ByteView payload);
