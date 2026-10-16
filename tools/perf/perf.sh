@@ -16,29 +16,43 @@
 #
 #   tools/perf/perf.sh [nea2] [nea1] [split] [many]    (none: all)
 #   PERF_SECS=10 PERF_NETD=/run/ksim/netd.sock
+#   PERF_BIN=<dir>  every binary from one directory: a release's bin/ on kaluza-uesim (P2 Q15,
+#                   LW3); without it the dev PC's release build, and ksim-sim from the dev build
+#   PERF_OUT=<dir>  where the runs go (build/perf; short: split mode's sockets live there)
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-R="$ROOT/build/release/apps"
-D="$ROOT/build/dev/apps"
-for x in "$R/ksim/ksim" "$R/ksim-ctl/ksim-ctl" "$R/ksim-corestub/ksim-corestub" "$D/ksim-sim/ksim-sim"; do
-    [[ -x "$x" ]] || { echo "PERF=SKIP (no $x; build the release and dev presets)"; exit 77; }
+if [[ -n "${PERF_BIN:-}" ]]; then
+    KSIM_EXE="$PERF_BIN/ksim"; CTL="$PERF_BIN/ksim-ctl"; STUB_EXE="$PERF_BIN/ksim-corestub"; SIM="$PERF_BIN/ksim-sim"
+else
+    R="$ROOT/build/release/apps"
+    KSIM_EXE="$R/ksim/ksim"; CTL="$R/ksim-ctl/ksim-ctl"; STUB_EXE="$R/ksim-corestub/ksim-corestub"
+    SIM="$ROOT/build/dev/apps/ksim-sim/ksim-sim"
+fi
+for x in "$KSIM_EXE" "$CTL" "$STUB_EXE" "$SIM"; do
+    [[ -x "$x" ]] || { echo "PERF=SKIP (no $x; build the release and dev presets, or PERF_BIN)"; exit 77; }
 done
+# The oracle venv on the dev PC; the system's python3 elsewhere (the report needs only its stdlib).
+PY="$ROOT/.venv/bin/python"; [[ -x "$PY" ]] || PY=python3
 NETD="${PERF_NETD:-/run/ksim/netd.sock}"
-"$R/ksim-ctl/ksim-ctl" netd list --netd "$NETD" >/dev/null 2>&1 || { echo "PERF=SKIP (no ksim-netd at $NETD)"; exit 77; }
+"$CTL" netd list --netd "$NETD" >/dev/null 2>&1 || { echo "PERF=SKIP (no ksim-netd at $NETD)"; exit 77; }
 command -v iperf3 >/dev/null || { echo "PERF=SKIP (no iperf3)"; exit 77; }
 cases=("$@")
 [[ ${#cases[@]} -eq 0 ]] && cases=(nea2 nea1 split many)
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-W="$ROOT/build/perf/$STAMP"   # short paths: split mode's sockets live in the run directory
+OUT="${PERF_OUT:-$ROOT/build/perf}"
+W="$OUT/$STAMP"
 mkdir -p "$W/bin"
-for b in ksim ksim-du ksim-cucp ksim-cuup ksim-ue ksim-ctl ksim-corestub; do
-    for d in "$R/ksim" "$R/$b"; do
+ln -sf "$KSIM_EXE" "$W/bin/ksim"
+ln -sf "$CTL" "$W/bin/ksim-ctl"
+ln -sf "$STUB_EXE" "$W/bin/ksim-corestub"
+for b in ksim-du ksim-cucp ksim-cuup ksim-ue; do
+    for d in "$(dirname "$KSIM_EXE")" "${R:-/nonexistent}/$b"; do
         [[ -x "$d/$b" ]] && ln -sf "$d/$b" "$W/bin/$b"
     done
 done
-"$D/ksim-sim/ksim-sim" range init --master "$W/keys/master.key" --kek "$W/keys/kek.key" >/dev/null || exit 1
-"$D/ksim-sim/ksim-sim" range derive --block 001010000300000/101 --master "$W/keys/master.key" --kek "$W/keys/kek.key" \
+"$SIM" range init --master "$W/keys/master.key" --kek "$W/keys/kek.key" >/dev/null || exit 1
+"$SIM" range derive --block 001010000300000/101 --master "$W/keys/master.key" --kek "$W/keys/kek.key" \
     --out "$W/cards" >/dev/null || exit 1
 : > "$W/perf.tsv"
 
@@ -77,8 +91,10 @@ for c in "${cases[@]}"; do
 done
 left=$(ip netns list 2>/dev/null | grep -c '^ksim-' || true)
 echo "PERF_NETNS_LEFT=$left"
-rm -rf "$ROOT/build/perf/last"
-mkdir -p "$ROOT/build/perf/last"
-cp "$W/perf.tsv" "$ROOT/build/perf/last/perf.tsv"
-"$ROOT/.venv/bin/python" -I "$ROOT/tools/perf/perf_report.py" "$ROOT/build/perf/last/perf.tsv" \
-    --commit "$(git -C "$ROOT" rev-parse --short=12 HEAD)" --host "$(hostname)" | tee "$ROOT/build/perf/last/report.txt"
+rm -rf "$OUT/last"
+mkdir -p "$OUT/last"
+cp "$W/perf.tsv" "$OUT/last/perf.tsv"
+# The commit: the checkout's, or a release's name (~/ksim/releases/<commit>/).
+COMMIT="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || basename "$(readlink -f "$ROOT")")"
+"$PY" -I "$ROOT/tools/perf/perf_report.py" "$OUT/last/perf.tsv" --commit "$COMMIT" --host "$(hostname)" \
+    | tee "$OUT/last/report.txt"

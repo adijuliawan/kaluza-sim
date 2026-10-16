@@ -28,7 +28,7 @@ DN_NS=${DN_NS:-ksim-dn-stub}
 OUT="$RUN/perf.tsv"
 stub() { "$KSIM_CTL" --socket "$STUB_CTL" stub "$@"; }
 put() { printf '%s\t%s\t%s\t%s\n' "$PERF_LABEL" "$1" "$2" "$3" >> "$OUT"; echo "  $PERF_LABEL $1 = $2 $3"; }
-py() { "$KSIM_ROOT/.venv/bin/python" -I "$@"; }
+py() { if [ -x "$KSIM_ROOT/.venv/bin/python" ]; then "$KSIM_ROOT/.venv/bin/python" -I "$@"; else python3 -I "$@"; fi; }
 num() { _v=$(cat); echo "${_v:-0}"; }
 
 # iperf3 servers in the DN namespace, one port each (iperf3 serves one test at a time);
@@ -158,6 +158,6 @@ fi
 # is stopped, the helper and iperf3 together (KS-PLAT-D18).
 for f in "$RUN/iperf3-s.pids" "$RUN/iperf-c.pids"; do
     [ -f "$f" ] || continue
-    while read -r pid; do kill -TERM -- "-$pid" 2>/dev/null; done < "$f"
+    while read -r pid; do kill -TERM "-$pid" 2>/dev/null; done < "$f"   # dash: no "--"
 done
 echo "PERF_TSV=$OUT"

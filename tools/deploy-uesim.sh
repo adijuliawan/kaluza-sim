@@ -73,6 +73,7 @@ if (( PEERS )); then
 fi
 cp -r "$ROOT/topologies" "$ROOT/cards" "$ROOT/personas" "$ROOT/gates" "$STAGE/$REL/"
 cp -r "$ROOT/tools/systemd" "$STAGE/$REL/tools/"
+cp -r "$ROOT/tools/perf" "$STAGE/$REL/tools/"   # P2 Q15 (LW3): the harness, run with PERF_BIN=~/ksim/current/bin
 rig "mkdir -p ~/ksim/releases && test ! -e ~/ksim/releases/$REL" || { echo "DEPLOY=FAIL (release $REL is on the VM already)"; exit 1; }
 tar -C "$STAGE" -cf - "$REL" | rig "tar -C ~/ksim/releases -xf -"
 rig "ln -sfn releases/$REL ~/ksim/current && cd ~/ksim/releases && ls -1t | tail -n +4 | xargs -r rm -rf"
