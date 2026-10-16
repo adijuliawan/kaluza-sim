@@ -181,6 +181,10 @@ Result<e1ap::DrbSetup> CuUp::add_drb(Context& c, Session& sess, const e1ap::DrbT
         for (const auto& f : d.flows) {
             drb.qfis.push_back(f.qfi);
             sess.qfi_to_drb[f.qfi] = d.drb_id;
+            if (f.gbr) {
+                drb.gfbr_dl += f.gbr->gfbr_dl;   // P2 Q11
+                drb.gfbr_ul += f.gbr->gfbr_ul;
+            }
         }
         if (d.default_drb) {
             sess.default_drb = d.drb_id;
@@ -243,7 +247,11 @@ Result<e1ap::DrbSetup> CuUp::add_drb(Context& c, Session& sess, const e1ap::DrbT
                     }
                     const auto h = sdap::decode_ul(sdu.front());
                     if (!h.data) {
-                        return;   // an end-marker control PDU
+                        // An end-marker control PDU (TS 37.324 6.2.3): the flow left this DRB (P2 Q11).
+                        ++stats_.end_markers;
+                        events_.emit("ran.cuup.end_marker", cfg_.id,
+                                     {{"cu_up_ue", str(up_id)}, {"psi", str(psi)}, {"drb", str(drb_id)}, {"qfi", str(h.qfi)}});
+                        return;
                     }
                     qfi = h.qfi;
                     sdu.erase(sdu.begin());
@@ -281,7 +289,7 @@ std::vector<CuUp::DrbStat> CuUp::drb_stats() const {
     for (const auto& [up, c] : ctx_) {
         for (const auto& [psi, s] : c.sessions) {
             for (const auto& [id, d] : s.drbs) {
-                out.push_back(DrbStat{up, psi, id, s.default_drb == id, d.qfis, d.ul_packets, d.dl_packets});
+                out.push_back(DrbStat{up, psi, id, s.default_drb == id, d.qfis, d.ul_packets, d.dl_packets, d.gfbr_dl, d.gfbr_ul});
             }
         }
     }
@@ -312,9 +320,14 @@ void CuUp::remap(Session& s, Drb& d, const std::vector<e1ap::QosFlow>& flows) {
         }
     }
     d.qfis.clear();
+    d.gfbr_dl = d.gfbr_ul = 0;
     for (const auto& f : flows) {
         d.qfis.push_back(f.qfi);
         s.qfi_to_drb[f.qfi] = d.id;
+        if (f.gbr) {
+            d.gfbr_dl += f.gbr->gfbr_dl;
+            d.gfbr_ul += f.gbr->gfbr_ul;
+        }
     }
 }
 
@@ -512,7 +525,8 @@ void CuUp::on_n3(std::uint32_t cu_up_ue, std::uint8_t psi, const entity::gtpu::U
     Bytes sdu;
     sdu.reserve(d.payload.size() + 1);
     if (r.sdap_dl) {
-        sdu.push_back(sdap::encode(sdap::DlHeader{false, false, qfi}));
+        // P2 Q11: the PDU Session Container's RQI goes to the UE in the SDAP header (TS 37.324 6.2.2.2).
+        sdu.push_back(sdap::encode(sdap::DlHeader{false, d.rqi, qfi}));
     }
     sdu.insert(sdu.end(), d.payload.begin(), d.payload.end());
     r.pdcp->write_sdu(std::move(sdu));

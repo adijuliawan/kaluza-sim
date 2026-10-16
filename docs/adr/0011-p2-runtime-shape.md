@@ -45,6 +45,9 @@
        - per-5qi gives each 5QI of a session its own DRB, the default DRB holding the first flow's, as OCUDU's CU-CP does.
        - per-session puts every flow on one DRB, P1's way.
        - A modification keeps the mapping, and a DRB left with no flow is removed.
+     - *As built (P2 Q11):* `cucp: {gbr_budget_kbps: N}` (KS-RRC-B7), default 100000, is the cell's GBR budget (ledger A-07).
+       - A GBR flow always gets its own DRB, and one over the budget is refused.
+       - `ksim-ctl gnb <name> gbr-budget` changes it during a run, and notification control tells the AMF.
   8. **Topology settings,** each recorded as a -B row when it lands: the CU-CP's NEA/NIA preference lists, its UP security policy for "preferred" and for an absent Security Indication, its QoS-flow-to-DRB mapping, and t-Reordering.
   9. **Throughput** is measured only on the dev PC or inside kaluza-uesim against the scripted core on 127.0.0.x, never across the lab (kaluza-core-df, 2026-10-15). The numbers are the sim's own processing over an ideal link with zero delay; the scripted UPF's CPU is reported apart.
 - **Consequences:**

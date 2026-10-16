@@ -109,12 +109,22 @@ struct GtpTunnel {
     friend bool operator==(const GtpTunnel&, const GtpTunnel&) = default;
 };
 /// A non-GBR flow with a standardised 5QI and its ARP.
+/// GBR QoS Flow Information (TS 38.473 9.3.1.46; P2 Q11): bit/s each way.
+struct Gbr {
+    std::uint64_t mfbr_dl = 0;
+    std::uint64_t mfbr_ul = 0;
+    std::uint64_t gfbr_dl = 0;
+    std::uint64_t gfbr_ul = 0;
+    friend bool operator==(const Gbr&, const Gbr&) = default;
+};
 struct Flow {
     std::uint8_t qfi = 1;
     std::uint16_t five_qi = 9;
     std::uint8_t arp_priority = 8;
     bool may_preempt = false;
     bool preemptable = true;
+    std::optional<Gbr> gbr;    // P2 Q11
+    bool reflective = false;   // reflective-QoS-Attribute subject-to (P2 Q11)
     friend bool operator==(const Flow&, const Flow&) = default;
 };
 struct DrbToSetup {

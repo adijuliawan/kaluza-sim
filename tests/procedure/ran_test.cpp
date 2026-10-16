@@ -320,7 +320,7 @@ TEST(Ran, F1ap8_3_4_3_AModificationTheDuCannotMakeIsRefused) {
     f1ap::UeContextModificationRequest m;
     m.cu_ue = 1;
     m.du_ue = 1;
-    m.drbs = {f1ap::DrbToSetup{1, f1ap::Snssai{1, std::nullopt}, {f1ap::Flow{1, 9, 8, false, true}},
+    m.drbs = {f1ap::DrbToSetup{1, f1ap::Snssai{1, std::nullopt}, {f1ap::Flow{1, 9, 8, false, true, std::nullopt, false}},
                                f1ap::GtpTunnel{{127, 0, 0, 4}, 1}, 18, 18}};
     auto wire = f1ap::encode(m);
     ASSERT_TRUE(wire);

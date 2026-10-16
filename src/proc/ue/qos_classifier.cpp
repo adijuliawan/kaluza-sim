@@ -283,6 +283,46 @@ bool direction_ok(std::uint8_t d, QosDirection dir) {
 
 } // namespace
 
+std::optional<Filter> derive_ul_filter(ByteView dl) {
+    // The view of a DL packet from the UE's side: local is the destination, remote the source.
+    const auto v = parse_ip(dl, false);
+    if (!v || !v->protocol || (*v->protocol != 6 && *v->protocol != 17) || !v->local_port || !v->remote_port) {
+        return std::nullopt;   // not TCP or UDP (ESP: no uplink SA is known)
+    }
+    std::vector<Component> c;
+    if (v->ipv4) {
+        Bytes remote(v->remote.begin(), v->remote.begin() + 4);
+        remote.insert(remote.end(), 4, 0xFF);
+        Bytes local(v->local.begin(), v->local.begin() + 4);
+        local.insert(local.end(), 4, 0xFF);
+        c.push_back({kIpv4Remote, std::move(remote)});
+        c.push_back({kIpv4Local, std::move(local)});
+    } else {
+        Bytes remote(v->remote.begin(), v->remote.end());
+        remote.push_back(128);
+        Bytes local(v->local.begin(), v->local.end());
+        local.push_back(128);
+        c.push_back({kIpv6Remote, std::move(remote)});
+        c.push_back({kIpv6Local, std::move(local)});
+    }
+    c.push_back({kProtocol, Bytes{*v->protocol}});
+    c.push_back({kLocalPort, Bytes{static_cast<std::uint8_t>(*v->local_port >> 8), static_cast<std::uint8_t>(*v->local_port)}});
+    c.push_back({kRemotePort, Bytes{static_cast<std::uint8_t>(*v->remote_port >> 8), static_cast<std::uint8_t>(*v->remote_port)}});
+    return Filter{2, 0, std::move(c)};   // uplink only
+}
+
+bool same_filter(const Filter& a, const Filter& b) {
+    if (a.direction != b.direction || a.components.size() != b.components.size()) {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.components.size(); ++i) {
+        if (a.components[i].type != b.components[i].type || a.components[i].value != b.components[i].value) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool filter_matches(const Filter& f, ByteView packet, QosDirection dir, PduKind kind) {
     if (!direction_ok(f.direction, dir) || f.components.empty()) {
         return false;

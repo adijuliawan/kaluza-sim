@@ -44,6 +44,7 @@ struct UserData {
     Bytes payload;                        // the T-PDU; none with a DDDS of its own
     bool report_polling = false;          // the DL USER DATA's Report Polling flag (P2 Q4)
     std::optional<DeliveryStatus> ddds;   // an NR-U DL DATA DELIVERY STATUS frame (P2 Q4)
+    bool rqi = false;                     // the DL PDU SESSION INFORMATION's RQI (TS 38.415 5.5.3.4; P2 Q11)
 
     /// A G-PDU with no frame (an NR-U UL T-PDU), with a PDU SESSION INFORMATION
     /// frame, or with a DL USER DATA frame.
@@ -53,9 +54,10 @@ struct UserData {
         d.payload = std::move(payload);
         return d;
     }
-    static UserData dl_psc(std::uint32_t teid, std::uint8_t qfi, Bytes payload) {
+    static UserData dl_psc(std::uint32_t teid, std::uint8_t qfi, Bytes payload, bool rqi = false) {
         UserData d = plain(teid, std::move(payload));
         d.dl_qfi = qfi;
+        d.rqi = rqi;
         return d;
     }
     static UserData ul_psc(std::uint32_t teid, std::uint8_t qfi, Bytes payload) {

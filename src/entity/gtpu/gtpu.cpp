@@ -64,7 +64,10 @@ Result<Bytes> encode(const UserData& d) {
     std::uint8_t ext_type = 0;
     if (d.dl_qfi || d.ul_qfi) {
         const bool dl = d.dl_qfi.has_value();
-        ext = frame(up::Protocol::psc, dl ? 0 : 1, static_cast<std::uint8_t>((dl ? *d.dl_qfi : *d.ul_qfi) & 0x3F), std::nullopt);
+        // Octet 2: PPP, RQI (DL only, P2 Q11), QFI (TS 38.415 5.5.2.1, 5.5.2.2).
+        const auto rqi = static_cast<std::uint8_t>(dl && d.rqi ? 0x40 : 0x00);
+        ext = frame(up::Protocol::psc, dl ? 0 : 1, static_cast<std::uint8_t>(((dl ? *d.dl_qfi : *d.ul_qfi) & 0x3F) | rqi),
+                    std::nullopt);
         ext_type = codec::ext_pdu_session_container;
     } else if (d.ddds) {
         ext = ddds_frame(*d.ddds);
@@ -103,6 +106,7 @@ Result<UserData> decode_gpdu(ByteView in) {
             const std::uint8_t qfi = f->flags.size() > 1 ? static_cast<std::uint8_t>(f->flags[1] & 0x3F) : 0;
             if (f->spec->pdu_type == 0) {
                 d.dl_qfi = qfi;
+                d.rqi = f->flags.size() > 1 && (f->flags[1] & 0x40) != 0;
             } else {
                 d.ul_qfi = qfi;
             }

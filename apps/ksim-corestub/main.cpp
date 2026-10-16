@@ -133,6 +133,10 @@ Reply report(Stub& s) {
             out.set("LAST_RELEASE_CAUSE", s.amf->last_release_cause().empty() ? std::string("-") : s.amf->last_release_cause());
             out.set("SESSIONS", static_cast<std::int64_t>(s.amf->smf().sessions()));
             out.set("NOTIFIES", static_cast<std::int64_t>(s.amf->notifies()));   // P2 Q10
+            out.set("NOTIFY_FULFILLED", static_cast<std::int64_t>(s.amf->notify_fulfilled()));   // P2 Q11
+            out.set("NOTIFY_NOT_FULFILLED", static_cast<std::int64_t>(s.amf->notify_not_fulfilled()));
+            out.set("SETUPS_WITH_REFUSED_FLOWS", static_cast<std::int64_t>(s.amf->refused_flows()));
+            out.set("SM_RQOS", static_cast<std::int64_t>(s.amf->smf().rqos_sessions()));
             out.set("SM_REQUESTS", static_cast<std::int64_t>(s.amf->smf().requests()));
             if (const auto* upf = s.amf->upf()) {
                 out.set("UPF_UL", static_cast<std::int64_t>(upf->stats().ul_packets));
@@ -140,6 +144,9 @@ Reply report(Stub& s) {
                 out.set("UPF_ECHO_REPLIES", static_cast<std::int64_t>(upf->stats().echo_replies));
                 out.set("UPF_ECHO_FROM_UE", static_cast<std::int64_t>(upf->stats().echo_from_ue));
                 out.set("UPF_ERROR_INDICATIONS", static_cast<std::int64_t>(upf->error_indications()));
+                out.set("UPF_UDP_TO_UE", static_cast<std::int64_t>(upf->stats().udp_to_ue));   // P2 Q11
+                out.set("UPF_UDP_FROM_UE", static_cast<std::int64_t>(upf->stats().udp_from_ue));
+                out.set("UPF_RQI_MARKED", static_cast<std::int64_t>(upf->stats().rqi_marked));
                 // P2 Q10: the UPF's packets per QFI, as its classification of them found them.
                 for (const auto& [q, n] : upf->stats().ul_per_qfi) {
                     out.set("UPF_UL_QFI." + std::to_string(q), static_cast<std::int64_t>(n));
@@ -403,7 +410,38 @@ static int run_main(int argc, char** argv) {
     server.post("/v1/stub/qos", [&s, find_ue, num](const ksim::api::Request& req) {
         const std::string action = req.arg("action");
         ksim::corestub::FlowSpec f;
-        if (action == "flows-add" || action == "add") {
+        if (action == "rq-timer") {
+            const int secs = static_cast<int>(num(req, "seconds", 60, 1860));   // P2 Q11: 0 sends none
+            auto r = s.call<bool>([&s, secs] {
+                for (auto* p : {&s.profile.session, s.amf ? &s.amf->smf().profile() : nullptr}) {
+                    if (p != nullptr) {
+                        p->rq_timer_s = secs;
+                    }
+                }
+                return true;
+            });
+            if (!r) {
+                return Reply::fail(Exit::abort, "the stub did not answer in time");
+            }
+            Reply out;
+            out.set("RQ_TIMER_S", static_cast<std::int64_t>(secs));
+            return out;
+        }
+        if (req.has("gfbr") != req.has("mfbr")) {
+            return Reply::fail(Exit::usage, "qos: a GBR flow takes --gfbr and --mfbr (kbit/s)");
+        }
+        if (req.has("gfbr")) {   // P2 Q11: a GBR flow
+            f.gfbr_kbps = num(req, "gfbr", 0, 10'000'000);
+            f.mfbr_kbps = num(req, "mfbr", 0, 10'000'000);
+            if (*f.gfbr_kbps > *f.mfbr_kbps) {
+                return Reply::fail(Exit::usage, "qos: the GFBR is at most the MFBR");
+            }
+            f.notification_control = req.has("notify") && req.arg("notify") != "0";
+        }
+        if (action == "mod") {
+            f.qfi = static_cast<std::uint8_t>(num(req, "qfi", 2, 63));
+            f.five_qi = static_cast<std::uint16_t>(num(req, "5qi", 9, 255));
+        } else if (action == "flows-add" || action == "add") {
             f.qfi = static_cast<std::uint8_t>(num(req, "qfi", 2, 63));
             f.five_qi = static_cast<std::uint16_t>(num(req, "5qi", 9, 255));
             f.precedence = static_cast<std::uint8_t>(num(req, "precedence", 10, 255));
@@ -420,7 +458,7 @@ static int run_main(int argc, char** argv) {
         } else if (action == "del") {
             f.qfi = static_cast<std::uint8_t>(num(req, "qfi", 2, 63));
         } else if (action != "flows-clear") {
-            return Reply::fail(Exit::usage, "qos flows-add|flows-clear|add|del");
+            return Reply::fail(Exit::usage, "qos flows-add|flows-clear|add|del|mod|rq-timer");
         }
         const auto psi = static_cast<std::uint8_t>(num(req, "psi", 1, 15));
         auto r = s.call<std::string>([&s, &req, find_ue, action, f, psi] {
@@ -443,7 +481,9 @@ static int run_main(int argc, char** argv) {
             if (nas == nullptr) {
                 return std::string("no such registered UE");
             }
-            const auto done = action == "add" ? nas->qos_add(psi, f) : nas->qos_del(psi, f.qfi);
+            const auto done = action == "add"   ? nas->qos_add(psi, f)
+                              : action == "mod" ? nas->qos_mod(psi, f.qfi, f.five_qi, f.gfbr_kbps, f.mfbr_kbps)
+                                                : nas->qos_del(psi, f.qfi);
             return done ? std::string() : std::string(done.error().what);
         });
         if (!r) {
@@ -455,6 +495,36 @@ static int run_main(int argc, char** argv) {
         Reply out;
         out.set("QOS", action);
         out.set("QFI", static_cast<std::int64_t>(f.qfi));
+        return out;
+    });
+    // P2 Q11: a UDP datagram from the DN to a UE's echo port (7), on a QFI of the test's and with
+    // the RQI when asked: the reflective QoS and unknown-QFI rows.
+    server.post("/v1/stub/udp-ue", [&s, find_ue, num](const ksim::api::Request& req) {
+        const auto psi = static_cast<std::uint8_t>(num(req, "psi", 1, 15));
+        const auto sport = static_cast<std::uint16_t>(num(req, "sport", 40000, 65535));
+        const auto seq = static_cast<std::uint16_t>(num(req, "seq", 1, 65535));
+        std::optional<std::uint8_t> qfi;
+        if (req.has("qfi")) {
+            qfi = static_cast<std::uint8_t>(num(req, "qfi", 1, 63));
+        }
+        const bool rqi = req.has("rqi") && req.arg("rqi") != "0";
+        auto from = ksim::Endpoint::parse(req.arg("src", "10.60.0.1"), 0);
+        if (!from || from->family != ksim::Endpoint::Family::v4) {
+            return Reply::fail(Exit::usage, "udp-ue --src takes an IPv4 address");
+        }
+        const ksim::ip::Addr src{from->addr[0], from->addr[1], from->addr[2], from->addr[3]};
+        auto r = s.call<bool>([&s, &req, find_ue, psi, src, sport, qfi, rqi, seq] {
+            auto* nas = find_ue(s, req);
+            return nas != nullptr && s.amf->smf().udp_ue(nas->supi(), psi, src, sport, qfi, rqi, seq).has_value();
+        });
+        if (!r) {
+            return Reply::fail(Exit::abort, "the stub did not answer in time");
+        }
+        if (!*r) {
+            return Reply::fail(Exit::wrong_state, "no such UE session with a downlink tunnel");
+        }
+        Reply out;
+        out.set("UDP", "sent");
         return out;
     });
     server.post("/v1/stub/nas-alg", [&s, num](const ksim::api::Request& req) {

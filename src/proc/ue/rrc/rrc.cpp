@@ -365,7 +365,7 @@ Result<void> UeRrc::add_drb(const rrc::DrbAdd& d) {
         }
         // The SDAP headers and the session cannot change after setup (TS 38.331 SDAP-Config).
         entity::SdapDrb m{d.drb_id, d.sdap_header_ul, d.sdap_header_dl, d.default_drb, d.qfis, d.qfis_release};
-        s->second.configure(m);
+        send_end_markers(s->second.configure(m));
         events_.emit("rrc.drb.remapped", cfg_.id,
                      {{"drb", str(d.drb_id)}, {"added", join(d.qfis)}, {"released", join(d.qfis_release)}});
         return {};
@@ -411,7 +411,8 @@ Result<void> UeRrc::add_drb(const rrc::DrbAdd& d) {
     drbs_.emplace(id, std::move(b));
     auto [it, fresh] = sdaps_.try_emplace(d.pdu_session, d.pdu_session);
     (void)fresh;
-    it->second.configure(entity::SdapDrb{d.drb_id, d.sdap_header_ul, d.sdap_header_dl, d.default_drb, d.qfis, d.qfis_release});
+    send_end_markers(
+        it->second.configure(entity::SdapDrb{d.drb_id, d.sdap_header_ul, d.sdap_header_dl, d.default_drb, d.qfis, d.qfis_release}));
     return {};
 }
 
@@ -601,6 +602,9 @@ void UeRrc::on_reconfiguration(const rrc::Reconfiguration& m) {
                 added += "drb" + str(d.drb_id) + " ";
             }
         }
+        for (auto& [psi, sd] : sdaps_) {
+            sd.settle();   // P2 Q11: established from here on, for TS 37.324 5.3.1's end-markers
+        }
     }
     events_.emit("rrc.reconfiguration.complete", cfg_.id,
                  {{"added", added.empty() ? "" : added.substr(0, added.size() - 1)},
@@ -643,6 +647,18 @@ Result<void> UeRrc::send_data(std::uint8_t psi, std::uint8_t qfi, Bytes ip) {
     return {};
 }
 
+void UeRrc::send_end_markers(const std::vector<entity::Sdap::EndMarker>& markers) {
+    // P2 Q11 (TS 37.324 6.2.3): each end-marker control PDU on the DRB it names.
+    for (const auto& m : markers) {
+        auto d = drbs_.find(m.drb_id);
+        if (d == drbs_.end() || !d->second.pdcp) {
+            continue;
+        }
+        d->second.pdcp->write_sdu(m.pdu);
+        events_.emit("rrc.sdap.end_marker", cfg_.id, {{"drb", str(m.drb_id)}, {"qfi", str(sdap::decode_ul(m.pdu.front()).qfi)}});
+    }
+}
+
 void UeRrc::on_drb(std::uint8_t drb, Bytes sdu) {
     auto d = drbs_.find(drb);
     if (d == drbs_.end()) {
@@ -653,6 +669,9 @@ void UeRrc::on_drb(std::uint8_t drb, Bytes sdu) {
         return;
     }
     auto dl = s->second.on_dl(drb, std::move(sdu));
+    if (dl && dl->header && dl->header->rdi) {
+        send_end_markers(s->second.reflect(drb, dl->header->qfi));   // P2 Q11: TS 37.324 5.3.2
+    }
     if (dl && upper_.dl_data) {
         upper_.dl_data(d->second.psi, dl->header, std::move(dl->sdu));
     }

@@ -3,6 +3,8 @@
 
 #include "proc/ue/nas_sm/sm.hpp"
 
+#include "proc/ue/qos_classifier.hpp"
+
 #include <algorithm>
 #include <utility>
 
@@ -112,6 +114,114 @@ Sm::~Sm() {
             ex_.stop_timer(*b.id);
         }
     }
+    for (auto& [psi, s] : sessions_) {
+        drop_derived(s);
+    }
+}
+
+// ---- reflective QoS (P2 Q11; TS 24.501 6.2.5.1.4) ---------------------------------------------
+
+void Sm::drop_derived(Session& s) {
+    for (const auto& [key, id] : s.t3583) {
+        ex_.stop_timer(id);
+    }
+    s.t3583.clear();
+    s.derived_keys.clear();
+    s.info.derived.clear();
+}
+
+void Sm::arm_t3583(Session& s, std::uint64_t key) {
+    if (auto it = s.t3583.find(key); it != s.t3583.end()) {
+        ex_.stop_timer(it->second);
+        s.t3583.erase(it);
+    }
+    if (KSIM_MUTANT("rq_timer_never")) {
+        return;   // the mutant (row ksim-p2.rqos-timer): a derived rule that never goes
+    }
+    const std::int64_t ms = s.info.rq_timer_ms.value_or(60'000);   // T3583's default, 1 min (Table 10.3.2)
+    s.t3583[key] = ex_.start_timer(ms, [this, alive = alive_, psi = s.info.psi, key] {
+        if (!*alive) {
+            return;
+        }
+        auto it = sessions_.find(psi);
+        if (it == sessions_.end()) {
+            return;
+        }
+        Session& ss = it->second;
+        ss.t3583.erase(key);
+        for (std::size_t i = 0; i < ss.derived_keys.size(); ++i) {
+            if (ss.derived_keys[i] != key) {
+                continue;
+            }
+            // 6.2.5.1.4.5: T3583 expired, the derived rule goes.
+            const std::uint8_t qfi = ss.info.derived[i].qfi.value_or(0);
+            ss.derived_keys.erase(ss.derived_keys.begin() + static_cast<std::ptrdiff_t>(i));
+            ss.info.derived.erase(ss.info.derived.begin() + static_cast<std::ptrdiff_t>(i));
+            events_.emit("ue.qos.derived_expired", cfg_.id, {{"psi", str(psi)}, {"qfi", str(qfi)}, {"rule", std::to_string(key)}});
+            return;
+        }
+    });
+}
+
+void Sm::take_rq_timer(Session& s, const nas::Message& m) {
+    const Bytes* t = nas::get(m, "RQ timer value");
+    if (t == nullptr) {
+        return;
+    }
+    auto v = ie::GprsTimer::decode(*t);
+    if (!v) {
+        return;
+    }
+    const auto ms = v->ms();
+    // 6.2.5.1.4.5: "deactivated" or zero removes the derived rules (and no more come).
+    if (!ms || *ms == 0) {
+        s.rq_revoked = true;
+        drop_derived(s);
+        return;
+    }
+    s.rq_revoked = false;
+    s.info.rq_timer_ms = ms;
+}
+
+bool Sm::reflect(std::uint8_t psi, std::uint8_t qfi, ByteView dl_packet) {
+    auto it = sessions_.find(psi);
+    if (it == sessions_.end() || it->second.info.state != SmState::active || !reflective_qos() || it->second.rq_revoked) {
+        return false;
+    }
+    Session& s = it->second;
+    auto f = derive_ul_filter(dl_packet);
+    if (!f) {
+        return false;   // 6.2.5.1.4.6: the RQI is ignored, the packet handled
+    }
+    for (std::size_t i = 0; i < s.info.derived.size(); ++i) {
+        if (!s.info.derived[i].filters.empty() && same_filter(s.info.derived[i].filters.front(), *f)) {
+            // 6.2.5.1.4.4: the same filter: T3583 again, and the QFI the packet's.
+            const bool moved = s.info.derived[i].qfi != qfi;
+            s.info.derived[i].qfi = qfi;
+            arm_t3583(s, s.derived_keys[i]);
+            if (moved) {
+                events_.emit("ue.qos.derived", cfg_.id,
+                             {{"psi", str(psi)}, {"qfi", str(qfi)}, {"rule", std::to_string(s.derived_keys[i])}, {"new", "0"}});
+            }
+            return true;
+        }
+    }
+    // 6.2.5.1.4.3: a new derived rule, precedence 80.
+    ie::QosRules::Rule r;
+    r.id = 0;
+    r.operation = 1;
+    r.default_rule = false;
+    r.precedence = 80;
+    r.qfi = qfi;
+    r.filters = {*f};
+    const std::uint64_t key = ++derived_seq_;
+    s.info.derived.push_back(std::move(r));
+    s.derived_keys.push_back(key);
+    arm_t3583(s, key);
+    events_.emit("ue.qos.derived", cfg_.id,
+                 {{"psi", str(psi)}, {"qfi", str(qfi)}, {"rule", std::to_string(key)}, {"new", "1"},
+                  {"timer_ms", std::to_string(s.info.rq_timer_ms.value_or(60'000))}});
+    return true;
 }
 
 std::uint8_t Sm::next_pti() {
@@ -188,6 +298,9 @@ Result<std::uint8_t> Sm::establish(const SessionRequest& r) {
                    ie::IntegrityProtectionMaxDataRate{cfg_.ip_max_rate_ul, cfg_.ip_max_rate_dl}.encode());
     (void)nas::set(m, "PDU session type", Bytes{ie::PduSessionType::ipv4});
     (void)nas::set(m, "SSC mode", Bytes{1});
+    if (!cfg_.sm_capability.empty()) {
+        (void)nas::set(m, "5GSM capability", cfg_.sm_capability);   // P2 Q11: RqoS (9.11.4.1)
+    }
     nas::Epco epco;
     epco.units = {nas::EpcoUnit{0x000D, {}, 0}, nas::EpcoUnit{0x0010, {}, 0}};
     if (auto e = nas::encode_epco(epco, nas::Direction::ul)) {
@@ -211,7 +324,8 @@ Result<std::uint8_t> Sm::establish(const SessionRequest& r) {
     set_state(s, SmState::active_pending);
     start_proc_timer(s);
     events_.emit("nas.sm.est.request", cfg_.id,
-                 {{"psi", str(psi)}, {"pti", str(pti)}, {"dnn", r.dnn}, {"snssai", key_part(r.snssai)}, {"type", "ipv4"}});
+                 {{"psi", str(psi)}, {"pti", str(pti)}, {"dnn", r.dnn}, {"snssai", key_part(r.snssai)}, {"type", "ipv4"},
+                  {"rqos", reflective_qos() ? "1" : "0"}});
     return psi;
 }
 
@@ -318,6 +432,7 @@ void Sm::on_accept(Session& s, const nas::Message& m, std::uint8_t pti) {
             apply_flows(s, *flows, true);
         }
     }
+    take_rq_timer(s, m);   // P2 Q11
     if (const Bytes* a = nas::get(m, "Session AMBR")) {
         if (auto ambr = ie::SessionAmbr::decode(*a)) {
             s.info.ambr_dl_bps = ambr->dl_bps();
@@ -627,6 +742,7 @@ void Sm::on_modification_command(Session& s, const nas::Message& m, std::uint8_t
             apply_flows(s, *flows, false);
         }
     }
+    take_rq_timer(s, m);   // P2 Q11
     std::string qfis;
     for (const auto& rule : s.rules) {
         if (rule.qfi) {

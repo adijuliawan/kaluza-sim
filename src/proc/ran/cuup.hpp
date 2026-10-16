@@ -62,6 +62,7 @@ struct CuUpStats {
     std::uint64_t ul_packets = 0;      // F1-U to N3
     std::uint64_t dropped = 0;         // no DRB for the flow, no F1-U DL end yet, …
     std::uint64_t ddds_rx = 0;         // P2 Q4: the DU's DL DATA DELIVERY STATUS frames
+    std::uint64_t end_markers = 0;     // P2 Q11: SDAP end-marker control PDUs from the UE
     std::uint64_t inactivity_reports = 0;   // P2 Q5: BEARER CONTEXT INACTIVITY NOTIFICATIONs sent
     std::uint64_t e1_errors = 0;
 };
@@ -84,6 +85,8 @@ public:
         std::vector<std::uint8_t> qfis;
         std::uint64_t ul_packets = 0;
         std::uint64_t dl_packets = 0;
+        std::uint64_t gfbr_dl = 0;   // P2 Q11
+        std::uint64_t gfbr_ul = 0;
     };
     std::vector<DrbStat> drb_stats() const;
     const CuUpStats& stats() const noexcept { return stats_; }
@@ -105,6 +108,8 @@ private:
         std::uint32_t nru_sn = 0;
         std::uint64_t ul_packets = 0;   // P2 Q10: per DRB
         std::uint64_t dl_packets = 0;
+        std::uint64_t gfbr_dl = 0;      // P2 Q11: its GBR flows' (E1)
+        std::uint64_t gfbr_ul = 0;
     };
     struct Session {
         std::uint8_t psi = 1;

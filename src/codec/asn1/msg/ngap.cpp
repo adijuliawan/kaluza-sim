@@ -477,11 +477,26 @@ GtpTunnel read_gtp_tunnel(const json& j) {
 }
 
 json qos_params(const QosFlowRequest& f) {
-    return {{"qosCharacteristics", {{"nonDynamic5QI", {{"fiveQI", f.five_qi}}}}},
-            {"allocationAndRetentionPriority",
-             {{"priorityLevelARP", f.arp.priority},
-              {"pre-emptionCapability", f.arp.may_preempt ? "may-trigger-pre-emption" : "shall-not-trigger-pre-emption"},
-              {"pre-emptionVulnerability", f.arp.preemptable ? "pre-emptable" : "not-pre-emptable"}}}};
+    json j = {{"qosCharacteristics", {{"nonDynamic5QI", {{"fiveQI", f.five_qi}}}}},
+              {"allocationAndRetentionPriority",
+               {{"priorityLevelARP", f.arp.priority},
+                {"pre-emptionCapability", f.arp.may_preempt ? "may-trigger-pre-emption" : "shall-not-trigger-pre-emption"},
+                {"pre-emptionVulnerability", f.arp.preemptable ? "pre-emptable" : "not-pre-emptable"}}}};
+    if (const auto& g = f.gbr) {
+        // P2 Q11 (TS 38.413 9.3.1.10), in ASN.1 order.
+        json gbr = {{"maximumFlowBitRateDL", g->mfbr_dl},
+                    {"maximumFlowBitRateUL", g->mfbr_ul},
+                    {"guaranteedFlowBitRateDL", g->gfbr_dl},
+                    {"guaranteedFlowBitRateUL", g->gfbr_ul}};
+        if (g->notification_control) {
+            gbr["notificationControl"] = "notification-requested";
+        }
+        j["gBR-QosInformation"] = gbr;
+    }
+    if (f.reflective) {
+        j["reflectiveQosAttribute"] = "subject-to";
+    }
+    return j;
 }
 
 QosFlowRequest read_qos_flow(const json& j) {
@@ -493,8 +508,12 @@ QosFlowRequest read_qos_flow(const json& j) {
         throw jer::NotP1("a dynamic 5QI");
     }
     if (p.contains("gBR-QosInformation")) {
-        throw jer::NotP1("a GBR QoS flow");   // until P2 Q11 (KS-NGAP-D2)
+        const json& g = p.at("gBR-QosInformation");   // P2 Q11
+        f.gbr = Gbr{g.at("maximumFlowBitRateDL").get<std::uint64_t>(), g.at("maximumFlowBitRateUL").get<std::uint64_t>(),
+                    g.at("guaranteedFlowBitRateDL").get<std::uint64_t>(), g.at("guaranteedFlowBitRateUL").get<std::uint64_t>(),
+                    g.contains("notificationControl")};
     }
+    f.reflective = p.contains("reflectiveQosAttribute");
     f.five_qi = c.at("nonDynamic5QI").at("fiveQI").get<std::uint16_t>();
     const json& arp = p.at("allocationAndRetentionPriority");
     f.arp.priority = arp.at("priorityLevelARP").get<std::uint8_t>();
@@ -505,7 +524,9 @@ QosFlowRequest read_qos_flow(const json& j) {
 
 bool flows_ok(const std::vector<QosFlowRequest>& l) {
     return std::all_of(l.begin(), l.end(), [](const QosFlowRequest& f) {
-        return f.qfi <= 63 && f.five_qi <= 255 && f.arp.priority >= 1 && f.arp.priority <= 15;
+        // A GBR flow's guaranteed rate is at most its maximum (TS 23.501 5.7.2.5).
+        const bool gbr_ok = !f.gbr || (f.gbr->gfbr_dl <= f.gbr->mfbr_dl && f.gbr->gfbr_ul <= f.gbr->mfbr_ul);
+        return f.qfi <= 63 && f.five_qi <= 255 && f.arp.priority >= 1 && f.arp.priority <= 15 && gbr_ok;
     });
 }
 
@@ -550,6 +571,24 @@ Result<Bytes> encode_transfer(const SetupRequestTransfer& t) {
     return per_of<SetupRequestTransfer>(asn_DEF_NGAP_PDUSessionResourceSetupRequestTransfer, {{"protocolIEs", ies}});
 }
 
+json flows_with_cause(const std::vector<QosFlowCause>& l) {
+    json flows = json::array();
+    for (const auto& f : l) {
+        flows.push_back({{"qosFlowIdentifier", f.qfi}, {"cause", cause(f.cause)}});
+    }
+    return flows;
+}
+std::vector<QosFlowCause> read_flows_with_cause(const json& l) {
+    std::vector<QosFlowCause> out;
+    for (const auto& f : l) {
+        out.push_back(QosFlowCause{f.at("qosFlowIdentifier").get<std::uint8_t>(), read_cause(f.at("cause"))});
+    }
+    return out;
+}
+bool qfis_ok(const std::vector<QosFlowCause>& l) {
+    return std::all_of(l.begin(), l.end(), [](const QosFlowCause& f) { return f.qfi <= 63; });
+}
+
 Result<Bytes> encode_transfer(const SetupResponseTransfer& t) {
     if (t.qfis.empty()) {
         return bad("NGAP: a set-up session names its QoS flows");
@@ -562,6 +601,9 @@ Result<Bytes> encode_transfer(const SetupResponseTransfer& t) {
     if (t.security) {
         j["securityResult"] = {{"integrityProtectionResult", t.security->integrity ? "performed" : "not-performed"},
                                {"confidentialityProtectionResult", t.security->confidentiality ? "performed" : "not-performed"}};
+    }
+    if (!t.failed.empty()) {
+        j["qosFlowFailedToSetupList"] = flows_with_cause(t.failed);   // P2 Q11
     }
     return per_of<SetupResponseTransfer>(asn_DEF_NGAP_PDUSessionResourceSetupResponseTransfer, j);
 }
@@ -590,24 +632,6 @@ Result<Bytes> encode_transfer(const ModifyRequestTransfer& t) {
         ies.push_back(ie(kQosFlowToReleaseList, "reject", "QosFlowListWithCause", flows));
     }
     return per_of<ModifyRequestTransfer>(asn_DEF_NGAP_PDUSessionResourceModifyRequestTransfer, {{"protocolIEs", ies}});
-}
-
-json flows_with_cause(const std::vector<QosFlowCause>& l) {
-    json flows = json::array();
-    for (const auto& f : l) {
-        flows.push_back({{"qosFlowIdentifier", f.qfi}, {"cause", cause(f.cause)}});
-    }
-    return flows;
-}
-std::vector<QosFlowCause> read_flows_with_cause(const json& l) {
-    std::vector<QosFlowCause> out;
-    for (const auto& f : l) {
-        out.push_back(QosFlowCause{f.at("qosFlowIdentifier").get<std::uint8_t>(), read_cause(f.at("cause"))});
-    }
-    return out;
-}
-bool qfis_ok(const std::vector<QosFlowCause>& l) {
-    return std::all_of(l.begin(), l.end(), [](const QosFlowCause& f) { return f.qfi <= 63; });
 }
 
 Result<Bytes> encode_transfer(const ModifyResponseTransfer& t) {
@@ -716,6 +740,9 @@ Result<SetupResponseTransfer> decode_setup_response_transfer(ByteView in) {
             const json& s = j->at("securityResult");
             t.security = SecurityResult{s.at("integrityProtectionResult").get<std::string>() == "performed",
                                         s.at("confidentialityProtectionResult").get<std::string>() == "performed"};
+        }
+        if (j->contains("qosFlowFailedToSetupList")) {
+            t.failed = read_flows_with_cause(j->at("qosFlowFailedToSetupList"));
         }
         return t;
     });

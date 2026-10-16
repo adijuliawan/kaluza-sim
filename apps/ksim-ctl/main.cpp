@@ -22,6 +22,7 @@
 //     wait <event> … (any subject)      events …      metrics (P2 Q7: Prometheus text)
 //     gnb <name> ue-list | amf-list | ue-release <ue sel> [--cause C] | restart
 //     gnb <name> qos <ue sel> | qos-release <ue sel> --psi N --qfi N    (P2 Q10: DRBs; the gNB's own release)
+//     gnb <name> gbr-budget [kbps]                                      (P2 Q11: the cell's GBR budget)
 //     ue <sel> service-request [--wait DUR] | sim remove|insert | airplane on|off
 //     ue <sel> sms-send <digits> <text> [--ucs2] [--srr] [--vp N] | sms-list | sms-memory full|available
 //     ue <sel> register --update
@@ -32,7 +33,9 @@
 //     stub [release --ue SUPI --psi N [--cause C] | ping-ue --ue SUPI --psi N [--seq N]
 //           | deregister --ue SUPI [--rereg] | restart | t3512 --seconds N | sms-sub --ue SUPI [--off]
 //           | qos flows-add|add --qfi N --5qi N --precedence N --filter F [--direction D] [--ue SUPI --psi N]
-//           | qos flows-clear | qos del --ue SUPI --psi N --qfi N]                      (P2 Q10)
+//           | qos flows-clear | qos del --ue SUPI --psi N --qfi N                       (P2 Q10)
+//           | qos ... --gfbr K --mfbr K [--notify] | qos mod --ue SUPI --psi N --qfi N --5qi N
+//           | qos rq-timer --seconds N | udp-ue --ue SUPI --psi N [--src A] [--sport N] [--qfi N] [--rqi]]   (P2 Q11)
 //           (--socket <stub ctl>)
 //
 // <sel> is imsi-…, a farm index, a range of them (P2 Q7: 1-100), group:<name> or
@@ -201,7 +204,8 @@ Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
                                                  "seq", "seconds", "vp", "log", "netd", "parent", "addr", "ea", "ia",
                                                  "integrity", "confidentiality", "rate-ul", "rate-dl", "preferred-integrity",
                                                  "preferred-confidentiality", "absent-integrity", "absent-confidentiality",
-                                                 "integrity-possible", "qfi", "5qi", "precedence", "filter", "direction"};
+                                                 "integrity-possible", "qfi", "5qi", "precedence", "filter", "direction",
+                                                 "gfbr", "mfbr", "src", "sport"};
     Flags f;
     for (std::size_t i = from; i < args.size(); ++i) {
         const std::string& a = args[i];
@@ -718,10 +722,12 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
         // ksim-corestub (--socket): its report, or a network-side trigger for the gates.
         if (!f.words.empty() && (f.words[0] == "release" || f.words[0] == "ping-ue" || f.words[0] == "deregister" ||
                                  f.words[0] == "restart" || f.words[0] == "t3512" || f.words[0] == "sms-sub" ||
-                                 f.words[0] == "nas-alg" || f.words[0] == "up-policy" || f.words[0] == "qos")) {
+                                 f.words[0] == "nas-alg" || f.words[0] == "up-policy" || f.words[0] == "qos" ||
+                                 f.words[0] == "udp-ue")) {
             json body = json::object();
             for (const char* k : {"ue", "psi", "cause", "seq", "seconds", "ea", "ia", "integrity", "confidentiality",
-                                  "rate-ul", "rate-dl", "qfi", "5qi", "precedence", "filter", "direction"}) {
+                                  "rate-ul", "rate-dl", "qfi", "5qi", "precedence", "filter", "direction", "gfbr", "mfbr",
+                                  "src", "sport"}) {
                 if (f.has(k)) {
                     body[k] = f.get(k);
                 }
@@ -734,6 +740,11 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
             }
             if (f.words[0] == "qos") {
                 body["action"] = f.words.size() >= 2 ? f.words[1] : std::string();   // P2 Q10
+            }
+            for (const char* k : {"notify", "rqi"}) {   // P2 Q11: switches
+                if (f.has(k)) {
+                    body[k] = "1";
+                }
             }
             r = call(c, "POST", "/v1/stub/" + f.words[0], body);
         } else {
@@ -768,6 +779,13 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
                 }
             }
             r = call(c, "POST", "/v1/gnb/" + encode(f.words[0]) + "/up-policy", body);
+        } else if (f.words.size() >= 2 && f.words[1] == "gbr-budget") {
+            // P2 Q11: the cell's GBR budget in kbit/s (none: just read it).
+            json body = json::object();
+            if (f.words.size() >= 3) {
+                body["kbps"] = f.words[2];
+            }
+            r = call(c, "POST", "/v1/gnb/" + encode(f.words[0]) + "/gbr-budget", body);
         } else if (f.words.size() >= 3 && f.words[1] == "qos") {
             // P2 Q10: the UE's DRBs and the QFIs on each, as the CU-CP holds them.
             r = call(c, "GET", "/v1/gnb/" + encode(f.words[0]) + "/qos?ue=" + encode(f.words[2]));

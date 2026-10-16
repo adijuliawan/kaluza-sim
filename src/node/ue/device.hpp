@@ -110,6 +110,9 @@ public:
     /// P2 Q10: UL packets per (PSI, QFI) as the classifier sent them, and those no rule matched.
     const std::map<std::pair<std::uint8_t, std::uint8_t>, std::uint64_t>& ul_per_qfi() const noexcept { return ul_per_qfi_; }
     const std::map<std::uint8_t, std::uint64_t>& ul_unmatched() const noexcept { return ul_unmatched_; }
+    /// P2 Q11: DL packets taken per (PSI, QFI), and those discarded for an unknown QFI.
+    const std::map<std::pair<std::uint8_t, std::uint8_t>, std::uint64_t>& dl_per_qfi() const noexcept { return dl_per_qfi_; }
+    const std::map<std::uint8_t, std::uint64_t>& dl_unknown_qfi() const noexcept { return dl_unknown_qfi_; }
     /// `net`: the system's side of the TUN data plane (none: inject mode).
     UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::unique_ptr<uicc::os::Card> card,
              std::function<void(air::Frame)> to_air, const UeTaps& taps, IUeNet* net = nullptr);
@@ -212,6 +215,14 @@ private:
     /// NO-SUPI once a UICC is put back) with a valid USIM.
     void poll_registration(int left, proc::ue::MmState waiting = proc::ue::MmState::null);
     void on_dl_ip(std::uint8_t psi, Bytes packet);
+    // P2 Q11: the SDAP header's QFI and RQI first, then the packet.
+    void on_dl(std::uint8_t psi, std::optional<sdap::DlHeader> h, Bytes sdu);
+    static bool known_qfi(const proc::ue::SessionInfo& s, std::uint8_t qfi);
+    void udp_echo(std::uint8_t psi, const ip::Ipv4& p);
+    std::map<std::pair<std::uint8_t, std::uint8_t>, std::uint64_t> dl_per_qfi_;   // (PSI, QFI) -> packets taken
+    std::map<std::uint8_t, std::uint64_t> dl_unknown_qfi_;                       // by PSI: discarded
+    std::set<std::pair<std::uint8_t, std::uint8_t>> unknown_told_;               // (PSI, QFI) told of once
+    std::set<std::pair<std::uint8_t, std::uint8_t>> derived_classified_;         // (PSI, QFI) told of once
     void on_ul_ip(std::uint8_t psi, ByteView packet);
     /// Sends an uplink packet on its session's DRB; in 5GMM-IDLE it is held and
     /// a service request asks for the bearers (§5.6.1.1 d).

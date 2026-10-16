@@ -64,6 +64,9 @@ struct SmConfig {
     std::uint8_t ip_max_rate_ul = 0xFF;
     std::uint8_t ip_max_rate_dl = 0xFF;
     Millis default_backoff = 720'000;  // §6.4.1.4.3: 12 minutes with no SM Retry Timer configured
+    // P2 Q11 (TS 24.501 9.11.4.1): the 5GSM capability the establishment request carries, octet 3
+    // on; RqoS (bit 1) set by default, as the persona's phone sent it otherwise.
+    Bytes sm_capability{0x01};
 };
 
 struct SessionRequest {
@@ -85,6 +88,10 @@ struct SessionInfo {
     std::vector<std::uint8_t> qfis;    // every QoS rule's
     std::vector<nas::ie::QosRules::Rule> rules;   // P2 Q10: the signalled QoS rules, for the UL classifier
     std::map<std::uint8_t, std::uint16_t> flow_5qi;   // P2 Q10: the QoS flow descriptions (QFI -> 5QI; 0 when none given)
+    // P2 Q11 (TS 24.501 6.2.5.1.1.3, 6.2.5.1.4): the derived QoS rules (precedence 80, one UL
+    // filter each), and the RQ timer last received (none: T3583's default, 1 min).
+    std::vector<nas::ie::QosRules::Rule> derived;
+    std::optional<std::int64_t> rq_timer_ms;
     std::optional<std::uint64_t> ambr_dl_bps;
     std::optional<std::uint64_t> ambr_ul_bps;
 };
@@ -121,6 +128,11 @@ public:
     /// A back-off blocks a request for this DNN and S-NSSAI.
     bool backed_off(const std::string& dnn, const std::optional<nas::ie::Snssai>& snssai) const;
     bool running(std::uint8_t psi) const;   // T3580 or T3582 for the session
+    /// P2 Q11 (TS 24.501 6.2.5.1.4.3, .4): a DL user data packet with an RQI on QFI `qfi`
+    /// creates a derived QoS rule, or refreshes the one with its filter, and (re)starts its
+    /// T3583. False when the RQI is ignored (no RqoS offered, revoked, or no filter derivable).
+    bool reflect(std::uint8_t psi, std::uint8_t qfi, ByteView dl_packet);
+    bool reflective_qos() const noexcept { return !cfg_.sm_capability.empty() && (cfg_.sm_capability[0] & 0x01) != 0; }
 
 private:
     struct Proc {
@@ -135,6 +147,9 @@ private:
         std::optional<Proc> proc;
         std::vector<nas::ie::QosRules::Rule> rules;
         std::optional<std::uint8_t> released_pti;   // the PTI of the last accepted UE-requested release
+        std::vector<std::uint64_t> derived_keys;    // P2 Q11: info.derived's, in the same order
+        std::map<std::uint64_t, TimerId> t3583;     // by derived rule key
+        bool rq_revoked = false;                    // the RQ timer came as deactivated
     };
     struct Backoff {
         std::string timer;             // "T3396", "T3584", "T3585" or "back-off"
@@ -158,6 +173,9 @@ private:
     void set_state(Session& s, SmState to);
     bool apply_rules(Session& s, const nas::ie::QosRules& r, bool initial);
     void apply_flows(Session& s, const nas::ie::QosFlowDescriptions& d, bool initial);
+    void take_rq_timer(Session& s, const nas::Message& m);
+    void arm_t3583(Session& s, std::uint64_t key);
+    void drop_derived(Session& s);
     std::uint8_t next_pti();
 
     Executor& ex_;
@@ -169,6 +187,7 @@ private:
     std::map<std::uint8_t, Session> sessions_;     // by PSI, 1..15
     std::map<std::string, Backoff> backoffs_;      // by "<dnn>|<s-nssai>", either part "*"
     std::uint8_t pti_ = 0;
+    std::uint64_t derived_seq_ = 0;   // P2 Q11: derived rule keys, never reused
 };
 
 /// "01" or "01-000001": an S-NSSAI as events and ksim-ctl print it.

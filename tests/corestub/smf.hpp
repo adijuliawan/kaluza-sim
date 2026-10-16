@@ -49,6 +49,10 @@ struct FlowSpec {
     std::uint8_t direction = 3;    // TS 24.501 9.11.4.13: 1 downlink only, 2 uplink only, 3 bidirectional
     std::vector<nas::ie::QosRules::Component> components;
     std::string filter;            // the components as written (parse_filter)
+    // P2 Q11: a GBR flow's GFBR and MFBR in kbit/s, the same both ways, and notification control.
+    std::optional<std::uint64_t> gfbr_kbps;
+    std::optional<std::uint64_t> mfbr_kbps;
+    bool notification_control = false;
 };
 /// A packet filter written as comma-separated components (Table 9.11.4.13.1): all,
 /// remote=A.B.C.D[/N], local=A.B.C.D[/N], proto=N, lport=N, lports=N-M, rport=N,
@@ -88,6 +92,9 @@ struct SessionProfile {
     // P2 Q10: the flows every new session gets beside the default one
     // (flows: [{qfi, five_qi, precedence, direction, filter}]).
     std::vector<FlowSpec> flows;
+    // P2 Q11: the RQ timer the accept gives a UE that offered reflective QoS (TS 24.501 9.11.2.3,
+    // T3583); 0 sends none.
+    int rq_timer_s = 60;
 
     static SessionProfile from_yaml(const Yaml& y);
 };
@@ -125,6 +132,15 @@ public:
     /// one (not the default rule's); Errc::invalid_argument when the session cannot.
     Result<SmAction> qos_add(const std::string& supi, std::uint8_t psi, const FlowSpec& f);
     Result<SmAction> qos_del(const std::string& supi, std::uint8_t psi, std::uint8_t qfi);
+    /// P2 Q11: a flow's 5QI (and GBR rates) changed where it is: the flow description
+    /// modified, and the flow in the N2 add-or-modify list (the gNB may move it to another DRB).
+    Result<SmAction> qos_mod(const std::string& supi, std::uint8_t psi, std::uint8_t qfi, std::uint16_t five_qi,
+                             std::optional<std::uint64_t> gfbr_kbps, std::optional<std::uint64_t> mfbr_kbps);
+    /// P2 Q11: a UDP datagram from `from`:`sport` to the UE's echo port in this session, on
+    /// `qfi` (none: as the UPF classifies it) and with an RQI when asked.
+    Result<void> udp_ue(const std::string& supi, std::uint8_t psi, ip::Addr from, std::uint16_t sport,
+                        std::optional<std::uint8_t> qfi, bool rqi, std::uint16_t seq);
+    int rqos_sessions() const noexcept { return rqos_sessions_; }   // the UE offered reflective QoS
     /// The gNB's answer to a modification: the UPF takes the rules of the flows it set up.
     void on_modify_response(const std::string& supi, std::uint8_t psi, const ngap::ModifyResponseTransfer& t);
     void on_modify_failed(const std::string& supi, std::uint8_t psi);
@@ -170,6 +186,7 @@ public:
         };
         std::optional<Pending> modifying;
         int modifications = 0;                     // answered by the gNB
+        bool rqos = false;                         // P2 Q11: the request's 5GSM capability had RqoS
     };
     const Session* session(const std::string& supi, std::uint8_t psi) const;
     std::size_t sessions() const;
@@ -196,6 +213,7 @@ private:
     int rejected_ = 0;
     std::map<std::string, int> backoff_rejected_;   // by SUPI
     int completes_ = 0;
+    int rqos_sessions_ = 0;
     std::uint32_t fake_teid_ = 0x51000001;           // without a UPF
     std::function<void(const std::string&, std::uint8_t)> on_page_;
     std::vector<Verdict> verdicts_;

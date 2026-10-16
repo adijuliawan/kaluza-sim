@@ -119,12 +119,43 @@ ie::QosFlowDescriptions::Description create_flow(std::uint8_t qfi, std::uint16_t
     return {qfi, 1, true, {ie::QosFlowDescriptions::Parameter{1, Bytes{static_cast<std::uint8_t>(five_qi)}}}};
 }
 
+/// A bit rate as 9.11.4.12 writes it: a unit of Table 9.11.4.14.1 and two octets (P2 Q11).
+Bytes rate(std::uint64_t kbps) {
+    const bool mega = kbps > 0xFFFF;
+    const auto v = static_cast<std::uint16_t>(std::min<std::uint64_t>(mega ? kbps / 1000 : kbps, 0xFFFF));
+    return Bytes{static_cast<std::uint8_t>(mega ? 6 : 1), static_cast<std::uint8_t>(v >> 8), static_cast<std::uint8_t>(v)};
+}
+
+/// The flow description of `f`: its 5QI and, for a GBR flow, GFBR and MFBR both ways.
+ie::QosFlowDescriptions::Description describe(const FlowSpec& f, std::uint8_t operation = 1) {
+    auto d = create_flow(f.qfi, f.five_qi);
+    d.operation = operation;
+    if (f.gfbr_kbps && f.mfbr_kbps) {
+        for (std::uint8_t id : {std::uint8_t{2}, std::uint8_t{3}}) {
+            d.parameters.push_back(ie::QosFlowDescriptions::Parameter{id, rate(*f.gfbr_kbps)});
+        }
+        for (std::uint8_t id : {std::uint8_t{4}, std::uint8_t{5}}) {
+            d.parameters.push_back(ie::QosFlowDescriptions::Parameter{id, rate(*f.mfbr_kbps)});
+        }
+    }
+    return d;
+}
+
+/// The flow as N2 gives it to the gNB (TS 38.413 9.3.1.12; GBR: 9.3.1.10).
+ngap::QosFlowRequest n2_flow(const FlowSpec& f) {
+    ngap::QosFlowRequest q{f.qfi, f.five_qi, ngap::Arp{}, std::nullopt, false};
+    if (f.gfbr_kbps && f.mfbr_kbps) {
+        q.gbr = ngap::Gbr{*f.mfbr_kbps * 1000, *f.mfbr_kbps * 1000, *f.gfbr_kbps * 1000, *f.gfbr_kbps * 1000, f.notification_control};
+    }
+    return q;
+}
+
 } // namespace
 
 SessionProfile SessionProfile::from_yaml(const Yaml& y) {
     y.only({"establishment", "reject_cause", "backoff_s", "rejects", "dnns", "pool", "dns", "dn", "mtu", "qfi", "five_qi",
             "ambr_mbps", "default_rule", "up_integrity", "up_confidentiality", "up_rate_ul", "up_rate_dl",
-            "backoff_dnn", "backoff_dnn_s", "backoff_dnn_rejects", "flows"});
+            "backoff_dnn", "backoff_dnn_s", "backoff_dnn_rejects", "flows", "rq_timer_s"});
     SessionProfile p;
     const std::string e = y.get<std::string>("establishment", "accept");
     if (e == "accept") {
@@ -166,11 +197,12 @@ SessionProfile SessionProfile::from_yaml(const Yaml& y) {
     p.backoff_dnn = y.get<std::string>("backoff_dnn", p.backoff_dnn);
     p.backoff_dnn_s = y.get<int>("backoff_dnn_s", p.backoff_dnn_s);
     p.backoff_dnn_rejects = y.get<int>("backoff_dnn_rejects", p.backoff_dnn_rejects);
+    p.rq_timer_s = y.get<int>("rq_timer_s", p.rq_timer_s);
     if (y.has("flows")) {
         // P2 Q10: QoS flows beside the default one, with their rules.
         for (std::size_t i = 0; i < y.at("flows").size(); ++i) {
             const Yaml f = y.at("flows").at(i);
-            f.only({"qfi", "five_qi", "precedence", "direction", "filter"});
+            f.only({"qfi", "five_qi", "precedence", "direction", "filter", "gfbr_kbps", "mfbr_kbps", "notification_control"});
             FlowSpec spec;
             spec.qfi = static_cast<std::uint8_t>(f.at("qfi").as<int>());
             spec.five_qi = static_cast<std::uint16_t>(f.get<int>("five_qi", spec.five_qi));
@@ -183,6 +215,11 @@ SessionProfile SessionProfile::from_yaml(const Yaml& y) {
             }
             spec.direction = *d;
             spec.components = std::move(*c);
+            if (f.has("gfbr_kbps") || f.has("mfbr_kbps")) {   // P2 Q11: a GBR flow
+                spec.gfbr_kbps = f.at("gfbr_kbps").as<std::uint64_t>();
+                spec.mfbr_kbps = f.at("mfbr_kbps").as<std::uint64_t>();
+            }
+            spec.notification_control = f.get<bool>("notification_control", false);
             p.flows.push_back(std::move(spec));
         }
     }
@@ -405,10 +442,21 @@ std::vector<SmAction> Smf::on_establishment(const std::string& supi, std::uint8_
     if (snssai) {
         (void)nas::set(a, "S-NSSAI", snssai->encode());
     }
+    // P2 Q11 (TS 24.501 6.4.1.3, 9.11.2.3): the RQ timer for a UE that offered reflective QoS.
+    if (const Bytes* cap = nas::get(m, "5GSM capability"); cap != nullptr && !cap->empty() && ((*cap)[0] & 0x01) != 0) {
+        s.rqos = true;
+        ++rqos_sessions_;
+        if (p_.rq_timer_s > 0) {
+            const int t = p_.rq_timer_s;
+            const ie::GprsTimer rq = t % 2 == 0 && t / 2 <= 31 ? ie::GprsTimer{0, static_cast<std::uint8_t>(t / 2)}
+                                                              : ie::GprsTimer{1, static_cast<std::uint8_t>(std::min(31, (t + 59) / 60))};
+            (void)nas::set(a, "RQ timer value", rq.encode());
+        }
+    }
     ie::QosFlowDescriptions flows;
     flows.list.push_back(create_flow(p_.qfi, p_.five_qi));
     for (const auto& f : p_.flows) {
-        flows.list.push_back(create_flow(f.qfi, f.five_qi));
+        flows.list.push_back(describe(f));
     }
     if (auto f = flows.encode()) {
         (void)nas::set(a, "Authorized QoS flow descriptions", std::move(*f));
@@ -439,9 +487,9 @@ std::vector<SmAction> Smf::on_establishment(const std::string& supi, std::uint8_
         si.max_rate_dl = p_.up_rate_dl;
         item.transfer.security = si;
     }
-    item.transfer.flows = {ngap::QosFlowRequest{p_.qfi, p_.five_qi, ngap::Arp{}}};
+    item.transfer.flows = {ngap::QosFlowRequest{p_.qfi, p_.five_qi, ngap::Arp{}, std::nullopt, false}};
     for (const auto& f : p_.flows) {
-        item.transfer.flows.push_back(ngap::QosFlowRequest{f.qfi, f.five_qi, ngap::Arp{}});
+        item.transfer.flows.push_back(n2_flow(f));
     }
     s.setup = item;
     sessions_[{supi, psi}] = s;
@@ -684,7 +732,7 @@ Result<SmAction> Smf::qos_add(const std::string& supi, std::uint8_t psi, const F
     const ie::QosRules::Rule r = rule_of(s.next_rule++, f);
     p.rules.push_back(r);
     p.flows = now;
-    const ngap::QosFlowRequest flow{f.qfi, f.five_qi, ngap::Arp{}};
+    const ngap::QosFlowRequest flow = n2_flow(f);
     p.flows.push_back(flow);
     p.added = {f.qfi};
     ngap::ModifyRequestTransfer t;
@@ -692,8 +740,54 @@ Result<SmAction> Smf::qos_add(const std::string& supi, std::uint8_t psi, const F
     ie::QosRules rules;
     rules.list = {r};
     ie::QosFlowDescriptions flows;
-    flows.list = {create_flow(f.qfi, f.five_qi)};
+    flows.list = {describe(f)};
     return modification(s, std::move(p), std::move(t), rules, flows);
+}
+
+Result<SmAction> Smf::qos_mod(const std::string& supi, std::uint8_t psi, std::uint8_t qfi, std::uint16_t five_qi,
+                              std::optional<std::uint64_t> gfbr_kbps, std::optional<std::uint64_t> mfbr_kbps) {
+    auto it = sessions_.find({supi, psi});
+    if (it == sessions_.end() || !it->second.active || !it->second.setup) {
+        return make_error(Errc::invalid_argument, psi, "smf: no active session with that PSI");
+    }
+    Session& s = it->second;
+    if (s.modifying) {
+        return make_error(Errc::invalid_argument, psi, "smf: a modification of the session is on its way");
+    }
+    const auto& now = s.setup->transfer.flows;
+    const auto old = std::find_if(now.begin(), now.end(), [qfi](const auto& x) { return x.qfi == qfi; });
+    if (old == now.end()) {
+        return make_error(Errc::invalid_argument, qfi, "smf: no such QoS flow in the session");
+    }
+    FlowSpec f;
+    f.qfi = qfi;
+    f.five_qi = five_qi;
+    f.gfbr_kbps = gfbr_kbps;
+    f.mfbr_kbps = mfbr_kbps;
+    f.notification_control = old->gbr && old->gbr->notification_control;
+    Session::Pending p;
+    p.rules = s.rules;   // the rule stays: its QFI is the same
+    p.flows = now;
+    for (auto& x : p.flows) {
+        if (x.qfi == qfi) {
+            x = n2_flow(f);
+        }
+    }
+    p.added = {qfi};     // answered in the response's added-or-modified list
+    ngap::ModifyRequestTransfer t;
+    t.add_or_modify = {n2_flow(f)};
+    ie::QosFlowDescriptions flows;
+    flows.list = {describe(f, 3)};   // modify existing QoS flow description
+    return modification(s, std::move(p), std::move(t), ie::QosRules{}, flows);
+}
+
+Result<void> Smf::udp_ue(const std::string& supi, std::uint8_t psi, ip::Addr from, std::uint16_t sport,
+                         std::optional<std::uint8_t> qfi, bool rqi, std::uint16_t seq) {
+    const Session* s = session(supi, psi);
+    if (s == nullptr || upf_ == nullptr) {
+        return make_error(Errc::invalid_argument, psi, "smf: no such session, or no UPF");
+    }
+    return upf_->udp_ue(s->ul_teid, from, sport, qfi, rqi, seq);
 }
 
 Result<SmAction> Smf::qos_del(const std::string& supi, std::uint8_t psi, std::uint8_t qfi) {

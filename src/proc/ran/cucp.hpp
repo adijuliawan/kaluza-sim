@@ -61,6 +61,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "codec/asn1/msg/e1ap.hpp"
@@ -93,6 +94,10 @@ struct CuCpConfig {
     std::optional<int> t_reordering_ms;   // P2 Q8: the DRBs' t-Reordering (RRC and E1); absent: infinity
     UpPolicy up_policy;                   // P2 Q9: "preferred" and no Security Indication (proc/ran/up_security)
     DrbMap drb_map = DrbMap::per_5qi;     // P2 Q10
+    // P2 Q11 (ledger A-07): the cell's capacity for GBR flows, the GFBRs (UL plus DL) of the
+    // flows admitted; a GBR flow beyond it is refused, and flows it no longer covers are told
+    // to the AMF as not fulfilled (notification control).
+    std::uint64_t gbr_budget_bps = 100'000'000;
     // The UE Inactivity Timer E1 Bearer Context Setup gives the CU-UP with
     // ActivityNotificationLevel "ue" (P2 Q4, KS-E1AP-D1). From Q5 the CU-UP's
     // report releases the UE, so the default is the longest the IE allows: a run's
@@ -127,6 +132,11 @@ public:
     void set_up_policy(const UpPolicy& p) noexcept { cfg_.up_policy = p; }
     const UpPolicy& up_policy() const noexcept { return cfg_.up_policy; }
     DrbMap drb_map() const noexcept { return cfg_.drb_map; }
+    /// P2 Q11: the cell's GBR budget (bit/s, GFBR UL plus DL), changed at run time
+    /// (ksim-ctl gnb gbr-budget): the flows are reassessed and NOTIFY tells the changes.
+    void set_gbr_budget(std::uint64_t bps);
+    std::uint64_t gbr_budget() const noexcept { return cfg_.gbr_budget_bps; }
+    std::uint64_t gbr_used() const;
     /// `e1`: the CU-UP's association (none: sessions are refused).
     CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1, IAssoc* e1 = nullptr);
     ~CuCp();
@@ -149,6 +159,9 @@ public:
         bool default_drb = false;
         std::uint16_t five_qi = 9;
         std::vector<std::uint8_t> qfis;
+        std::uint64_t gfbr_dl = 0;   // P2 Q11: the DRB's GBR flows'
+        std::uint64_t gfbr_ul = 0;
+        std::vector<std::uint8_t> not_fulfilled;   // its GBR flows the budget no longer covers
     };
     std::vector<DrbView> drbs_of(std::uint32_t ran_ue, std::uint8_t psi) const;
     /// P2 Q10: the gNB releases one QoS flow of a session itself (E1, F1 and the UE
@@ -203,6 +216,7 @@ private:
             std::uint8_t id = 1;
             std::uint16_t five_qi = 9;                  // its flows' (per-5QI mapping)
             bool default_drb = false;
+            bool gbr = false;                           // P2 Q11: a GBR flow's own DRB
             std::vector<ngap::QosFlowRequest> flows;
             std::optional<e1ap::GtpTunnel> f1u_ul;      // the CU-UP's F1-U end
             std::optional<f1ap::DrbSetup> du;           // the DU's answer (F1-U DL end, LCID)
@@ -214,6 +228,7 @@ private:
             bool integrity = false;                     // P2 Q9: the UP security decision
             bool confidentiality = true;
             bool report = false;                        // a Security Result goes back
+            std::vector<ngap::QosFlowCause> refused;    // P2 Q11: GBR flows not admitted at setup
         };
         std::map<std::uint8_t, Session> sessions;       // set up, by PSI
         std::optional<std::uint32_t> cu_up_ue;
@@ -290,6 +305,11 @@ private:
     void job_done(Ue& ue);
     // P2 Q10
     bool one_drb() const;
+    // P2 Q11: GBR admission and its reassessment.
+    static std::uint64_t gbr_need(const ngap::QosFlowRequest& f);
+    bool admit(std::uint64_t used, const ngap::QosFlowRequest& f) const;
+    void reassess_gbr();
+    std::set<std::tuple<std::uint32_t, std::uint8_t, std::uint8_t>> not_fulfilled_;   // (CU UE, PSI, QFI)
     std::set<std::uint8_t> drbs_in_use(const Ue& ue) const;
     static std::optional<std::uint8_t> take_drb(std::set<std::uint8_t>& used);
     Ue::Drb* drb_for(Ue::Session& s, std::uint16_t five_qi) const;

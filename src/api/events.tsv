@@ -35,6 +35,7 @@ rrc.smc.complete	38.331 5.3.4.3	AS security active: SecurityModeComplete sent in
 rrc.smc.failure	38.331 5.3.4.3	SecurityModeFailure sent unprotected; reason
 rrc.reconfiguration.complete	38.331 5.3.5.3	RRCReconfiguration applied and RRCReconfigurationComplete sent; added (srb2, drb<n>), nas (messages forwarded)
 rrc.drb.remapped	38.331 5.3.5.6.5	the QoS flow mapping of a DRB the UE has changed by an RRCReconfiguration (P2 Q10; TS 37.324 5.3.1): drb, added (QFIs), released (QFIs)
+rrc.sdap.end_marker	37.324 5.3.1	an SDAP end-marker control PDU sent for a QoS flow whose UL mapping changed (P2 Q11; 5.3.2 for RDI): drb (where it went, the old or the default DRB), qfi
 rrc.reconfiguration.failure	38.331 5.3.5.8	an RRCReconfiguration the UE cannot comply with; what
 rrc.release	38.331 5.3.8.3	RRCRelease taken: RRC_IDLE
 rrc.capability.sent	38.331 5.6.1.3	UECapabilityInformation sent; octets (the UE-NR-Capability)
@@ -77,7 +78,7 @@ ran.rrc.integrity_failure	38.323 5.2.2.1	a PDCP integrity failure on a UE's SRB 
 ran.encode_error	sim	a message the RAN's builders refused (a sim bug); what
 nas.mm.transport.discard	24.501 5.4.5.3.3	a DL NAS TRANSPORT 5GMM does not pass on; payload_type, why
 nas.sm.state	24.501 6.1.3.2.1	a PDU session's 5GSM state change; psi, from, to (the spec's names)
-nas.sm.est.request	24.501 6.4.1.2	a PDU SESSION ESTABLISHMENT REQUEST sent; psi, pti, dnn, snssai, type
+nas.sm.est.request	24.501 6.4.1.2	a PDU SESSION ESTABLISHMENT REQUEST sent; psi, pti, dnn, snssai, type; P2 Q11: rqos=1|0 (the 5GSM capability's RqoS)
 nas.sm.est.accept	24.501 6.4.1.3	a PDU SESSION ESTABLISHMENT ACCEPT taken; psi, pti, dnn, snssai, type (the selected one), ip, dns, mtu, qfi (the default QoS rule's), ambr_dl, ambr_ul (bit/s)
 nas.sm.est.reject	24.501 6.4.1.4	a PDU SESSION ESTABLISHMENT REJECT taken; psi, pti, cause
 nas.sm.est.abort	24.501 6.4.1.6	an establishment given up: T3580 ran out the fifth time; psi, why
@@ -104,6 +105,7 @@ ran.cuup.bearer.setup	37.483 8.3.1	the CU-UP set up a session in a bearer contex
 ran.cuup.drb.setup	37.483 8.3.2.2	a DRB added to a PDU session by a bearer context modification (P2 Q10): cu_up_ue, psi, drb, qfis (count)
 ran.cuup.drb.remap	37.483 8.3.2.2	a DRB's QoS flows changed by a bearer context modification (Flow Mapping Information; P2 Q10): cu_up_ue, psi, drb, qfis (count)
 ran.cuup.drb.release	37.483 8.3.2.2	a DRB removed from a PDU session by a bearer context modification (P2 Q10): cu_up_ue, psi, drb
+ran.cuup.end_marker	37.324 6.2.3	an SDAP end-marker control PDU from the UE on a DRB (P2 Q11): cu_up_ue, psi, drb, qfi
 ran.cuup.bearer.release	37.483 8.3.4	the CU-UP released a session (modification) or a whole bearer context (release); cu_up_ue, psi (or all)
 ran.gtpu.error_indication	29.281 7.3.1	a GTP-U ERROR INDICATION sent or taken; direction=tx|rx, teid, from
 ran.up.security	38.413 8.2.1.2	the CU-CP's UP security decision for a session (TS 33.501 6.6.1; P2 Q9): ran_ue, psi, indication=present|absent (absent: the CU-CP's default policy), asked=<integrity>/<confidentiality> or -, integrity=0|1, confidentiality=0|1, result=set-up or the refusal's cause
@@ -112,9 +114,16 @@ ran.session.failure	38.413 8.2.1.2	sessions the gNB could not set up (answered a
 ran.session.release	38.413 8.2.2.2	a session's resources released at the CU-CP after the UE's reconfiguration; ran_ue, psi
 ran.session.modify	38.413 8.2.3.2	a PDU SESSION RESOURCE MODIFY done for a session (E1, F1 and the UE), or a QoS flow the gNB released itself (P2 Q10): ran_ue, psi, drbs (now), added (QFIs added or modified), released (QFIs), drbs_added, drbs_removed, failed (flows), by=amf|gnb
 ran.session.modify_failure	38.413 8.2.3.2	a modification the gNB could not make, answered as failed to modify (P2 Q10): ran_ue, cause
+ran.gbr.refused	38.413 8.2.1.2	a GBR QoS flow not admitted: the cell's GBR budget would not cover its GFBR (P2 Q11; 8.2.3.2 in a modification): ran_ue, psi, qfi, need (bit/s, UL plus DL), budget
+ran.gbr.budget	38.413 8.2.4	the cell's GBR budget changed (ksim-ctl gnb gbr-budget; P2 Q11): bps, used
+ran.gbr.fulfilment	38.413 8.2.4.2	a GBR flow's GFBR now covered or no longer covered by the budget (P2 Q11): ran_ue, psi, qfi, fulfilled=0|1, notification_control=0|1 (only those go to the AMF in NOTIFY)
 ue.netns.up	sim	the UE's namespace is made (ksim-netd: IPv6 off and ping_group_range set before any link is up, lo up); netns
 ue.qos.classified	24.501 6.2.5.1.1.2	the UE's first UL packet on a QoS rule (P2 Q10; TS 23.501 5.7.1.5): psi, rule (QRI), qfi, precedence, default=0|1
 ue.qos.unmatched	23.501 5.7.1.5	a UL packet that no QoS rule of the session matches, not sent; told once per session (P2 Q10): psi
+ue.qos.derived	24.501 6.2.5.1.4.3	a derived QoS rule created from a DL packet with an RQI, or its QFI changed (6.2.5.1.4.4; P2 Q11): psi, qfi, rule (the UE's key), new=1|0, timer_ms (T3583, when new)
+ue.qos.derived_expired	24.501 6.2.5.1.4.5	T3583 expired and the derived QoS rule went (P2 Q11): psi, qfi, rule
+ue.sdap.unknown_qfi	37.324 5.2.2	a DL packet with a QFI none of the session's rules, derived rules or flow descriptions names, discarded and counted; told once per QFI (P2 Q11, KS-SDAP-002): psi, qfi
+ue.udp.echoed	RFC 862	inject mode's UDP echo answered a datagram to the UE's port 7 (P2 Q11, the reflective QoS rows): psi, from, port (the far end's)
 ue.dataplane.up	sim	a PDU session's TUN is up in the UE's namespace; psi, ifname, ip, mtu, table, netns
 ue.dataplane.down	sim	a PDU session's TUN went with the session; psi, ifname
 ue.dataplane.error	sim	the UE's namespace or a session's TUN could not be made; psi, what

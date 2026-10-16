@@ -23,6 +23,12 @@
     - `add` and `del`, with `--ue SUPI --psi N`, change a live session by a network-requested modification (the 5GSM command inside a PDU SESSION RESOURCE MODIFY REQUEST).
     - F is comma-separated: `all`, `remote=A/N`, `local=A/N`, `proto=N`, `lport=N`, `lports=N-M`, `rport=N`, `rports=N-M`, `spi=N`, `tos=V/M`.
     - The stub's report shows `NOTIFIES` and the UPF's packets per QFI, `UPF_UL_QFI.n` and `UPF_DL_QFI.n`.
+  - P2 Q11 adds to `stub qos`:
+    - `--gfbr K --mfbr K [--notify]` for a GBR flow (kbit/s, the same both ways, notification control);
+    - `stub qos mod --ue SUPI --psi N --qfi N --5qi N` to change a flow where it is;
+    - `stub qos rq-timer --seconds N` for the RQ timer the next accepts give a UE that offered RqoS (0: none).
+  - `stub udp-ue --ue SUPI --psi N [--src A] [--sport N] [--qfi N] [--rqi]` (P2 Q11): a UDP datagram from the DN to the UE's port 7, which inject mode echoes. It goes on the QFI given, else as the UPF classifies it, with the RQI when asked.
+    - The report adds `UPF_UDP_TO_UE`, `UPF_UDP_FROM_UE`, `UPF_RQI_MARKED`, `SM_RQOS`, `NOTIFY_FULFILLED`, `NOTIFY_NOT_FULFILLED` and `SETUPS_WITH_REFUSED_FLOWS`.
 - **The run:** `--run D`, else `$KSIM_RUN`, else `$KSIM_RUNS/latest` (`runs/latest`); `--socket S` reaches any control socket, e.g. `ksim-corestub`'s, with `stub`.
 - **`ksim-sim`** (the offline card tool) has `range init|derive|provision|deprovision` (N8, N9) and, from N14:
   - `serve [--test-keys | --sealed D --kek F] [--imsi I] [--template Y] [--vpcd host:port] [--personality sysmoISIM-SJA5] [--trace-udp host:port] [--trace-pcap F] [--seconds N]`;
@@ -79,6 +85,13 @@ Group commands take `--stagger <ms>` and `--parallel <n>`, and print one block p
   - `ue <sel> ps-list`: the QoS rules (`PS.<psi>.RULES`, `PS.<psi>.RULE.<id>`), the flows' 5QI (`PS.<psi>.FLOW.<qfi>.5QI`), the uplink packets per QFI the classifier sent (`PS.<psi>.UL_QFI.<qfi>`) and those no rule matched (`PS.<psi>.UL_UNMATCHED`);
   - `cuup <name> bearers`: each DRB as `DRB.<cu-up ue>.<psi>.<drb>.QFIS|DEFAULT|UL_PACKETS|DL_PACKETS`, and `QFI.<n>.UL_PACKETS|DL_PACKETS`;
   - `du <name> ue-list`: each UE's DRBs as `UE.<c-rnti>.DRB.<drb>.LCID|QFIS`.
+- `ksim-ctl gnb <name> gbr-budget [kbps]` (P2 Q11) reads or sets the cell's GBR budget. The default comes from the topology's `cucp: {gbr_budget_kbps: N}`, 100000.
+  - A GBR flow over the budget is refused.
+  - A change notifies the AMF of the flows with notification control that are not fulfilled, or fulfilled again.
+- P2 Q11 adds to these views:
+  - `ue <sel> ps-list`: `PS.<psi>.DERIVED` (the derived QoS rules, with `.DERIVED.<n>.QFI`), `PS.<psi>.RQ_TIMER_MS`, `PS.<psi>.DL_QFI.<qfi>` and `PS.<psi>.DL_UNKNOWN_QFI`;
+  - `gnb <name> qos <ue>`: `GBR_BUDGET` and `GBR_USED` in bit/s, and per DRB `.GFBR` (DL/UL) and `.NOT_FULFILLED`;
+  - `cuup <name> bearers`: `END_MARKERS`, and `.GFBR` per DRB; `du <name> ue-list`: `.GFBR` per DRB.
 - `ksim-bench [--ms N] [--size BYTES] [--check <bounds.tsv>]` (P2 Q8), a separate binary: the user plane's per-packet costs in one process, as `BENCH.<case>.NS=` and `BENCH.<case>.MBITS=`.
   - It covers PDCP DRB pairs per algorithm, the AS contexts against one-shot calls, SDAP, and GTP-U N3 and NR-U.
   - With `--check` it prints `BENCH=PASS|FAIL` against the bounds. CI's hook 75 runs it from the release build.

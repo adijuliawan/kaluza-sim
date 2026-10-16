@@ -128,6 +128,8 @@ public:
     /// UE told of flows the gNB released (Smf::on_notify).
     Result<void> qos_add(std::uint8_t psi, const FlowSpec& f);
     Result<void> qos_del(std::uint8_t psi, std::uint8_t qfi);
+    Result<void> qos_mod(std::uint8_t psi, std::uint8_t qfi, std::uint16_t five_qi, std::optional<std::uint64_t> gfbr_kbps,
+                         std::optional<std::uint64_t> mfbr_kbps);   // P2 Q11
     void qos_released(std::uint8_t psi, const std::vector<std::uint8_t>& qfis);
     /// Network-initiated de-registration (§5.5.2.3.1) of a registered, connected UE.
     /// With a 5GMM cause when not 0 (§5.5.2.3.1). Also while a UE de-registration

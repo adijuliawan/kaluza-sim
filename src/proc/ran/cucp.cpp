@@ -1059,9 +1059,19 @@ namespace {
 constexpr std::uint8_t kMaxDrbId = 29;
 
 e1ap::QosFlow e1_flow(const ngap::QosFlowRequest& f) {
-    return {f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable};
+    std::optional<e1ap::Gbr> gbr;
+    if (f.gbr) {   // P2 Q11: the bit rates go on to the CU-UP as NGAP gave them
+        gbr = e1ap::Gbr{f.gbr->mfbr_dl, f.gbr->mfbr_ul, f.gbr->gfbr_dl, f.gbr->gfbr_ul};
+    }
+    return {f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable, gbr, f.reflective};
 }
-f1ap::Flow f1_flow(const ngap::QosFlowRequest& f) { return {f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable}; }
+f1ap::Flow f1_flow(const ngap::QosFlowRequest& f) {
+    std::optional<f1ap::Gbr> gbr;
+    if (f.gbr) {   // and to the DU, which schedules them (P2 Q11)
+        gbr = f1ap::Gbr{f.gbr->mfbr_dl, f.gbr->mfbr_ul, f.gbr->gfbr_dl, f.gbr->gfbr_ul};
+    }
+    return {f.qfi, f.five_qi, f.arp.priority, f.arp.may_preempt, f.arp.preemptable, gbr, f.reflective};
+}
 
 std::string qfi_list(const std::vector<std::uint8_t>& v) {
     std::string out;
@@ -1115,15 +1125,109 @@ std::optional<std::uint8_t> CuCp::take_drb(std::set<std::uint8_t>& used) {
 
 CuCp::Ue::Drb* CuCp::drb_for(Ue::Session& s, std::uint16_t five_qi) const {
     // Per 5QI: the DRB that carries that 5QI. On one DRB: the default DRB (or the first).
+    // A GBR flow's DRB is its own (P2 Q11): no other flow joins it.
     for (auto& d : s.drbs) {
-        if (one_drb() ? d.default_drb : d.five_qi == five_qi) {
+        if (!d.gbr && (one_drb() ? d.default_drb : d.five_qi == five_qi)) {
             return &d;
         }
     }
-    if (one_drb() && !s.drbs.empty()) {
-        return &s.drbs.front();
+    if (one_drb()) {
+        for (auto& d : s.drbs) {
+            if (!d.gbr) {
+                return &d;
+            }
+        }
     }
     return nullptr;
+}
+
+// ---- GBR admission (P2 Q11; ledger A-07) ----------------------------------------------------
+
+std::uint64_t CuCp::gbr_need(const ngap::QosFlowRequest& f) { return f.gbr ? f.gbr->gfbr_dl + f.gbr->gfbr_ul : 0; }
+
+bool CuCp::admit(std::uint64_t used, const ngap::QosFlowRequest& f) const {
+    // The mutant gbr_no_admission (row ksim-p2.gbr-refused): every GBR flow admitted.
+    return KSIM_MUTANT("gbr_no_admission") || used + gbr_need(f) <= cfg_.gbr_budget_bps;
+}
+
+std::uint64_t CuCp::gbr_used() const {
+    std::uint64_t n = 0;
+    for (const auto& [cu, ue] : ues_) {
+        for (const auto& [psi, s] : ue.sessions) {
+            for (const auto& f : s.item.transfer.flows) {
+                n += gbr_need(f);
+            }
+        }
+        if (!ue.jobs.empty()) {   // sessions being set up hold theirs already
+            for (const auto& [psi, s] : ue.jobs.front().pending) {
+                for (const auto& f : s.item.transfer.flows) {
+                    n += gbr_need(f);
+                }
+            }
+        }
+    }
+    return n;
+}
+
+void CuCp::set_gbr_budget(std::uint64_t bps) {
+    cfg_.gbr_budget_bps = bps;
+    events_.emit("ran.gbr.budget", cfg_.id, {{"bps", std::to_string(bps)}, {"used", std::to_string(gbr_used())}});
+    reassess_gbr();
+}
+
+void CuCp::reassess_gbr() {
+    // The GBR flows in the cell, in the order the CU-CP holds them, each fulfilled while the
+    // budget covers its GFBR beside those before it (TS 23.501 5.7.2.4, notification control).
+    std::uint64_t load = 0;
+    std::set<std::tuple<std::uint32_t, std::uint8_t, std::uint8_t>> now;
+    std::map<std::uint32_t, std::map<std::uint8_t, ngap::NotifyTransfer>> notes;
+    for (const auto& [cu, ue] : ues_) {
+        for (const auto& [psi, s] : ue.sessions) {
+            for (const auto& f : s.item.transfer.flows) {
+                if (!f.gbr) {
+                    continue;
+                }
+                const bool ok = load + gbr_need(f) <= cfg_.gbr_budget_bps;
+                if (ok) {
+                    load += gbr_need(f);
+                }
+                const auto key = std::tuple{cu, psi, f.qfi};
+                if (!ok) {
+                    now.insert(key);
+                }
+                if (ok == (not_fulfilled_.count(key) == 0)) {
+                    continue;
+                }
+                events_.emit("ran.gbr.fulfilment", cfg_.id,
+                             {{"ran_ue", str(ue.ran_ue)}, {"psi", str(psi)}, {"qfi", str(f.qfi)}, {"fulfilled", ok ? "1" : "0"},
+                              {"notification_control", f.gbr->notification_control ? "1" : "0"}});
+                if (f.gbr->notification_control) {
+                    notes[cu][psi].notify.push_back(ngap::NotifyTransfer::Notify{f.qfi, ok});
+                }
+            }
+        }
+    }
+    not_fulfilled_ = std::move(now);
+    // TS 38.413 8.2.4.2: PDU SESSION RESOURCE NOTIFY with the flows not fulfilled or fulfilled
+    // again (mutant notify_missing, row ksim-p2.gbr-notify).
+    if (KSIM_MUTANT("notify_missing")) {
+        return;
+    }
+    for (const auto& [cu, sessions] : notes) {
+        auto it = ues_.find(cu);
+        if (it == ues_.end()) {
+            continue;
+        }
+        const auto amf_ue = it->second.amf_ue;
+        if (!amf_ue) {
+            continue;
+        }
+        ngap::PduSessionResourceNotify n{*amf_ue, it->second.ran_ue, {}, {}};
+        for (const auto& [psi, t] : sessions) {
+            n.sessions.push_back(ngap::SessionNotify{psi, t});
+        }
+        send_ngap(n, it->second.ran_ue);
+    }
 }
 
 std::vector<CuCp::DrbView> CuCp::drbs_of(std::uint32_t ran_ue, std::uint8_t psi) const {
@@ -1137,9 +1241,16 @@ std::vector<CuCp::DrbView> CuCp::drbs_of(std::uint32_t ran_ue, std::uint8_t psi)
             break;
         }
         for (const auto& d : s->second.drbs) {
-            DrbView v{d.id, d.default_drb, d.five_qi, {}};
+            DrbView v{d.id, d.default_drb, d.five_qi, {}, 0, 0, {}};
             for (const auto& f : d.flows) {
                 v.qfis.push_back(f.qfi);
+                if (f.gbr) {
+                    v.gfbr_dl += f.gbr->gfbr_dl;
+                    v.gfbr_ul += f.gbr->gfbr_ul;
+                    if (not_fulfilled_.count(std::tuple{ue.cu_ue, psi, f.qfi}) != 0) {
+                        v.not_fulfilled.push_back(f.qfi);
+                    }
+                }
             }
             out.push_back(std::move(v));
         }
@@ -1192,6 +1303,7 @@ void CuCp::start_job(Ue& ue) {
         return;
     }
     std::set<std::uint8_t> used = drbs_in_use(ue);
+    std::uint64_t gbr_load = gbr_used();   // P2 Q11
     std::vector<e1ap::SessionToSetup> up;
     for (const auto& item : j.items) {
         if (ue.sessions.count(item.psi) != 0 || j.pending.count(item.psi) != 0) {
@@ -1218,9 +1330,28 @@ void CuCp::start_job(Ue& ue) {
         s.confidentiality = upd.confidentiality;
         s.report = upd.report;
         std::set<std::uint8_t> mine;
-        bool fit = !item.transfer.flows.empty();
-        for (const auto& f : item.transfer.flows) {
-            Ue::Drb* d = drb_for(s, f.five_qi);
+        // P2 Q11: a GBR flow is admitted against the cell's budget; one refused goes in the
+        // session's QoS Flow Failed to Setup List (TS 38.413 8.2.1.2), none left fails the session.
+        std::vector<ngap::QosFlowRequest> flows;
+        std::uint64_t mine_gbr = 0;
+        for (auto f : item.transfer.flows) {
+            if (KSIM_MUTANT("gbr_as_nongbr")) {
+                f.gbr.reset();   // the mutant (row ksim-p2.gbr-setup): a GBR flow taken as non-GBR
+            }
+            if (f.gbr && !admit(gbr_load + mine_gbr, f)) {
+                s.refused.push_back(ngap::QosFlowCause{f.qfi, ngap::Cause{"radioNetwork", "radio-resources-not-available"}});
+                events_.emit("ran.gbr.refused", cfg_.id,
+                             {{"ran_ue", str(ue.ran_ue)}, {"psi", str(item.psi)}, {"qfi", str(f.qfi)},
+                              {"need", std::to_string(gbr_need(f))}, {"budget", std::to_string(cfg_.gbr_budget_bps)}});
+                continue;
+            }
+            mine_gbr += gbr_need(f);
+            flows.push_back(f);
+        }
+        s.item.transfer.flows = flows;
+        bool fit = !flows.empty();
+        for (const auto& f : flows) {
+            Ue::Drb* d = f.gbr ? nullptr : drb_for(s, f.five_qi);
             if (d == nullptr) {
                 const auto id = take_drb(used);
                 if (!id) {
@@ -1231,11 +1362,15 @@ void CuCp::start_job(Ue& ue) {
                 Ue::Drb fresh;
                 fresh.id = *id;
                 fresh.five_qi = f.five_qi;
+                fresh.gbr = f.gbr.has_value();
                 fresh.default_drb = s.drbs.empty();
                 s.drbs.push_back(std::move(fresh));
                 d = &s.drbs.back();
             }
             d->flows.push_back(f);
+        }
+        if (fit) {
+            gbr_load += mine_gbr;
         }
         if (!fit) {
             for (std::uint8_t id : mine) {
@@ -1446,6 +1581,7 @@ void CuCp::handle(const f1ap::UeContextModificationResponse& m) {
 void CuCp::start_modify(Ue& ue) {
     Ue::Job& j = ue.jobs.front();
     std::set<std::uint8_t> used = drbs_in_use(ue);
+    std::uint64_t gbr_load = gbr_used();   // P2 Q11
     for (const auto& item : j.modify) {
         auto it = ue.sessions.find(item.psi);
         if (it == ue.sessions.end()) {
@@ -1492,13 +1628,32 @@ void CuCp::start_modify(Ue& ue) {
             }
         };
         for (std::uint8_t q : item.transfer.release) {
+            for (const auto& f : flows) {
+                if (f.qfi == q) {
+                    gbr_load -= std::min(gbr_load, gbr_need(f));   // P2 Q11: its GFBR is free again
+                }
+            }
             flows.erase(std::remove_if(flows.begin(), flows.end(), [q](const auto& f) { return f.qfi == q; }), flows.end());
             unmap(q);
         }
-        for (const auto& f : item.transfer.add_or_modify) {
+        for (auto f : item.transfer.add_or_modify) {
+            if (KSIM_MUTANT("gbr_as_nongbr")) {
+                f.gbr.reset();
+            }
             auto fl = std::find_if(flows.begin(), flows.end(), [&f](const auto& x) { return x.qfi == f.qfi; });
+            const std::uint64_t before = fl != flows.end() ? gbr_need(*fl) : 0;
+            // P2 Q11: a GBR flow added, or one asking a higher GFBR, is admitted against the budget.
+            if (gbr_need(f) > before && !admit(gbr_load - std::min(gbr_load, before), f)) {
+                c.failed.push_back(ngap::QosFlowCause{f.qfi, ngap::Cause{"radioNetwork", "radio-resources-not-available"}});
+                events_.emit("ran.gbr.refused", cfg_.id,
+                             {{"ran_ue", str(ue.ran_ue)}, {"psi", str(item.psi)}, {"qfi", str(f.qfi)},
+                              {"need", std::to_string(gbr_need(f))}, {"budget", std::to_string(cfg_.gbr_budget_bps)}});
+                continue;
+            }
             Ue::Drb* cur = drb_of(f.qfi);
-            if (fl != flows.end() && cur != nullptr && (one_drb() || cur->five_qi == f.five_qi)) {
+            const bool stays = fl != flows.end() && cur != nullptr && cur->gbr == f.gbr.has_value() &&
+                               (cur->gbr || one_drb() || cur->five_qi == f.five_qi);
+            if (stays) {
                 // Modified where it is: its QoS parameters change, its DRB stays.
                 *fl = f;
                 for (auto& x : cur->flows) {
@@ -1509,33 +1664,41 @@ void CuCp::start_modify(Ue& ue) {
                 if (!is_new(cur->id)) {
                     (void)c.remapped[cur->id];
                 }
+                gbr_load = gbr_load - std::min(gbr_load, before) + gbr_need(f);
                 c.ok.push_back(f.qfi);
                 continue;
+            }
+            // Where it goes: its 5QI's DRB, or a new one (a GBR flow's always its own). The
+            // DRB ID is found first, so a flow that cannot move stays where it was.
+            Ue::Drb* d = f.gbr ? nullptr : drb_for(c.after, f.five_qi);
+            std::optional<std::uint8_t> fresh_id;
+            if (d == nullptr) {
+                fresh_id = take_drb(used);
+                if (!fresh_id) {
+                    c.failed.push_back(ngap::QosFlowCause{f.qfi, ngap::Cause{"radioNetwork", "radio-resources-not-available"}});
+                    continue;
+                }
             }
             if (fl != flows.end()) {
                 flows.erase(fl);   // a new 5QI: the flow moves to that 5QI's DRB
             }
             unmap(f.qfi);
-            Ue::Drb* d = drb_for(c.after, f.five_qi);
-            if (d == nullptr) {
-                const auto id = take_drb(used);
-                if (!id) {
-                    c.failed.push_back(ngap::QosFlowCause{f.qfi, ngap::Cause{"radioNetwork", "radio-resources-not-available"}});
-                    continue;
-                }
+            if (fresh_id) {
                 Ue::Drb fresh;
-                fresh.id = *id;
+                fresh.id = *fresh_id;
                 fresh.five_qi = f.five_qi;
+                fresh.gbr = f.gbr.has_value();
                 fresh.default_drb = c.after.drbs.empty();
                 c.after.drbs.push_back(std::move(fresh));
-                c.added.push_back(*id);
-                d = find_drb(*id);
+                c.added.push_back(*fresh_id);
+                d = find_drb(*fresh_id);
             }
             d->flows.push_back(f);
             flows.push_back(f);
             if (!is_new(d->id)) {
                 c.remapped[d->id].first.push_back(f.qfi);
             }
+            gbr_load = gbr_load - std::min(gbr_load, before) + gbr_need(f);
             c.ok.push_back(f.qfi);
         }
         // A DRB left with no flow goes (TS 37.324 5.3: a DRB carries at least one).
@@ -1798,6 +1961,7 @@ void CuCp::job_done(Ue& ue) {
     ue.jobs.pop_front();
     if (j.kind == Ue::Job::Kind::modify) {
         modify_done(ue, std::move(j));
+        reassess_gbr();   // P2 Q11: GFBR freed or taken may change what others get
         start_job(ue);
         return;
     }
@@ -1837,6 +2001,7 @@ void CuCp::job_done(Ue& ue) {
             }
             send_ngap(ngap::PduSessionResourceReleaseResponse{*ue.amf_ue, ue.ran_ue, released}, ue.ran_ue);
         }
+        reassess_gbr();   // P2 Q11
         start_job(ue);
         return;
     }
@@ -1853,6 +2018,7 @@ void CuCp::job_done(Ue& ue) {
             // TS 38.413 8.2.1.2: what was done with a "preferred" (9.3.1.59).
             t.security = ngap::SecurityResult{s.integrity != KSIM_MUTANT("up_result_misreported"), s.confidentiality};
         }
+        t.failed = s.refused;   // P2 Q11: GBR flows not admitted
         ok.push_back(ngap::SessionSetupOk{psi, std::move(t)});
         events_.emit("ran.session.setup", cfg_.id,
                      {{"ran_ue", str(ue.ran_ue)}, {"psi", str(psi)}, {"drb", str(s.drbs.empty() ? 0 : s.drbs.front().id)},

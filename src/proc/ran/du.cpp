@@ -441,6 +441,10 @@ std::vector<f1ap::DrbSetup> Du::drbs_change(Ue& ue, const std::vector<f1ap::DrbT
         drb.sn_bits = d.dl_pdcp_sn_bits;
         for (const auto& f : d.flows) {
             drb.qfis.push_back(f.qfi);
+            if (f.gbr) {
+                drb.gfbr_dl += f.gbr->gfbr_dl;   // P2 Q11
+                drb.gfbr_ul += f.gbr->gfbr_ul;
+            }
         }
         const std::uint32_t du_ue = ue.du_ue;
         const std::uint8_t drb_id = drb.id;
@@ -673,7 +677,7 @@ std::vector<Du::DrbView> Du::drb_list() const {
     std::vector<DrbView> out;
     for (const auto& [id, ue] : ues_) {
         for (const auto& [d, drb] : ue.drbs) {
-            out.push_back(DrbView{ue.rnti, d, drb.lcid, drb.qfis});
+            out.push_back(DrbView{ue.rnti, d, drb.lcid, drb.qfis, drb.gfbr_dl, drb.gfbr_ul});
         }
     }
     return out;
@@ -704,8 +708,13 @@ void Du::handle(const f1ap::UeContextModificationRequest& m) {
             it->second.ul = d.ul;   // the CU-UP's end, as it was unless the CU-CP names another
         }
         it->second.qfis.clear();
+        it->second.gfbr_dl = it->second.gfbr_ul = 0;
         for (const auto& f : d.flows) {
             it->second.qfis.push_back(f.qfi);
+            if (f.gbr) {
+                it->second.gfbr_dl += f.gbr->gfbr_dl;
+                it->second.gfbr_ul += f.gbr->gfbr_ul;
+            }
         }
         modified.push_back(f1ap::DrbSetup{it->second.id, std::nullopt, f1ap::GtpTunnel{cfg_.f1u_addr, it->second.dl_teid}});
     }

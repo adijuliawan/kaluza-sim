@@ -48,7 +48,7 @@ TEST(F1apMsg, InputsOutOfRangeAreRefused) {
     UeContextModificationRequest m;
     m.cu_ue = 1;
     m.du_ue = 1;
-    m.drbs = {DrbToSetup{1, Snssai{1, std::nullopt}, {Flow{1, 9, 8, false, true}}, GtpTunnel{{127, 0, 0, 4}, 1}, 13, std::nullopt}};
+    m.drbs = {DrbToSetup{1, Snssai{1, std::nullopt}, {Flow{1, 9, 8, false, true, std::nullopt, false}}, GtpTunnel{{127, 0, 0, 4}, 1}, 13, std::nullopt}};
     EXPECT_FALSE(encode(m));   // P2 Q4: a PDCP SN is 12 or 18 bits
 }
 
@@ -58,7 +58,7 @@ TEST(F1apMsg, TheDrbItemCarriesItsPdcpSnLengths) {
     UeContextModificationRequest m;
     m.cu_ue = 1;
     m.du_ue = 2;
-    m.drbs = {DrbToSetup{4, Snssai{1, 0x000001}, {Flow{1, 9, 8, false, true}}, GtpTunnel{{127, 0, 0, 4}, 7}, 12, 18}};
+    m.drbs = {DrbToSetup{4, Snssai{1, 0x000001}, {Flow{1, 9, 8, false, true, std::nullopt, false}}, GtpTunnel{{127, 0, 0, 4}, 7}, 12, 18}};
     auto back = decode(*encode(m));
     ASSERT_TRUE(back);
     const auto& d = std::get<UeContextModificationRequest>(*back).drbs.at(0);

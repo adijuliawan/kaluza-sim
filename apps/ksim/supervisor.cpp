@@ -492,6 +492,7 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
     to("GET", "/v1/gnb/:name/ue-list", "cucp");
     to("GET", "/v1/gnb/:name/amf-list", "cucp");
     to("POST", "/v1/gnb/:name/up-policy", "cucp");   // P2 Q9
+    to("POST", "/v1/gnb/:name/gbr-budget", "cucp");   // P2 Q11
     to("GET", "/v1/du/:name/ue-list", "du");
     to("POST", "/v1/debug/stall", "du");   // P2 Q7: the DU's loop has timers that come due
     to("GET", "/v1/cuup/:name/bearers", "cuup");

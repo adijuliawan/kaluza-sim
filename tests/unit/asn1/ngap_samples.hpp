@@ -66,13 +66,13 @@ inline std::vector<Sample> all() {
     st.ul = GtpTunnel{{172, 30, 50, 2}, 0x00000101};
     st.type = "ipv4";
     st.security = SecurityIndication{"preferred", "required", "maximum-UE-rate", std::nullopt};   // UL as the encoder fills it
-    st.flows = {QosFlowRequest{1, 9, Arp{8, false, true}}};
+    st.flows = {QosFlowRequest{1, 9, Arp{8, false, true}, std::nullopt, false}};
     SessionSetupItem item{1, protected_nas, Snssai{1, 0x000001}, st};
     InitialContextSetupRequest ics_s = ics;
     ics_s.ue_ambr = Ambr{2'000'000'000, 1'000'000'000};
     ics_s.sessions = {SessionSetupItem{1, std::nullopt, Snssai{1, 0x000001}, st}};
     s.push_back({"InitialContextSetupRequest.sessions", ics_s});
-    const SetupResponseTransfer rt{GtpTunnel{{172, 30, 30, 31}, 0x10000001}, {1}, SecurityResult{false, true}};
+    const SetupResponseTransfer rt{GtpTunnel{{172, 30, 30, 31}, 0x10000001}, {1}, SecurityResult{false, true}, {}};
     s.push_back({"InitialContextSetupResponse", InitialContextSetupResponse{7, 1, {}, {}}});
     s.push_back({"InitialContextSetupResponse.sessions",
                  InitialContextSetupResponse{7, 1, {SessionSetupOk{1, rt}}, {SessionCause{2, Cause{"radioNetwork", "unspecified"}}}}});
@@ -84,6 +84,14 @@ inline std::vector<Sample> all() {
     s.push_back({"PDUSessionResourceSetupRequest.up-rates",
                  PduSessionResourceSetupRequest{7, 1, std::nullopt, {rated}, std::nullopt}});
     s.push_back({"PDUSessionResourceSetupResponse", PduSessionResourceSetupResponse{7, 1, {SessionSetupOk{1, rt}}, {}}});
+    // P2 Q11: a GBR flow the cell could not admit, in the session's failed-to-setup list.
+    SetupResponseTransfer gbr_refused = rt;
+    gbr_refused.failed = {QosFlowCause{3, Cause{"radioNetwork", "radio-resources-not-available"}}};
+    s.push_back({"PDUSessionResourceSetupResponse.gbr-refused",
+                 PduSessionResourceSetupResponse{7, 1, {SessionSetupOk{1, gbr_refused}}, {}}});
+    // P2 Q11: a GFBR not fulfilled any more (notification control).
+    s.push_back({"PDUSessionResourceNotify.not-fulfilled",
+                 PduSessionResourceNotify{7, 1, {SessionNotify{1, NotifyTransfer{{NotifyTransfer::Notify{3, false}}, {}}}}, {}}});
     s.push_back({"PDUSessionResourceSetupResponse.failed",
                  PduSessionResourceSetupResponse{7, 1, {}, {SessionCause{5, Cause{"radioNetwork", "multiple-PDU-session-ID-instances"}}}}});
     s.push_back({"PDUSessionResourceReleaseCommand",
@@ -91,7 +99,9 @@ inline std::vector<Sample> all() {
     s.push_back({"PDUSessionResourceReleaseResponse", PduSessionResourceReleaseResponse{7, 1, {1}}});
     ModifyRequestTransfer mt;
     mt.session_ambr = Ambr{500'000'000, 250'000'000};
-    mt.add_or_modify = {QosFlowRequest{2, 7, Arp{9, false, true}}};
+    mt.add_or_modify = {QosFlowRequest{2, 7, Arp{9, false, true}, std::nullopt, false},
+                        // P2 Q11: a GBR flow with notification control, subject to reflective QoS
+                        QosFlowRequest{3, 1, Arp{2, true, false}, Gbr{256'000, 128'000, 128'000, 64'000, true}, true}};
     mt.release = {3};
     s.push_back({"PDUSessionResourceModifyRequest",
                  PduSessionResourceModifyRequest{7, 1, {SessionModifyItem{1, protected_nas, mt}}}});

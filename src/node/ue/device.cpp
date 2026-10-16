@@ -3,6 +3,7 @@
 
 #include "node/ue/device.hpp"
 
+#include "platform/mutation.hpp"
 #include "proc/ue/qos_classifier.hpp"
 
 #include <fmt/format.h>
@@ -66,7 +67,7 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
         mm_->on_user_plane();
         flush_held();
     };
-    up.dl_data = [this](std::uint8_t psi, std::optional<sdap::DlHeader>, Bytes sdu) { on_dl_ip(psi, std::move(sdu)); };
+    up.dl_data = [this](std::uint8_t psi, std::optional<sdap::DlHeader> h, Bytes sdu) { on_dl(psi, h, std::move(sdu)); };
     rrc_ = std::make_unique<proc::ue::UeRrc>(ex_, Rng(cfg_.seed, {cfg_.index, 1}), events, rc, up, std::move(to_air));
     proc::ue::MmConfig mc;
     mc.id = subject;
@@ -106,6 +107,9 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
         sc.ip_max_rate_ul = (*cfg_.persona->integrity_max_data_rate)[0];   // P2 Q9: as the phone sent it
         sc.ip_max_rate_dl = (*cfg_.persona->integrity_max_data_rate)[1];
     }
+    if (cfg_.persona && cfg_.persona->sm_capability) {
+        sc.sm_capability = *cfg_.persona->sm_capability;   // P2 Q11: the 5GSM capability as the phone sent it
+    }
     proc::ue::SmUpper su;
     su.up = [this](const proc::ue::SessionInfo& s) { session_up(s); };
     su.down = [this](std::uint8_t psi) {
@@ -121,6 +125,16 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
         }
         unmatched_.erase(psi);
         ul_unmatched_.erase(psi);
+        for (auto it = dl_per_qfi_.begin(); it != dl_per_qfi_.end();) {   // P2 Q11
+            it = it->first.first == psi ? dl_per_qfi_.erase(it) : std::next(it);
+        }
+        for (auto it = unknown_told_.begin(); it != unknown_told_.end();) {
+            it = it->first == psi ? unknown_told_.erase(it) : std::next(it);
+        }
+        for (auto it = derived_classified_.begin(); it != derived_classified_.end();) {
+            it = it->first == psi ? derived_classified_.erase(it) : std::next(it);
+        }
+        dl_unknown_qfi_.erase(psi);
         session_down(psi);
     };
     sm_ = std::make_unique<proc::ue::Sm>(ex_, events, sc, [this](const proc::ue::SmUplink& u) { return mm_->send_sm(u); }, su);
@@ -562,6 +576,14 @@ std::optional<std::uint8_t> UeDevice::ul_qfi(const proc::ue::SessionInfo& s, Byt
         return s.default_qfi;
     }
     const auto* r = proc::ue::classify(s.rules, packet, proc::ue::QosDirection::uplink);
+    // P2 Q11 (TS 24.501 6.2.5.1.3): the derived rules too, at precedence 80, in their place.
+    bool derived = false;
+    if (!s.derived.empty() && (r == nullptr || r->precedence.value_or(256) > 80)) {
+        if (const auto* d = proc::ue::classify(s.derived, packet, proc::ue::QosDirection::uplink); d != nullptr) {
+            r = d;
+            derived = true;
+        }
+    }
     if (r == nullptr || !r->qfi) {
         if (unmatched_.insert(s.psi).second) {
             events_.emit("ue.qos.unmatched", subject(), {{"psi", std::to_string(s.psi)}});
@@ -569,14 +591,40 @@ std::optional<std::uint8_t> UeDevice::ul_qfi(const proc::ue::SessionInfo& s, Byt
         ++ul_unmatched_[s.psi];
         return std::nullopt;
     }
-    if (classified_.insert({s.psi, r->id}).second) {
+    if (derived ? derived_classified_.insert({s.psi, *r->qfi}).second : classified_.insert({s.psi, r->id}).second) {
         events_.emit("ue.qos.classified", subject(),
-                     {{"psi", std::to_string(s.psi)}, {"rule", std::to_string(r->id)}, {"qfi", std::to_string(*r->qfi)},
-                      {"precedence", r->precedence ? std::to_string(*r->precedence) : "-"},
+                     {{"psi", std::to_string(s.psi)}, {"rule", derived ? std::string("derived") : std::to_string(r->id)},
+                      {"qfi", std::to_string(*r->qfi)}, {"precedence", r->precedence ? std::to_string(*r->precedence) : "-"},
                       {"default", r->default_rule ? "1" : "0"}});
     }
     ++ul_per_qfi_[{s.psi, *r->qfi}];
     return r->qfi;
+}
+
+void UeDevice::udp_echo(std::uint8_t psi, const ip::Ipv4& p) {
+    // RFC 862 over UDP: a datagram to the UE's port 7 comes back to where it came from, with
+    // the ports swapped. Only in inject mode: with a TUN the namespace's stack has the packet.
+    const proc::ue::SessionInfo* s = sm_->session(psi);
+    if (s == nullptr || !s->ipv4 || p.dst != *s->ipv4 || p.payload.size() < 8 || p.payload[2] != 0 || p.payload[3] != 7) {
+        return;
+    }
+    ip::Ipv4 out;
+    out.id = p.id;
+    out.protocol = ip::kUdp;
+    out.src = p.dst;
+    out.dst = p.src;
+    out.payload = p.payload;
+    std::swap(out.payload[0], out.payload[2]);
+    std::swap(out.payload[1], out.payload[3]);
+    out.payload[6] = 0;   // no UDP checksum (RFC 768, IPv4)
+    out.payload[7] = 0;
+    const Bytes reply = ip::encode(out);
+    if (const auto qfi = ul_qfi(*s, reply); qfi && rrc_->send_data(psi, *qfi, reply)) {
+        ++ul_packets_;
+    }
+    events_.emit("ue.udp.echoed", subject(),
+                 {{"psi", std::to_string(psi)}, {"from", fmt::format("{}.{}.{}.{}", p.src[0], p.src[1], p.src[2], p.src[3])},
+                  {"port", std::to_string(p.payload[0] << 8 | p.payload[1])}});
 }
 
 bool UeDevice::send_ul(std::uint8_t psi, Bytes packet) {
@@ -714,6 +762,39 @@ void UeDevice::ping_done(const char* why) {
                   {"why", why}});
 }
 
+void UeDevice::on_dl(std::uint8_t psi, std::optional<sdap::DlHeader> h, Bytes sdu) {
+    const proc::ue::SessionInfo* s = sm_->session(psi);
+    if (h && s != nullptr) {
+        // P2 Q11: an RQI makes or refreshes a derived QoS rule (TS 24.501 6.2.5.1.4.3; mutant
+        // rqi_ignored, row ksim-p2.rqos-derived-rule) before the QFI is checked, since a derived
+        // rule is how the UE learns a QFI it was not told of.
+        if (h->rqi && !KSIM_MUTANT("rqi_ignored")) {
+            (void)sm_->reflect(psi, h->qfi, sdu);
+        }
+        // KS-SDAP-002: a QFI none of the session's rules, derived rules or flow descriptions
+        // names is discarded and counted (mutant unknown_qfi_accepted, row ksim-p2.unknown-qfi).
+        if (!known_qfi(*s, h->qfi) && !KSIM_MUTANT("unknown_qfi_accepted")) {
+            ++dl_unknown_qfi_[psi];
+            if (unknown_told_.insert({psi, h->qfi}).second) {
+                events_.emit("ue.sdap.unknown_qfi", subject(), {{"psi", std::to_string(psi)}, {"qfi", std::to_string(h->qfi)}});
+            }
+            return;
+        }
+        ++dl_per_qfi_[{psi, h->qfi}];
+    }
+    on_dl_ip(psi, std::move(sdu));
+}
+
+bool UeDevice::known_qfi(const proc::ue::SessionInfo& s, std::uint8_t qfi) {
+    if (s.rules.empty() || qfi == s.default_qfi || s.flow_5qi.count(qfi) != 0) {
+        return true;
+    }
+    const auto named = [qfi](const auto& rules) {
+        return std::any_of(rules.begin(), rules.end(), [qfi](const auto& r) { return r.qfi == qfi; });
+    };
+    return named(s.rules) || named(s.derived);
+}
+
 void UeDevice::on_dl_ip(std::uint8_t psi, Bytes packet) {
     ++dl_packets_;
     if (auto t = tuns_.find(psi); t != tuns_.end()) {
@@ -734,6 +815,10 @@ void UeDevice::on_dl_ip(std::uint8_t psi, Bytes packet) {
         }
     }
     auto p = ip::decode(packet);
+    if (p && p->protocol == ip::kUdp) {
+        udp_echo(psi, *p);   // P2 Q11: inject mode's UDP echo (port 7), for the reflective QoS rows
+        return;
+    }
     if (!p || p->protocol != ip::kIcmp) {
         return;
     }

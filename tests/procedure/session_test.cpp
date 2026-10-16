@@ -512,6 +512,146 @@ TEST(Session, APerSessionMappingPutsBothFlowsOnOneDrb) {
     EXPECT_EQ(n.failures(), "");
 }
 
+// ---- P2 Q11: reflective QoS, unknown QFIs, end-markers, GBR --------------------------------------
+
+corestub::FlowSpec gbr_flow(std::uint8_t qfi, std::uint64_t kbps, bool notify, const char* filter) {
+    corestub::FlowSpec f = flow(qfi, 1, 10, filter);   // 5QI 1, conversational voice (GBR)
+    f.gfbr_kbps = kbps;
+    f.mfbr_kbps = kbps * 2;
+    f.notification_control = notify;
+    return f;
+}
+
+std::uint64_t events_named(const Net& n, const char* name) { return n.named(name).size(); }
+
+// TS 24.501 6.2.5.1.4: the UE offers RqoS, takes the accept's RQ timer, derives a rule from a
+// UDP datagram with an RQI on QFI 2, replies on QFI 2 (the UPF checks it), and drops the rule
+// when T3583 expires.
+TEST(Session, Ts24501_6_2_5_1_4_AnRqiPacketDerivesARuleItsReplyRidesAndT3583RemovesIt) {
+    corestub::Profile p;
+    p.session.rq_timer_s = 4;
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    EXPECT_EQ(n.amf.smf().rqos_sessions(), 1);
+    EXPECT_EQ(*n.last("nas.sm.est.request")->find("rqos"), "1");
+    ASSERT_TRUE(n.ue->sessions().at(0).rq_timer_ms);
+    EXPECT_EQ(*n.ue->sessions().at(0).rq_timer_ms, 4'000);
+    ASSERT_TRUE(n.amf.smf().udp_ue(kSupi, 1, {10, 60, 0, 9}, 40001, std::uint8_t{2}, true, 1));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.upf()->stats().udp_from_ue == 1; }, n.loop.now() + 2'000)) << n.failures();
+    ASSERT_EQ(n.ue->sessions().at(0).derived.size(), 1u);
+    EXPECT_EQ(n.ue->sessions().at(0).derived.at(0).precedence, std::optional<std::uint8_t>(80));
+    EXPECT_EQ(ul_on(n, 2), 1u);
+    EXPECT_EQ(n.amf.upf()->stats().ul_per_qfi.at(2), 1u);
+    EXPECT_EQ(*n.last("ue.qos.derived")->find("new"), "1");
+    ASSERT_TRUE(n.loop.run_until([&] { return events_named(n, "ue.qos.derived_expired") == 1; }, n.loop.now() + 6'000));
+    EXPECT_TRUE(n.ue->sessions().at(0).derived.empty());
+    EXPECT_EQ(n.failures(), "");
+}
+
+// KS-SDAP-002: a DL packet on a QFI the UE was never told of, and with no RQI, is discarded
+// and counted; nothing comes back.
+TEST(Session, AnUnknownDownlinkQfiIsDiscardedAndCounted) {
+    Net n;
+    n.register_ue();
+    n.establish();
+    ASSERT_TRUE(n.amf.smf().udp_ue(kSupi, 1, {10, 60, 0, 9}, 40002, std::uint8_t{9}, false, 1));
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("ue.sdap.unknown_qfi").empty(); }, n.loop.now() + 2'000));
+    n.loop.run_until([] { return false; }, n.loop.now() + 300);
+    EXPECT_EQ(n.ue->dl_unknown_qfi().at(1), 1u);
+    EXPECT_EQ(n.amf.upf()->stats().udp_from_ue, 0u);
+    EXPECT_EQ(n.failures(), "");
+}
+
+// TS 37.324 5.3.1: QFI 2 leaves DRB 2 (a modification gives it 5QI 9) while QFI 3 keeps it;
+// the UE sends an end-marker for QFI 2 on DRB 2.
+TEST(Session, Ts37324_5_3_1_AFlowMovedToAnotherDrbLeavesAnEndMarker) {
+    corestub::Profile p;
+    p.session.flows = {flow(2, 7, 10, "remote=10.60.0.9/32"), flow(3, 7, 11, "remote=10.60.0.8/32")};
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    const std::uint32_t ran = n.amf.ids(0)->ran;
+    ASSERT_EQ(n.cucp.drbs_of(ran, 1).size(), 2u);
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 9}));   // QFI 2 on DRB 2
+    ASSERT_TRUE(n.amf.nas()->qos_mod(1, 2, 9, std::nullopt, std::nullopt));
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.count("PDUSessionResourceModifyResponse") == 1; }, n.loop.now() + 5'000))
+        << n.failures();
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("ran.cuup.end_marker").empty(); }, n.loop.now() + 2'000));
+    const Event* e = n.last("ran.cuup.end_marker");
+    EXPECT_EQ(*e->find("drb"), "2");
+    EXPECT_EQ(*e->find("qfi"), "2");
+    const auto drbs = n.cucp.drbs_of(ran, 1);
+    ASSERT_EQ(drbs.size(), 2u);
+    EXPECT_EQ(drbs[0].qfis, (std::vector<std::uint8_t>{1, 2}));
+    EXPECT_EQ(drbs[1].qfis, std::vector<std::uint8_t>{3});
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 9}));   // now on DRB 1
+    EXPECT_EQ(n.failures(), "");
+}
+
+// TS 38.413 8.2.1.2, 9.3.1.10: a GBR flow gets a DRB of its own; its GFBR reaches the CU-UP
+// over E1 and the DU over F1.
+TEST(Session, Ts38413_9_3_1_10_AGbrFlowGetsItsOwnDrbWithItsBitRates) {
+    corestub::Profile p;
+    p.session.flows = {gbr_flow(2, 1000, false, "remote=10.60.0.9/32")};
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    const auto drbs = n.cucp.drbs_of(n.amf.ids(0)->ran, 1);
+    ASSERT_EQ(drbs.size(), 2u);
+    EXPECT_EQ(drbs[1].qfis, std::vector<std::uint8_t>{2});
+    EXPECT_EQ(drbs[1].gfbr_dl, 1'000'000u);
+    bool cuup = false;
+    for (const auto& d : n.cuup.drb_stats()) {
+        cuup = cuup || (d.drb == drbs[1].drb_id && d.gfbr_ul == 1'000'000u);
+    }
+    EXPECT_TRUE(cuup);
+    bool du = false;
+    for (const auto& d : n.du.drb_list()) {
+        du = du || (d.drb == drbs[1].drb_id && d.gfbr_dl == 1'000'000u);
+    }
+    EXPECT_TRUE(du);
+    EXPECT_EQ(n.cucp.gbr_used(), 2'000'000u);
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 9}));
+    EXPECT_EQ(ul_on(n, 2), 2u);
+    EXPECT_EQ(n.failures(), "");
+}
+
+// A GBR flow over the cell's budget is refused in the session's failed-to-setup list, the
+// session set up without it, and the SMF has the UE delete its rule.
+TEST(Session, Ts38413_8_2_1_2_AGbrFlowOverTheBudgetIsRefusedAndItsRuleGoes) {
+    const ScopedCuCp small([](proc::ran::CuCpConfig& c) { c.gbr_budget_bps = 1'000'000; });
+    corestub::Profile p;
+    p.session.flows = {gbr_flow(2, 1000, false, "remote=10.60.0.9/32")};   // 2 Mbit/s with UL
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    EXPECT_EQ(n.cucp.drbs_of(n.amf.ids(0)->ran, 1).size(), 1u);
+    EXPECT_EQ(n.amf.refused_flows(), 1u);
+    EXPECT_FALSE(n.named("ran.gbr.refused").empty());
+    ASSERT_TRUE(n.loop.run_until([&] { return n.ue->sessions().at(0).rules.size() == 1; }, n.loop.now() + 2'000));
+    ASSERT_TRUE(ping_once(n, {10, 60, 0, 9}));   // the default rule's now
+    EXPECT_EQ(ul_on(n, 1), 2u);
+    EXPECT_EQ(n.failures(), "");
+}
+
+// TS 38.413 8.2.4.2: with notification control, a budget lowered under the flow's GFBR is
+// notified as not fulfilled, and raised again as fulfilled.
+TEST(Session, Ts38413_8_2_4_2_AGfbrNoLongerCoveredIsNotifiedThenFulfilledAgain) {
+    corestub::Profile p;
+    p.session.flows = {gbr_flow(2, 1000, true, "remote=10.60.0.9/32")};
+    Net n(p);
+    n.register_ue();
+    n.establish();
+    n.cucp.set_gbr_budget(1'000'000);
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.notify_not_fulfilled() == 1; }, n.loop.now() + 2'000)) << n.failures();
+    EXPECT_EQ(n.cucp.drbs_of(n.amf.ids(0)->ran, 1).at(1).not_fulfilled, std::vector<std::uint8_t>{2});
+    n.cucp.set_gbr_budget(100'000'000);
+    ASSERT_TRUE(n.loop.run_until([&] { return n.amf.notify_fulfilled() == 1; }, n.loop.now() + 2'000));
+    EXPECT_TRUE(n.cucp.drbs_of(n.amf.ids(0)->ran, 1).at(1).not_fulfilled.empty());
+    EXPECT_EQ(n.failures(), "");
+}
+
 TEST(Session, Ts38413_8_2_1_ADuplicatePsiIsRefusedByTheGnb) {
     Net n;
     n.register_ue();

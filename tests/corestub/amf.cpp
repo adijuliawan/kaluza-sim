@@ -1212,6 +1212,19 @@ Result<void> Amf::qos_del(std::uint8_t psi, std::uint8_t qfi) {
     return {};
 }
 
+Result<void> Amf::qos_mod(std::uint8_t psi, std::uint8_t qfi, std::uint16_t five_qi, std::optional<std::uint64_t> gfbr_kbps,
+                          std::optional<std::uint64_t> mfbr_kbps) {
+    if (smf_ == nullptr || state_ != State::registered) {
+        return make_error(Errc::invalid_argument, psi, "amf: the UE is not registered");
+    }
+    auto a = smf_->qos_mod(supi_, psi, qfi, five_qi, gfbr_kbps, mfbr_kbps);
+    if (!a) {
+        return a.error();
+    }
+    sm_actions({std::move(*a)});
+    return {};
+}
+
 void Amf::qos_released(std::uint8_t psi, const std::vector<std::uint8_t>& qfis) {
     if (smf_ == nullptr) {
         return;

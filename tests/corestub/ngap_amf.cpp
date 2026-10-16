@@ -563,6 +563,19 @@ void NgapAmf::on_message(ByteView msg) {
                            }
                            check(!s.transfer.qfis.empty(), "TS 38.413 9.3.4.2", "the gNB set up the session's QoS flow");
                            smf_.on_setup_response(supi, s.psi, s.transfer.dl);
+                           if (!s.transfer.failed.empty()) {
+                               // P2 Q11 (TS 23.502 4.3.2.2.1): flows the gNB could not admit; the SMF has
+                               // the UE delete their rules. A GBR admission refusal is the only one expected.
+                               std::vector<std::uint8_t> qfis;
+                               qfis.reserve(s.transfer.failed.size());
+                               for (const auto& f : s.transfer.failed) {
+                                   check(f.cause.value == "radio-resources-not-available", "TS 38.413 8.2.1.2",
+                                         "a flow not set up is refused for radio resources", f.cause.group + "/" + f.cause.value);
+                                   qfis.push_back(f.qfi);
+                               }
+                               ++refused_flows_;
+                               ue->nas->qos_released(s.psi, qfis);
+                           }
                        }
                        for (const auto& f : m.failed) {
                            // P2 Q9: TS 38.413 8.2.1.2, a "required" UP security the gNB cannot
@@ -609,6 +622,9 @@ void NgapAmf::on_message(ByteView msg) {
                        }
                        ++notifies_;
                        for (const auto& s : m.sessions) {
+                           for (const auto& n : s.transfer.notify) {   // P2 Q11: GFBR not fulfilled / fulfilled again
+                               ++(n.fulfilled ? notify_fulfilled_ : notify_not_fulfilled_);
+                           }
                            std::vector<std::uint8_t> qfis;
                            qfis.reserve(s.transfer.released.size());
                            for (const auto& f : s.transfer.released) {

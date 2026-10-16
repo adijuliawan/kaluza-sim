@@ -28,7 +28,7 @@ void Upf::check(bool ok, const char* clause, const char* what, std::string detai
 
 std::uint32_t Upf::open(ip::Addr ue, std::uint8_t qfi) {
     const std::uint32_t teid = gtpu_.bind([this](const entity::gtpu::UserData& d, const ksim::Endpoint&) { on_ul(d.teid, d); });
-    tunnels_[teid] = Tunnel{ue, qfi, std::nullopt, {}, {}};
+    tunnels_[teid] = Tunnel{ue, qfi, std::nullopt, {}, {}, {}};
     return teid;
 }
 
@@ -56,7 +56,7 @@ void Upf::close(std::uint32_t ul_teid) {
     tunnels_.erase(ul_teid);
 }
 
-void Upf::send_dl(Tunnel& t, Bytes packet) {
+void Upf::send_dl(Tunnel& t, Bytes packet, std::optional<std::uint8_t> qfi_override, bool rqi) {
     if (!t.dl) {
         // Deactivated: held, and the first one reported so the UE is paged.
         const bool first = t.held.empty();
@@ -80,8 +80,12 @@ void Upf::send_dl(Tunnel& t, Bytes packet) {
     if (const auto* r = proc::ue::classify(t.rules, packet, proc::ue::QosDirection::downlink); r != nullptr && r->qfi) {
         qfi = *r->qfi;
     }
+    qfi = qfi_override.value_or(qfi);   // P2 Q11: a test's own marking
     ++stats_.dl_per_qfi[qfi];
-    const auto d = entity::gtpu::UserData::dl_psc(t.dl->teid, qfi, std::move(packet));
+    if (rqi) {
+        ++stats_.rqi_marked;
+    }
+    const auto d = entity::gtpu::UserData::dl_psc(t.dl->teid, qfi, std::move(packet), rqi);
     if (gtpu_.send(ksim::Endpoint::v4(a[0], a[1], a[2], a[3], port_), d)) {
         ++stats_.dl_packets;
     }
@@ -104,7 +108,19 @@ void Upf::on_ul(std::uint32_t teid, const entity::gtpu::UserData& d) {
     check(d.ul_qfi.has_value(), "TS 38.415 5.5.2.2", "an uplink G-PDU carries a UL PDU SESSION INFORMATION frame");
     if (d.ul_qfi) {
         ++stats_.ul_per_qfi[*d.ul_qfi];
-        if (t.rules.empty()) {
+        // P2 Q11: a reply to a datagram sent with the RQI goes on its QFI (the UE's derived rule).
+        std::optional<std::uint8_t> reflected;
+        if (auto ip4 = ip::decode(d.payload); ip4 && ip4->protocol == ip::kUdp && ip4->payload.size() >= 8) {
+            ++stats_.udp_from_ue;
+            const auto dport = static_cast<std::uint16_t>(ip4->payload[2] << 8 | ip4->payload[3]);
+            if (auto r = t.reflected.find({ip4->dst, dport}); r != t.reflected.end()) {
+                reflected = r->second;
+            }
+        }
+        if (reflected) {
+            check(*d.ul_qfi == *reflected, "TS 24.501 6.2.5.1.4.3", "the reply to an RQI packet goes on its QFI",
+                  std::to_string(*d.ul_qfi) + " for " + std::to_string(*reflected));
+        } else if (t.rules.empty()) {
             check(*d.ul_qfi == t.qfi, "TS 38.415 5.5.3.3", "the uplink QFI is the session's", std::to_string(*d.ul_qfi));
         } else {
             // P2 Q10: the QFI of the QoS rule the packet matches (TS 23.501 5.7.1.5, 24.501 6.2.5.1.1.2).
@@ -143,6 +159,34 @@ void Upf::on_ul(std::uint32_t teid, const entity::gtpu::UserData& d) {
     out.payload = ip::encode_icmp(reply);
     ++stats_.echo_replies;
     send_dl(tt, ip::encode(out));
+}
+
+Result<void> Upf::udp_ue(std::uint32_t ul_teid, ip::Addr from, std::uint16_t sport, std::optional<std::uint8_t> qfi, bool rqi,
+                         std::uint16_t seq) {
+    auto it = tunnels_.find(ul_teid);
+    if (it == tunnels_.end()) {
+        return make_error(Errc::invalid_argument, ul_teid, "upf: no such session");
+    }
+    Tunnel& t = it->second;
+    ip::Ipv4 p;
+    p.id = seq;
+    p.ttl = 63;
+    p.protocol = ip::kUdp;
+    p.src = from;
+    p.dst = t.ue;
+    p.payload = {static_cast<std::uint8_t>(sport >> 8), static_cast<std::uint8_t>(sport), 0, 7, 0, 14, 0, 0,
+                 'k', 's', 'i', 'm', static_cast<std::uint8_t>(seq >> 8), static_cast<std::uint8_t>(seq)};
+    const Bytes packet = ip::encode(p);
+    if (rqi) {
+        std::uint8_t q = t.qfi;
+        if (const auto* r = proc::ue::classify(t.rules, packet, proc::ue::QosDirection::downlink); r != nullptr && r->qfi) {
+            q = *r->qfi;
+        }
+        t.reflected[{from, sport}] = qfi.value_or(q);
+    }
+    ++stats_.udp_to_ue;
+    send_dl(t, packet, qfi, rqi);
+    return {};
 }
 
 Result<void> Upf::ping_ue(std::uint32_t ul_teid, ip::Addr from, std::uint16_t seq) {

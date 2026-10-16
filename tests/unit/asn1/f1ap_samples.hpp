@@ -59,7 +59,7 @@ inline std::vector<Sample> all() {
     s.push_back({"UEContextSetupRequest", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {}, std::nullopt}});
     s.push_back({"UEContextSetupResponse", UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {}}});
     // P1 N10: DRBs, the CU-UP's F1-U end up, the DU's down.
-    const DrbToSetup drb{1, Snssai{1, 0x000001}, {Flow{1, 9, 8, false, true}}, GtpTunnel{{127, 0, 0, 4}, 0x20000001}, 18, 12};
+    const DrbToSetup drb{1, Snssai{1, 0x000001}, {Flow{1, 9, 8, false, true, std::nullopt, false}}, GtpTunnel{{127, 0, 0, 4}, 0x20000001}, 18, 12};
     s.push_back({"UEContextSetupRequest.drbs", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {drb}, std::nullopt}});
     s.push_back({"UEContextSetupResponse.drbs",
                  UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {DrbSetup{1, 4, GtpTunnel{{127, 0, 0, 3}, 0x30000001}}}}});
@@ -68,13 +68,14 @@ inline std::vector<Sample> all() {
     s.push_back({"UEContextModificationResponse", UeContextModificationResponse{7, 1, cell_group, {}, {}}});
     DrbToSetup drb2 = drb;
     drb2.drb_id = 2;
-    drb2.flows = {Flow{1, 5, 1, false, false}, Flow{2, 9, 8, false, true}};
+    drb2.flows = {Flow{1, 5, 1, false, false, std::nullopt, false}, Flow{2, 9, 8, false, true, std::nullopt, false},
+                  Flow{3, 1, 2, true, false, Gbr{256000, 128000, 128000, 64000}, true}};   // P2 Q11: GBR, reflective
     s.push_back({"UEContextModificationRequest.drbs", UeContextModificationRequest{7, 1, {}, {drb2}, {1}, std::nullopt, {}}});
     s.push_back({"UEContextModificationResponse.drbs",
                  UeContextModificationResponse{7, 1, cell_group, {DrbSetup{2, std::nullopt, GtpTunnel{{127, 0, 0, 3}, 0x30000002}}}, {}}});
     // P2 Q10: a DRB whose QoS flows change (DRBs-ToBeModified), and the DU's DRBs-Modified.
     DrbToSetup remap = drb;
-    remap.flows = {Flow{1, 9, 8, false, true}, Flow{4, 9, 8, false, true}};
+    remap.flows = {Flow{1, 9, 8, false, true, std::nullopt, false}, Flow{4, 9, 8, false, true, std::nullopt, false}};
     remap.ul_pdcp_sn_bits = std::nullopt;   // a modified DRB keeps its SN lengths: none sent
     s.push_back({"UEContextModificationRequest.modify", UeContextModificationRequest{7, 1, {}, {}, {}, std::nullopt, {remap}}});
     s.push_back({"UEContextModificationResponse.modified",

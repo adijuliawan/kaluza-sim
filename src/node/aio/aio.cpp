@@ -625,6 +625,7 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         cc.t_reordering_ms = topo_.t_reordering_ms;
         cc.up_policy = topo_.up_policy;   // P2 Q9
         cc.drb_map = topo_.drb_map;       // P2 Q10
+        cc.gbr_budget_bps = topo_.gbr_budget_kbps * 1000;   // P2 Q11
         cc.slices.clear();
         for (const auto& s : slices) {
             cc.slices.push_back(ngap::Snssai{s.sst, s.sd});

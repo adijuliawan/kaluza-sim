@@ -167,11 +167,23 @@ struct Arp {
     bool preemptable = true;       // pre-emptionVulnerability pre-emptable
     friend bool operator==(const Arp&, const Arp&) = default;
 };
-/// A non-GBR flow with a standardised 5QI (GBR and dynamic 5QIs are not P1's).
+/// GBR QoS Flow Information (TS 38.413 9.3.1.10; P2 Q11): bit/s each way.
+struct Gbr {
+    std::uint64_t mfbr_dl = 0;
+    std::uint64_t mfbr_ul = 0;
+    std::uint64_t gfbr_dl = 0;
+    std::uint64_t gfbr_ul = 0;
+    bool notification_control = false;   // notification-requested
+    friend bool operator==(const Gbr&, const Gbr&) = default;
+};
+/// A flow with a standardised 5QI (dynamic 5QIs are not built). P2 Q11: GBR, and the
+/// reflective QoS attribute ("subject-to", TS 38.413 9.3.1.12).
 struct QosFlowRequest {
     std::uint8_t qfi = 1;
     std::uint16_t five_qi = 9;
     Arp arp;
+    std::optional<Gbr> gbr;
+    bool reflective = false;
     friend bool operator==(const QosFlowRequest&, const QosFlowRequest&) = default;
 };
 struct Ambr {
@@ -203,10 +215,17 @@ struct SetupRequestTransfer {
     std::vector<QosFlowRequest> flows;
     friend bool operator==(const SetupRequestTransfer&, const SetupRequestTransfer&) = default;
 };
+/// A QoS flow with a cause (QosFlowWithCauseItem, TS 38.413 9.3.4.x).
+struct QosFlowCause {
+    std::uint8_t qfi = 1;
+    Cause cause;
+    friend bool operator==(const QosFlowCause&, const QosFlowCause&) = default;
+};
 struct SetupResponseTransfer {
     GtpTunnel dl;                    // the gNB's N3 end
     std::vector<std::uint8_t> qfis;  // the flows set up on it
     std::optional<SecurityResult> security;
+    std::vector<QosFlowCause> failed;   // P2 Q11: qosFlowFailedToSetupList (a GBR flow not admitted)
     friend bool operator==(const SetupResponseTransfer&, const SetupResponseTransfer&) = default;
 };
 struct SessionSetupItem {
@@ -232,12 +251,6 @@ struct ModifyRequestTransfer {
     std::vector<QosFlowRequest> add_or_modify;
     std::vector<std::uint8_t> release;   // QFIs, with cause nas/normal-release
     friend bool operator==(const ModifyRequestTransfer&, const ModifyRequestTransfer&) = default;
-};
-/// A QoS flow with a cause (QosFlowWithCauseItem, TS 38.413 9.3.4.x).
-struct QosFlowCause {
-    std::uint8_t qfi = 1;
-    Cause cause;
-    friend bool operator==(const QosFlowCause&, const QosFlowCause&) = default;
 };
 struct ModifyResponseTransfer {
     std::vector<std::uint8_t> added_or_modified;   // QFIs

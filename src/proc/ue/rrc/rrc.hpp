@@ -138,6 +138,7 @@ private:
     void on_security_mode_command(const rrc::SecurityModeCommand& m);
     void on_reconfiguration(const rrc::Reconfiguration& m);
     void on_drb(std::uint8_t drb, Bytes sdu);
+    void send_end_markers(const std::vector<entity::Sdap::EndMarker>& markers);   // P2 Q11
     void add_srb(std::uint8_t id);
     Result<void> add_drb(const rrc::DrbAdd& d);
     void send_dcch(Result<Bytes> msg, std::uint8_t srb = 1);

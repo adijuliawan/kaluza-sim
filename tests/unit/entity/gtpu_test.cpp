@@ -36,6 +36,23 @@ TEST(Gtpu, UserDataRoundTripsWithEachExtension) {
     EXPECT_EQ(w->size(), 8u + 2u);   // no optional part: the mandatory header and the T-PDU
 }
 
+// P2 Q11 (TS 38.415 5.5.2.1, 5.5.3.4): the DL PDU SESSION INFORMATION's RQI, bit 6 of the
+// octet with the QFI; a frame without it reads as no RQI.
+TEST(Gtpu, Ts38415_5_5_3_4_TheDlFrameCarriesTheRqi) {
+    auto w = encode(UserData::dl_psc(0x10000001, 5, Bytes{0x45}, true));
+    ASSERT_TRUE(w);
+    auto back = decode_gpdu(*w);
+    ASSERT_TRUE(back);
+    EXPECT_TRUE(back->rqi);
+    EXPECT_EQ(back->dl_qfi, std::optional<std::uint8_t>(5));
+    // G-PDU header (8), sequence/N-PDU/next-type (4), the container: length, octets 1 and 2.
+    ASSERT_GT(w->size(), 14u);
+    EXPECT_EQ((*w)[14], 0x40 | 5);
+    back = decode_gpdu(*encode(UserData::dl_psc(0x10000001, 5, Bytes{0x45})));
+    ASSERT_TRUE(back);
+    EXPECT_FALSE(back->rqi);
+}
+
 // P2 Q4 (TS 38.425 5.5.2.1, 5.5.2.2): the DL USER DATA's Report Polling flag, and a
 // DL DATA DELIVERY STATUS alone in a G-PDU (no T-PDU) with its SNs and the polled frame.
 TEST(Gtpu, ReportPollingAndDeliveryStatusRoundTrip) {

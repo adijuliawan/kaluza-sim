@@ -60,12 +60,22 @@ struct Security {
     std::optional<Bytes> int_key;
     friend bool operator==(const Security&, const Security&) = default;
 };
+/// GBR QoS Flow Information (TS 37.483 9.3.1.x; P2 Q11): bit/s each way.
+struct Gbr {
+    std::uint64_t mfbr_dl = 0;
+    std::uint64_t mfbr_ul = 0;
+    std::uint64_t gfbr_dl = 0;
+    std::uint64_t gfbr_ul = 0;
+    friend bool operator==(const Gbr&, const Gbr&) = default;
+};
 struct QosFlow {
     std::uint8_t qfi = 1;
     std::uint16_t five_qi = 9;
     std::uint8_t arp_priority = 8;
     bool may_preempt = false;
     bool preemptable = true;
+    std::optional<Gbr> gbr;    // P2 Q11
+    bool reflective = false;   // reflective-QoS-Attribute subject-to (P2 Q11)
     friend bool operator==(const QosFlow&, const QosFlow&) = default;
 };
 struct DrbToSetup {

@@ -62,6 +62,9 @@ public:
     std::size_t count(std::string_view message) const;
     std::uint64_t error_indications() const noexcept { return error_indications_; }
     std::uint64_t notifies() const noexcept { return notifies_; }   // P2 Q10: PDU SESSION RESOURCE NOTIFYs
+    std::uint64_t notify_fulfilled() const noexcept { return notify_fulfilled_; }   // P2 Q11
+    std::uint64_t notify_not_fulfilled() const noexcept { return notify_not_fulfilled_; }
+    std::uint64_t refused_flows() const noexcept { return refused_flows_; }   // setups with flows not admitted
     /// The cause of the last UE CONTEXT RELEASE REQUEST, "" before one (P2 Q5: a peer
     /// CU-CP's release is seen here only).
     const std::string& last_release_cause() const noexcept { return last_release_cause_; }
@@ -141,6 +144,9 @@ private:
     std::vector<std::string> received_;
     std::uint64_t error_indications_ = 0;
     std::uint64_t notifies_ = 0;
+    std::uint64_t notify_fulfilled_ = 0;
+    std::uint64_t notify_not_fulfilled_ = 0;
+    std::uint64_t refused_flows_ = 0;
     std::string last_release_cause_;
     std::optional<ngap::Cause> last_error_;
     std::size_t pagings_ = 0;

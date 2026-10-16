@@ -715,6 +715,19 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                 }
                 const auto um = ue->ul_unmatched().find(p.psi);
                 r.set(k + ".UL_UNMATCHED", static_cast<std::int64_t>(um == ue->ul_unmatched().end() ? 0 : um->second));
+                // P2 Q11: reflective QoS and the DL QFIs.
+                r.set(k + ".DERIVED", static_cast<std::int64_t>(p.derived.size()));
+                for (std::size_t i = 0; i < p.derived.size(); ++i) {
+                    r.set(k + ".DERIVED." + std::to_string(i + 1) + ".QFI", static_cast<std::int64_t>(p.derived[i].qfi.value_or(0)));
+                }
+                r.set(k + ".RQ_TIMER_MS", p.rq_timer_ms ? std::to_string(*p.rq_timer_ms) : "-");
+                for (const auto& [key, n] : ue->dl_per_qfi()) {
+                    if (key.first == p.psi) {
+                        r.set(k + ".DL_QFI." + std::to_string(key.second), static_cast<std::int64_t>(n));
+                    }
+                }
+                const auto uq = ue->dl_unknown_qfi().find(p.psi);
+                r.set(k + ".DL_UNKNOWN_QFI", static_cast<std::int64_t>(uq == ue->dl_unknown_qfi().end() ? 0 : uq->second));
             }
             return r;
         });
@@ -1089,6 +1102,8 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                 Reply r;
                 r.set("RAN_UE_NGAP_ID", static_cast<std::int64_t>(u.ran_ue));
                 r.set("DRB_MAP", proc::ran::drb_map_name(aio.cucp().drb_map()));
+                r.set("GBR_BUDGET", std::to_string(aio.cucp().gbr_budget()));   // P2 Q11: bit/s
+                r.set("GBR_USED", std::to_string(aio.cucp().gbr_used()));
                 const auto psis = aio.cucp().sessions_of(u.ran_ue);
                 r.set("PDU_SESSIONS", static_cast<std::int64_t>(psis.size()));
                 for (std::uint8_t psi : psis) {
@@ -1104,12 +1119,44 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                         r.set(dk + ".QFIS", q.empty() ? "-" : q);
                         r.set(dk + ".5QI", static_cast<std::int64_t>(d.five_qi));
                         r.set(dk + ".DEFAULT", d.default_drb ? "1" : "0");
+                        if (d.gfbr_dl != 0 || d.gfbr_ul != 0) {   // P2 Q11
+                            r.set(dk + ".GFBR", fmt::format("{}/{}", d.gfbr_dl, d.gfbr_ul));
+                            std::string nf;
+                            for (std::uint8_t x : d.not_fulfilled) {
+                                nf += (nf.empty() ? "" : ",") + std::to_string(x);
+                            }
+                            r.set(dk + ".NOT_FULFILLED", nf.empty() ? "-" : nf);
+                        }
                     }
                     r.set(k + ".DRBS", ids.empty() ? "-" : ids);
                 }
                 return r;
             }
             return Reply::fail(Exit::wrong_state, "the UE has no RRC connection at this gNB");
+        });
+        return s ? *s : unsound();
+    });
+    // P2 Q11: the cell's GBR budget, read and set (kbps); the flows are reassessed at once.
+    server.post("/v1/gnb/:name/gbr-budget", [&aio, &t](const Request& req) {
+        if (req.params.at("name") != t.gnb_name || !aio.hosts_cucp()) {
+            return Reply::fail(Exit::unknown, "no such gNB");
+        }
+        std::optional<std::uint64_t> kbps;
+        if (req.has("kbps")) {
+            try {
+                kbps = std::stoull(req.arg("kbps"));
+            } catch (const std::exception&) {
+                return Reply::fail(Exit::usage, "gbr-budget takes kbit/s");
+            }
+        }
+        auto s = aio.call<Reply>([&aio, kbps] {
+            if (kbps) {
+                aio.cucp().set_gbr_budget(*kbps * 1000);
+            }
+            Reply r;
+            r.set("GBR_BUDGET_KBPS", std::to_string(aio.cucp().gbr_budget() / 1000));
+            r.set("GBR_USED_KBPS", std::to_string(aio.cucp().gbr_used() / 1000));
+            return r;
         });
         return s ? *s : unsound();
     });
@@ -1255,6 +1302,9 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                 }
                 r.set(k + ".LCID", static_cast<std::int64_t>(d.lcid));
                 r.set(k + ".QFIS", q.empty() ? "-" : q);
+                if (d.gfbr_dl != 0 || d.gfbr_ul != 0) {
+                    r.set(k + ".GFBR", fmt::format("{}/{}", d.gfbr_dl, d.gfbr_ul));   // P2 Q11: DL/UL bit/s
+                }
             }
             return r;
         });
@@ -1272,6 +1322,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             r.set("UL_PACKETS", static_cast<std::int64_t>(aio.cuup().stats().ul_packets));
             r.set("DROPPED", static_cast<std::int64_t>(aio.cuup().stats().dropped));
             r.set("DDDS_RX", static_cast<std::int64_t>(aio.cuup().stats().ddds_rx));
+            r.set("END_MARKERS", static_cast<std::int64_t>(aio.cuup().stats().end_markers));
             r.set("INACTIVITY_REPORTS", static_cast<std::int64_t>(aio.cuup().stats().inactivity_reports));
             // P2 Q10: each DRB (CU-UP UE, PSI, DRB) with its flows and packets, and the packets per QFI.
             const auto drbs = aio.cuup().drb_stats();
@@ -1284,6 +1335,9 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                 }
                 r.set(k + ".QFIS", q.empty() ? "-" : q);
                 r.set(k + ".DEFAULT", d.default_drb ? "1" : "0");
+                if (d.gfbr_dl != 0 || d.gfbr_ul != 0) {
+                    r.set(k + ".GFBR", fmt::format("{}/{}", d.gfbr_dl, d.gfbr_ul));   // P2 Q11
+                }
                 r.set(k + ".UL_PACKETS", static_cast<std::int64_t>(d.ul_packets));
                 r.set(k + ".DL_PACKETS", static_cast<std::int64_t>(d.dl_packets));
             }

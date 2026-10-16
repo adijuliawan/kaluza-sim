@@ -32,7 +32,20 @@ class Sdap {
 public:
     explicit Sdap(std::uint8_t pdu_session) : psi_(pdu_session) {}
 
-    void configure(const SdapDrb& d);   // add or modify (mappings add up, §5.3.1; released ones go)
+    /// An end-marker control PDU (§6.2.3) and the DRB it goes on (P2 Q11).
+    struct EndMarker {
+        std::uint8_t drb_id = 0;
+        Bytes pdu;
+    };
+    /// Add or modify (mappings add up, §5.3.1; released ones go). P2 Q11: the end-markers
+    /// §5.3.1 asks for once the entity is established: on the default DRB for a flow with no
+    /// stored mapping, on the old DRB (with a UL SDAP header) for a flow that moves.
+    std::vector<EndMarker> configure(const SdapDrb& d);
+    /// §5.3.2: a DL data PDU with RDI on `drb_id` maps the QoS flow there for the UL, with
+    /// the same end-markers.
+    std::vector<EndMarker> reflect(std::uint8_t drb_id, std::uint8_t qfi);
+    /// The entity counts as established once the reconfiguration that made it is applied.
+    void settle() noexcept { established_ = true; }
     /// The QoS flows mapped to `drb_id` (P2 Q10).
     std::vector<std::uint8_t> flows_of(std::uint8_t drb_id) const;
     void release(std::uint8_t drb_id);
@@ -58,6 +71,8 @@ private:
     std::uint8_t psi_;
     std::map<std::uint8_t, SdapDrb> drbs_;
     std::map<std::uint8_t, std::uint8_t> qfi_to_drb_;
+    bool established_ = false;
+    void map_to(std::uint8_t qfi, std::uint8_t drb, std::vector<EndMarker>& out);
 };
 
 } // namespace ksim::entity

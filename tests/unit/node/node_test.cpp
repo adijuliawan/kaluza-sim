@@ -365,7 +365,7 @@ TEST(Capture, ZeroesTheE1apUpKeysAndWritesGtpuAsIpv4Udp) {
     s.ng_ul = e1ap::GtpTunnel{{127, 0, 0, 9}, 0x51000001};
     e1ap::DrbToSetup d;
     d.drb_id = 1;
-    d.flows = {e1ap::QosFlow{1, 9, 8, false, true}};
+    d.flows = {e1ap::QosFlow{1, 9, 8, false, true, std::nullopt, false}};
     s.drbs = {d};
     r.sessions = {s};
     auto wire = e1ap::encode(r);

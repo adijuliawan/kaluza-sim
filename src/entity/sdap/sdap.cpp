@@ -3,9 +3,30 @@
 
 #include "entity/sdap/sdap.hpp"
 
+#include "platform/mutation.hpp"
+
 namespace ksim::entity {
 
-void Sdap::configure(const SdapDrb& d) {
+void Sdap::map_to(std::uint8_t qfi, std::uint8_t drb, std::vector<EndMarker>& out) {
+    qfi &= 0x3F;
+    const auto it = qfi_to_drb_.find(qfi);
+    // §5.3.1, §5.3.2 (P2 Q11; mutant no_end_marker, row ksim-p2.sdap-end-marker).
+    if (established_ && !KSIM_MUTANT("no_end_marker")) {
+        const Bytes marker{sdap::encode(sdap::UlHeader{false, qfi})};
+        if (it == qfi_to_drb_.end()) {
+            if (const auto def = default_drb(); def && *def != drb) {
+                out.push_back(EndMarker{*def, marker});
+            }
+        } else if (it->second != drb) {
+            if (auto old = drbs_.find(it->second); old != drbs_.end() && old->second.header_ul) {
+                out.push_back(EndMarker{it->second, marker});
+            }
+        }
+    }
+    qfi_to_drb_[qfi] = drb;
+}
+
+std::vector<Sdap::EndMarker> Sdap::configure(const SdapDrb& d) {
     if (d.default_drb) {
         for (auto& [id, other] : drbs_) {
             other.default_drb = false;   // one default DRB per PDU session
@@ -18,9 +39,19 @@ void Sdap::configure(const SdapDrb& d) {
             qfi_to_drb_.erase(it);
         }
     }
+    std::vector<EndMarker> out;
     for (std::uint8_t q : d.qfis) {
-        qfi_to_drb_[q & 0x3F] = d.drb_id;
+        map_to(q, d.drb_id, out);
     }
+    return out;
+}
+
+std::vector<Sdap::EndMarker> Sdap::reflect(std::uint8_t drb_id, std::uint8_t qfi) {
+    std::vector<EndMarker> out;
+    if (drbs_.count(drb_id) != 0) {
+        map_to(qfi, drb_id, out);
+    }
+    return out;
 }
 
 std::vector<std::uint8_t> Sdap::flows_of(std::uint8_t drb_id) const {

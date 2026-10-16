@@ -105,6 +105,8 @@ public:
         std::uint8_t drb = 0;
         std::uint8_t lcid = 0;
         std::vector<std::uint8_t> qfis;
+        std::uint64_t gfbr_dl = 0;   // P2 Q11
+        std::uint64_t gfbr_ul = 0;
     };
     std::vector<DrbView> drb_list() const;
     const DuStats& stats() const noexcept { return stats_; }
@@ -127,6 +129,8 @@ private:
             std::optional<std::uint32_t> highest_sn;   // of the DL PDCP PDUs sent to the UE
             bool report_due = false;      // a DDDS is armed
             std::vector<std::uint8_t> qfis;   // P2 Q10: the QoS flows F1AP mapped to it
+            std::uint64_t gfbr_dl = 0;        // P2 Q11: its GBR flows'
+            std::uint64_t gfbr_ul = 0;
         };
         std::map<std::uint8_t, Drb> drbs;   // by DRB ID
         Millis last_ul = 0;                 // the last frame from the UE

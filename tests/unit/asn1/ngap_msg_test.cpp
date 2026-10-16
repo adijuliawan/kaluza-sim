@@ -98,9 +98,10 @@ TEST(NgapMsg, InputsOutOfRangeAreRefused) {
     EXPECT_FALSE(encode(InitialUeMessage{}));   // no NAS PDU
 }
 
-// A GBR QoS flow is refused as unsupported until P2 Q11 builds GBR (KS-NGAP-D2): before,
-// gBR-QosInformation was ignored and the flow set up as non-GBR.
-TEST(NgapMsg, AGbrQosFlowIsRefusedUntilGbrIsBuilt) {
+// A GBR QoS flow, written into the JER by hand rather than by our builder, is read with its
+// bit rates (P2 Q11). Before Q11 it was refused as unsupported (KS-NGAP-D2's fix), and before
+// that gBR-QosInformation was ignored and the flow set up as non-GBR.
+TEST(NgapMsg, Ts38413_9_3_1_10_AGbrQosFlowIsReadWithItsBitRates) {
     const auto all = samples::all();
     const auto it = std::find_if(all.begin(), all.end(), [](const auto& s) {
         return std::holds_alternative<PduSessionResourceSetupRequest>(s.pdu);
@@ -142,8 +143,14 @@ TEST(NgapMsg, AGbrQosFlowIsRefusedUntilGbrIsBuilt) {
     auto gbr = jer::encode(asn_DEF_NGAP_NGAP_PDU, *pdu, asn1::Rules::aper);
     ASSERT_TRUE(gbr) << gbr.error().what;
     auto d = decode(*gbr);
-    ASSERT_FALSE(d);
-    EXPECT_EQ(d.error().code, Errc::unsupported);
+    ASSERT_TRUE(d) << d.error().what;
+    const auto& m = std::get<PduSessionResourceSetupRequest>(*d);
+    const auto& f = m.sessions.at(0).transfer.flows.at(0);
+    EXPECT_EQ(f.five_qi, 1);
+    ASSERT_TRUE(f.gbr);
+    EXPECT_EQ(f.gbr->mfbr_dl, 128000u);
+    EXPECT_EQ(f.gbr->gfbr_ul, 64000u);
+    EXPECT_FALSE(f.gbr->notification_control);
 }
 
 /// The external NGAP corpus: (pdu name, octets).

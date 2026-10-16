@@ -145,13 +145,21 @@ SecurityResult read_security_result(const json& j) {
 }
 
 json flow(const QosFlow& f) {
-    return {{"qoS-Flow-Identifier", f.qfi},
-            {"qoSFlowLevelQoSParameters",
-             {{"qoS-Characteristics", {{"non-Dynamic-5QI", {{"fiveQI", f.five_qi}}}}},
+    json p = {{"qoS-Characteristics", {{"non-Dynamic-5QI", {{"fiveQI", f.five_qi}}}}},
               {"nGRANallocationRetentionPriority",
                {{"priorityLevel", f.arp_priority},
                 {"pre-emptionCapability", f.may_preempt ? "may-trigger-pre-emption" : "shall-not-trigger-pre-emption"},
-                {"pre-emptionVulnerability", f.preemptable ? "pre-emptable" : "not-pre-emptable"}}}}}};
+                {"pre-emptionVulnerability", f.preemptable ? "pre-emptable" : "not-pre-emptable"}}}};
+    if (const auto& g = f.gbr) {   // P2 Q11, in ASN.1 order
+        p["gBR-QoS-Flow-Information"] = {{"maxFlowBitRateDownlink", g->mfbr_dl},
+                                         {"maxFlowBitRateUplink", g->mfbr_ul},
+                                         {"guaranteedFlowBitRateDownlink", g->gfbr_dl},
+                                         {"guaranteedFlowBitRateUplink", g->gfbr_ul}};
+    }
+    if (f.reflective) {
+        p["reflective-QoS-Attribute"] = "subject-to";
+    }
+    return {{"qoS-Flow-Identifier", f.qfi}, {"qoSFlowLevelQoSParameters", p}};
 }
 QosFlow read_flow(const json& j) {
     QosFlow f;
@@ -162,8 +170,12 @@ QosFlow read_flow(const json& j) {
         throw jer::NotP1("a dynamic 5QI");
     }
     if (p.contains("gBR-QoS-Flow-Information")) {
-        throw jer::NotP1("a GBR QoS flow");   // until P2 Q11 (KS-NGAP-D2)
+        const json& g = p.at("gBR-QoS-Flow-Information");   // P2 Q11
+        f.gbr = Gbr{g.at("maxFlowBitRateDownlink").get<std::uint64_t>(), g.at("maxFlowBitRateUplink").get<std::uint64_t>(),
+                    g.at("guaranteedFlowBitRateDownlink").get<std::uint64_t>(),
+                    g.at("guaranteedFlowBitRateUplink").get<std::uint64_t>()};
     }
+    f.reflective = p.contains("reflective-QoS-Attribute");
     f.five_qi = c.at("non-Dynamic-5QI").at("fiveQI").get<std::uint16_t>();
     const json& arp = p.at("nGRANallocationRetentionPriority");
     f.arp_priority = arp.at("priorityLevel").get<std::uint8_t>();

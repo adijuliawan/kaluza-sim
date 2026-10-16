@@ -23,6 +23,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "codec/nas/ie/ie.hpp"
@@ -37,9 +38,20 @@ enum class PduKind : std::uint8_t { ip, ethernet };
 bool filter_matches(const nas::ie::QosRules::PacketFilter& f, ByteView packet, QosDirection dir, PduKind kind = PduKind::ip);
 
 /// The rule `packet` maps to: the matching one with the lowest precedence value (a rule
-/// without precedence comes last), or nullptr when none matches (TS 24.501 6.2.5.1.1.2:
-/// the UE does not send it).
+/// without precedence comes last), or nullptr when none matches (TS 24.501 6.2.5.1.3:
+/// the UE discards it).
 const nas::ie::QosRules::Rule* classify(const std::vector<nas::ie::QosRules::Rule>& rules, ByteView packet,
                                         QosDirection dir, PduKind kind = PduKind::ip);
+
+/// P2 Q11 (TS 24.501 6.2.5.1.4.2): the packet filter for UL direction a DL user data packet
+/// gives a derived QoS rule. IPv4 and IPv6: remote and local address (the DL source and
+/// destination, full length), protocol / next header, and the ports swapped likewise, for
+/// TCP and UDP only. ESP needs an uplink IPsec SA the NAS layer knows, which the sim has
+/// none of, so it gives none (6.2.5.1.4.6: the RQI is ignored). nullopt when none can be derived.
+std::optional<nas::ie::QosRules::PacketFilter> derive_ul_filter(ByteView dl_packet);
+
+/// Whether two filters have the same direction and components (6.2.5.1.4.3: one derived
+/// rule per UL packet filter).
+bool same_filter(const nas::ie::QosRules::PacketFilter& a, const nas::ie::QosRules::PacketFilter& b);
 
 } // namespace ksim::proc::ue

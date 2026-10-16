@@ -25,7 +25,7 @@ inline std::vector<Sample> all() {
     s.push_back({"GNB-CU-UP-E1SetupRequest", E1SetupRequest{1, 0x1A0, "ksim-cuup1", {{plmn, {slice}}}}});
     s.push_back({"GNB-CU-UP-E1SetupResponse", E1SetupResponse{1, "ksim-gnb1"}});
     s.push_back({"GNB-CU-UP-E1SetupFailure", E1SetupFailure{1, Cause{"misc", "unspecified"}}});
-    const DrbToSetup drb{1, true, true, true, 18, {QosFlow{1, 9, 8, false, true}}, "ms100", 40};   // P2 Q5: the PDCP timers
+    const DrbToSetup drb{1, true, true, true, 18, {QosFlow{1, 9, 8, false, true, std::nullopt, false}}, "ms100", 40};   // P2 Q5: the PDCP timers
     const SessionToSetup sess{1, "ipv4", slice, SecurityIndication{"preferred", "required"},
                               GtpTunnel{{172, 30, 50, 2}, 0x101}, {drb}};
     BearerContextSetupRequest req;
@@ -64,9 +64,9 @@ inline std::vector<Sample> all() {
     DrbToSetup drb3 = drb;
     drb3.drb_id = 3;
     drb3.default_drb = false;
-    drb3.flows = {QosFlow{3, 7, 8, false, true}};
+    drb3.flows = {QosFlow{3, 1, 2, true, false, Gbr{256000, 128000, 128000, 64000}, true}};   // P2 Q11: GBR, reflective
     sm.drbs_setup = {drb3};
-    sm.drbs = {DrbToModify{1, std::nullopt, std::vector<QosFlow>{QosFlow{1, 9, 8, false, true}, QosFlow{2, 9, 8, false, true}}}};
+    sm.drbs = {DrbToModify{1, std::nullopt, std::vector<QosFlow>{QosFlow{1, 9, 8, false, true, std::nullopt, false}, QosFlow{2, 9, 8, false, true, std::nullopt, false}}}};
     sm.drbs_remove = {2};
     qos.modify = {sm};
     s.push_back({"BearerContextModificationRequest.qos", qos});

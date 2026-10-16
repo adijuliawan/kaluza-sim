@@ -186,24 +186,38 @@ GtpTunnel read_f1_tunnel(const json& j) {
 }
 
 json flow_qos(const Flow& f) {
-    return {{"qoS-Characteristics", {{"non-Dynamic-5QI", {{"fiveQI", f.five_qi}}}}},
-            {"nGRANallocationRetentionPriority",
-             {{"priorityLevel", f.arp_priority},
-              {"pre-emptionCapability", f.may_preempt ? "may-trigger-pre-emption" : "shall-not-trigger-pre-emption"},
-              {"pre-emptionVulnerability", f.preemptable ? "pre-emptable" : "not-pre-emptable"}}}};
+    json p = {{"qoS-Characteristics", {{"non-Dynamic-5QI", {{"fiveQI", f.five_qi}}}}},
+              {"nGRANallocationRetentionPriority",
+               {{"priorityLevel", f.arp_priority},
+                {"pre-emptionCapability", f.may_preempt ? "may-trigger-pre-emption" : "shall-not-trigger-pre-emption"},
+                {"pre-emptionVulnerability", f.preemptable ? "pre-emptable" : "not-pre-emptable"}}}};
+    if (const auto& g = f.gbr) {   // P2 Q11, in ASN.1 order
+        p["gBR-QoS-Flow-Information"] = {{"maxFlowBitRateDownlink", g->mfbr_dl},
+                                         {"maxFlowBitRateUplink", g->mfbr_ul},
+                                         {"guaranteedFlowBitRateDownlink", g->gfbr_dl},
+                                         {"guaranteedFlowBitRateUplink", g->gfbr_ul}};
+    }
+    if (f.reflective) {
+        p["reflective-QoS-Attribute"] = "subject-to";
+    }
+    return p;
 }
 Flow read_flow_qos(std::uint8_t qfi, const json& j) {
     const json& c = j.at("qoS-Characteristics");
     if (!c.contains("non-Dynamic-5QI")) {
         throw jer::NotP1("a dynamic 5QI");
     }
-    if (j.contains("gBR-QoS-Flow-Information")) {
-        throw jer::NotP1("a GBR QoS flow");   // until P2 Q11 (KS-NGAP-D2)
-    }
     const json& arp = j.at("nGRANallocationRetentionPriority");
-    return {qfi, c.at("non-Dynamic-5QI").at("fiveQI").get<std::uint16_t>(), arp.at("priorityLevel").get<std::uint8_t>(),
-            arp.at("pre-emptionCapability").get<std::string>() == "may-trigger-pre-emption",
-            arp.at("pre-emptionVulnerability").get<std::string>() == "pre-emptable"};
+    Flow f{qfi, c.at("non-Dynamic-5QI").at("fiveQI").get<std::uint16_t>(), arp.at("priorityLevel").get<std::uint8_t>(),
+           arp.at("pre-emptionCapability").get<std::string>() == "may-trigger-pre-emption",
+           arp.at("pre-emptionVulnerability").get<std::string>() == "pre-emptable", std::nullopt, j.contains("reflective-QoS-Attribute")};
+    if (j.contains("gBR-QoS-Flow-Information")) {
+        const json& g = j.at("gBR-QoS-Flow-Information");   // P2 Q11
+        f.gbr = Gbr{g.at("maxFlowBitRateDownlink").get<std::uint64_t>(), g.at("maxFlowBitRateUplink").get<std::uint64_t>(),
+                    g.at("guaranteedFlowBitRateDownlink").get<std::uint64_t>(),
+                    g.at("guaranteedFlowBitRateUplink").get<std::uint64_t>()};
+    }
+    return f;
 }
 
 bool drbs_ok(const std::vector<DrbToSetup>& l) {

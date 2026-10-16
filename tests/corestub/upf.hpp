@@ -49,6 +49,9 @@ struct UpfStats {
     std::uint64_t held = 0;              // downlink held for a deactivated session
     std::map<std::uint8_t, std::uint64_t> ul_per_qfi;   // P2 Q10
     std::map<std::uint8_t, std::uint64_t> dl_per_qfi;
+    std::uint64_t udp_to_ue = 0;         // P2 Q11: udp_ue datagrams sent
+    std::uint64_t udp_from_ue = 0;       // and UDP datagrams the UEs sent
+    std::uint64_t rqi_marked = 0;        // DL packets sent with the RQI
 };
 
 class Upf {
@@ -70,6 +73,11 @@ public:
     void on_dl_pending(std::function<void(std::uint32_t ul_teid)> f) { on_pending_ = std::move(f); }
     /// An echo request from `from` to the UE behind `ul_teid` (a DN ping).
     Result<void> ping_ue(std::uint32_t ul_teid, ip::Addr from, std::uint16_t seq);
+    /// P2 Q11: a UDP datagram from `from`:`sport` to the UE's port 7, on `qfi` (none: as the
+    /// rules classify it), with the RQI when asked. With the RQI the UPF expects the UE's
+    /// reply on that QFI (TS 23.501 5.7.5.3: the UE's derived rule).
+    Result<void> udp_ue(std::uint32_t ul_teid, ip::Addr from, std::uint16_t sport, std::optional<std::uint8_t> qfi, bool rqi,
+                        std::uint16_t seq);
 
     ngap::GtpTunnel tunnel(std::uint32_t ul_teid) const { return {addr_, ul_teid}; }
     const UpfStats& stats() const noexcept { return stats_; }
@@ -83,9 +91,10 @@ private:
         std::optional<ngap::GtpTunnel> dl;
         std::vector<Bytes> held;
         std::vector<nas::ie::QosRules::Rule> rules;
+        std::map<std::pair<ip::Addr, std::uint16_t>, std::uint8_t> reflected;   // P2 Q11: (remote, port) -> QFI
     };
     void on_ul(std::uint32_t teid, const entity::gtpu::UserData& d);
-    void send_dl(Tunnel& t, Bytes packet);
+    void send_dl(Tunnel& t, Bytes packet, std::optional<std::uint8_t> qfi = std::nullopt, bool rqi = false);
     void check(bool ok, const char* clause, const char* what, std::string detail = {});
 
     entity::gtpu::Endpoint gtpu_;

@@ -137,7 +137,9 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
         t.gnb_name = g.get<std::string>("name", t.gnb_name);
         // A peer CU-CP (P2 Q4) has its own N2 and N3 addresses in its config, not here.
         if (t.peer_cucp.empty() || g.has("cucp")) {
-            g.at("cucp").only({"ng_bind", "ng_streams", "ue_inactivity_s", "nea", "nia", "t_reordering_ms", "up_policy", "drb_map"});
+            g.at("cucp").only({"ng_bind", "ng_streams", "ue_inactivity_s", "nea", "nia", "t_reordering_ms", "up_policy", "drb_map",
+                                "gbr_budget_kbps"});
+            t.gbr_budget_kbps = g.at("cucp").get<std::uint64_t>("gbr_budget_kbps", t.gbr_budget_kbps);   // P2 Q11 (KS-RRC-B7)
             if (g.at("cucp").has("drb_map")) {
                 // P2 Q10: the QoS flow to DRB mapping (KS-RRC-B6): a DRB per 5QI, or one per session.
                 const std::string m = g.at("cucp").at("drb_map").as<std::string>();
