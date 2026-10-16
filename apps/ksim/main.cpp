@@ -229,6 +229,11 @@ int run(const std::string& topology_file, std::string run_dir, bool lab, int tcp
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     server.stop();
+    // P2 Q14 prep (KS-PLAT-D20): the releases under way end before the gNB goes. In split mode
+    // the supervisor drains through the DU's role before it stops any role.
+    if (aio->hosts_ues() && aio->hosts_du()) {
+        (void)aio->drain();
+    }
     aio->stop();
     const auto c = aio->capture()->stats();
     m["status"] = "stopped";

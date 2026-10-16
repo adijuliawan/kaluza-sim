@@ -21,6 +21,10 @@
 #   KSIM_LAB=1    pass --lab (kaluza-uesim only; the guard enforces it)
 #   KSIM_TOPOLOGY_FILE
 #                 a topology instead of the core's (the privileged netns hook writes one)
+#   STUB_RELEASE_DELAY_MS
+#                 the stub's UE CONTEXT RELEASE COMMAND that late (P2 Q14 prep); the stub's
+#                 report after ksim stopped goes to <run>/stub-after.txt (NG_END and
+#                 RELEASE_REQUESTS_REPEATED: how the gNB ended NG)
 #   KSIM_PHASE    p1 (default): the gates ksim-p1-*.sh scored against gates/rows/p1.tsv;
 #                 p2: the gates ksim-p1-*.sh and ksim-p2-*.sh against gates/rows/p2.tsv (P2 Q0)
 
@@ -112,7 +116,11 @@ cleanup() {
         [ -d "$RUN" ] && mv "$peer_dir" "$RUN/peer" 2>/dev/null
         peer_dir=""
     fi
-    [ -n "$stub_pid" ] && { kill "$stub_pid" 2>/dev/null; wait "$stub_pid" 2>/dev/null; }
+    if [ -n "$stub_pid" ]; then
+        # The stub saw the gNB end NG (P2 Q14 prep): its report once ksim has stopped.
+        [ -d "$RUN" ] && "$KSIM_CTL" --socket "$KSIM_RUNS/$core-stub.sock" stub > "$RUN/stub-after.txt" 2>&1
+        kill "$stub_pid" 2>/dev/null; wait "$stub_pid" 2>/dev/null
+    fi
 }
 peer_dir=""; peer_cucp=0; peer_cuup=0
 trap cleanup EXIT INT TERM
@@ -122,7 +130,7 @@ if [ "${STUB:-0}" = 1 ]; then
     STUB_CTL="$KSIM_RUNS/$core-stub.sock"; export STUB_CTL
     "$STUB_BIN" --listen "$STUB_LISTEN" --master "$KSIM_MASTER" --block "$STUB_BLOCK" \
         --ctl "$STUB_CTL" ${STUB_N3:+--n3 "$STUB_N3"} ${STUB_DN_NETD:+--dn-netd "$STUB_DN_NETD"} \
-        > "$KSIM_RUNS/$core-stub.out" 2>&1 &
+        ${STUB_RELEASE_DELAY_MS:+--release-delay-ms "$STUB_RELEASE_DELAY_MS"} > "$KSIM_RUNS/$core-stub.out" 2>&1 &
     stub_pid=$!
     i=0
     until grep -q '^CTL=' "$KSIM_RUNS/$core-stub.out" 2>/dev/null; do

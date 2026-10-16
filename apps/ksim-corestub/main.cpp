@@ -70,6 +70,7 @@ struct Stub {
     std::vector<ksim::corestub::Verdict> past;   // the verdicts of associations that ended
     std::map<std::string, bool> sms_sub;         // N13: per-UE SMS subscription, before the AMF exists
     std::uint64_t associations = 0;
+    ksim::Millis release_delay_ms = 0;           // P2 Q14 prep: --release-delay-ms
 
     template <class T>
     std::optional<T> call(std::function<T()> fn) {
@@ -126,14 +127,21 @@ Reply report(Stub& s) {
                 out.set("RECEIVED." + m, n);
             }
             std::int64_t registered = 0;
+            std::int64_t identified = 0;
             for (std::size_t i = 0; i < s.amf->ues(); ++i) {
-                if (auto* nas = s.amf->nas(i); nas != nullptr && nas->registered()) {
-                    ++registered;
+                if (auto* nas = s.amf->nas(i); nas != nullptr) {
+                    registered += nas->registered() ? 1 : 0;
+                    identified += static_cast<std::int64_t>(nas->identity_requests());
                 }
             }
             out.set("REGISTERED", registered);
+            out.set("IDENTITY_REQUESTS", identified);   // P2 Q14 prep: a 5G-GUTI the AMF could not resolve
             out.set("ERROR_INDICATIONS", static_cast<std::int64_t>(s.amf->error_indications()));
             out.set("LAST_RELEASE_CAUSE", s.amf->last_release_cause().empty() ? std::string("-") : s.amf->last_release_cause());
+            // P2 Q14 prep (KS-PLAT-D20): how NG ended, and release requests asked again.
+            out.set("NG_END", s.amf->ng_end());
+            out.set("RELEASE_REQUESTS_REPEATED", static_cast<std::int64_t>(s.amf->repeated_release_requests()));
+            out.set("RELEASE_DELAY_MS", static_cast<std::int64_t>(s.amf->release_delay()));
             out.set("SESSIONS", static_cast<std::int64_t>(s.amf->smf().sessions()));
             out.set("NOTIFIES", static_cast<std::int64_t>(s.amf->notifies()));   // P2 Q10
             out.set("NOTIFY_FULFILLED", static_cast<std::int64_t>(s.amf->notify_fulfilled()));   // P2 Q11
@@ -182,6 +190,7 @@ static int run_main(int argc, char** argv) {
     std::string block;
     std::string ctl;
     std::string profile_file;
+    ksim::Millis release_delay_ms = 0;
     std::string plmn = "00101";
     std::string n3 = "127.0.0.1:2152";
     std::string dn_netd;
@@ -194,6 +203,8 @@ static int run_main(int argc, char** argv) {
     app.add_option("--block", block, "the subscribers: <first IMSI>/<count>")->required();
     app.add_option("--ctl", ctl, "the control socket")->required();
     app.add_option("--profile", profile_file, "a behaviour profile (tests/corestub/profiles)");
+    app.add_option("--release-delay-ms", release_delay_ms,
+                   "P2 Q14 prep: the UE CONTEXT RELEASE COMMAND this late, as a loaded core's (0: at once)");
     app.add_option("--plmn", plmn, "the AMF's PLMN");
     CLI11_PARSE(app, argc, argv);
     std::signal(SIGINT, on_signal);
@@ -211,6 +222,7 @@ static int run_main(int argc, char** argv) {
         return 7;
     }
     Stub s;
+    s.release_delay_ms = release_delay_ms;
     s.n3_addr = {n3_ep->addr[0], n3_ep->addr[1], n3_ep->addr[2], n3_ep->addr[3]};
     if (plmn.size() < 5 || plmn.size() > 6 || plmn.find_first_not_of("0123456789") != std::string::npos) {
         std::cerr << "ksim-corestub: --plmn is MCC and MNC digits\n";
@@ -281,6 +293,7 @@ static int run_main(int argc, char** argv) {
             } else {
                 s.amf = std::make_unique<ksim::corestub::NgapAmf>(s.shard, s.home, s.plmn, s.profile, *s.assoc, s.n3.get(),
                                                                   s.n3_addr);
+                s.amf->set_release_delay(s.release_delay_ms);
                 if (s.dn && s.amf->upf() != nullptr) {
                     s.amf->upf()->attach_dn(s.dn.get());   // P2 Q12
                 }

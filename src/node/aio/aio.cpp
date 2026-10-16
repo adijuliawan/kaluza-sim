@@ -8,6 +8,7 @@
 #include <iterator>
 #include <map>
 #include <algorithm>
+#include <thread>
 #include <utility>
 
 #include "codec/air/kair.hpp"
@@ -16,6 +17,7 @@
 #include "net/tcp.hpp"
 #include "net/sctp.hpp"
 #include "net/udp.hpp"
+#include "platform/log.hpp"
 #include "platform/memlink.hpp"
 #include "platform/yaml.hpp"
 #include "proc/ran/cucp.hpp"
@@ -952,11 +954,56 @@ void AllInOne::observe_kair(Metrics::Hop h, const air::Frame& f) {
     metrics_.observe(h, shard_->now() - sent);   // one host, one CLOCK_MONOTONIC
 }
 
+std::size_t AllInOne::drain(std::chrono::milliseconds bound, std::chrono::milliseconds stall) {
+    if (!shard_ || !hosts_du()) {
+        return 0;
+    }
+    const auto count = [this] { return call<std::size_t>([this] { return du_ ? du_->ues() : std::size_t{0}; }).value_or(0); };
+    const auto start = std::chrono::steady_clock::now();
+    auto last_fall = start;
+    std::size_t n = count();
+    const std::size_t first = n;
+    while (n > 0) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - start >= bound || now - last_fall >= stall) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const std::size_t m = count();
+        if (m < n) {
+            last_fall = std::chrono::steady_clock::now();
+        }
+        n = m;
+    }
+    if (first > 0) {
+        log::info("ksim", "stop: {} of {} UE contexts at the DU released in {} ms", first - n, first,
+                  std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+    }
+    return n;
+}
+
 void AllInOne::stop() {
     if (stopped_) {
         return;
     }
     stopped_ = true;
+    if (shard_ && hosts_cucp()) {
+        // P2 Q14 prep (KS-PLAT-D20): NG ends with SCTP's graceful SHUTDOWN, not the ABORT the
+        // client's reset sends (the AMF saw COMM_LOST, kaluza-core's F-77): the SHUTDOWN begins
+        // on the shard and completes there, in at most 3 s.
+        (void)call<bool>([this] {
+            if (ng_ && ng_->up()) {
+                ng_->shutdown();
+            }
+            return true;
+        });
+        for (int i = 0; i < 60; ++i) {
+            if (!call<bool>([this] { return ng_ && ng_->up(); }).value_or(false)) {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
     if (shard_) {
         (void)call<bool>(
             [this] {

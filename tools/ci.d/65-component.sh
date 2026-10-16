@@ -13,7 +13,8 @@
 #      ksim-sim's output (derive, a kaluza dry run) included.
 # The run directory (no keys in it) is kept as build/component/last; the split run (P2 Q3) as
 # build/component/split-last; the split E1 run (P2 Q5) as build/component/e1-last; the 100-UE
-# run's rows (P2 Q7) in build/component/scale-last.
+# run's rows (P2 Q7) in build/component/scale-last. From P2 Q14 prep a teardown pass, aio and
+# split, against a stub that releases 2.5 s late: NG_END=shutdown, no release request repeated.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 B="$ROOT/build/dev/apps"
@@ -147,5 +148,19 @@ if [[ -n "$ERUN" && -d "$ERUN" ]]; then
 else
     echo "COMPONENT: no split E1 run directory"; rc=1
 fi
+# P2 Q14 prep (KS-PLAT-D20, KS-NGAP-D5): the teardown against a core that releases late. The
+# stub's UE CONTEXT RELEASE COMMAND comes 2.5 s late, and the run stops as soon as its UEs have
+# switched off: the gNB lets the releases end first, ends NG with SCTP's graceful SHUTDOWN, and
+# asks the AMF once per UE (the stub's report after ksim stopped, <run>/stub-after.txt).
+for topo in aio-stub split-stub; do
+    echo "-- the teardown against a late release ($topo)"
+    STUB_RELEASE_DELAY_MS=2500 KSIM_RUNS="$T/runs-td-$topo" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" \
+        KSIM_SEALED="$T/cards" KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE="$ROOT/topologies/$topo.yaml" \
+        sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p1-session.sh" > "$T/td-$topo.out" 2>&1 || rc=1
+    TDRUN="$(sed -n 's/^RUN_DIR=//p' "$T/td-$topo.out")"
+    td=$(grep -E '^(NG_END|RELEASE_REQUESTS_REPEATED|ERROR_INDICATIONS)=' "$TDRUN/stub-after.txt" 2>/dev/null | sort | tr '\n' ' ')
+    echo "TEARDOWN $topo: $td"
+    [[ "$td" == "ERROR_INDICATIONS=0 NG_END=shutdown RELEASE_REQUESTS_REPEATED=0 " ]] || rc=1
+done
 echo "COMPONENT=$([[ $rc -eq 0 ]] && echo PASS || echo FAIL) RUN=build/component/last"
 exit "$rc"

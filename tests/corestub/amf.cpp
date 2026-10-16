@@ -413,17 +413,17 @@ void Amf::on_registration_request(const nas::Message& m, bool initial, Sht sht, 
                            guti_->amf_set == id->amf_set && guti_->amf_pointer == id->amf_pointer;
         if (known) {
             supi_ = guti_supi_;
-        } else if (p_.forget_on_deregistration) {
-            // §5.4.3: identification. No context, so the request goes plain and
-            // the UE answers it before secure exchange (§4.4.4.2).
+        } else {
+            // §5.5.1.2.2, §5.4.3: a 5G-GUTI this AMF cannot resolve is identified. It is one it
+            // forgot at a de-registration (forget_on_deregistration), or another AMF's: a card
+            // keeps its last 5G-GUTI from run to run (P2 Q14 prep, KS-PLAT-D21). No context, so
+            // the request goes plain and the UE answers it before secure exchange (§4.4.4.2).
             nas::Message q = make(kIdentityRequest);
             put(q, "Identity type", Bytes{ie::IdentityType::suci});
             send(q, false);
             state_ = State::identifying;
             ++identity_requests_;
             return;
-        } else {
-            check(false, "5.5.1.2.2", "the 5G-GUTI is the one this AMF assigned");
         }
     } else {
         check(false, "5.5.1.2.2", "the identity is a SUCI or a 5G-GUTI");

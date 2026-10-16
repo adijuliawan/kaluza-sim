@@ -286,6 +286,27 @@ TEST(Ran, F1LossAsksTheAmfToReleaseTheUeAndTheReleaseCompletesWithoutTheDu) {
     EXPECT_TRUE(g.failures().empty()) << g.failures();
 }
 
+// P2 Q14 prep (KS-NGAP-D5; TS 38.413 §8.3.2): the CU-CP asks the AMF once per UE. Here the AMF's
+// UE CONTEXT RELEASE COMMAND comes 2 s late (a loaded core's), and F1 goes in between: the CU-CP
+// does not ask again for a UE it asked for already (LW1b's teardown asked twice for 52 UEs).
+TEST(Ran, AUeAskedForIsNotAskedForAgainWhenF1GoesBeforeTheAmfAnswers) {
+    Gnb g;
+    g.register_ue();
+    g.amf.set_release_delay(2'000);
+    const auto list = g.cucp.ue_list();
+    ASSERT_EQ(list.size(), 1u);
+    ASSERT_TRUE(g.cucp.request_release(list.front().ran_ue, "user-inactivity"));
+    ASSERT_TRUE(g.loop.run_until([&] { return g.amf.count("UEContextReleaseRequest") == 1; }, g.loop.now() + 500));
+    g.f1.a().abort();   // the DU's end goes before the AMF answers
+    ASSERT_TRUE(g.loop.run_until([&] { return g.amf.count("UEContextReleaseComplete") == 1; }, g.loop.now() + 4'000))
+        << g.failures();
+    EXPECT_EQ(g.amf.count("UEContextReleaseRequest"), 1u);
+    EXPECT_EQ(g.amf.repeated_release_requests(), 0u);
+    EXPECT_EQ(g.named("ran.ue.release_request").size(), 1u);
+    EXPECT_EQ(g.cucp.ues(), 0u);
+    EXPECT_TRUE(g.failures().empty()) << g.failures();
+}
+
 // P2 Q4 (TS 38.473 8.2.5.2): the gNB-CU takes the DU's cell off the air and puts it back; a cell that
 // is not the DU's cannot be activated and is listed so in the acknowledge.
 TEST(Ran, F1ap8_2_5_TheGnbCuDeactivatesAndActivatesTheCell) {

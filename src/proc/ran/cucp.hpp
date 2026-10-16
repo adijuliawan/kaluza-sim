@@ -192,6 +192,7 @@ private:
         std::uint32_t cu_ue = 0;
         std::uint32_t du_ue = 0;
         bool du_gone = false;            // P2 Q2: F1 was lost while the AMF knew the UE
+        bool release_asked = false;      // a UE CONTEXT RELEASE REQUEST went to the AMF (P2 Q14 prep)
         std::uint32_t ran_ue = 0;
         std::optional<std::uint64_t> amf_ue;
         std::uint16_t c_rnti = 0;
@@ -330,6 +331,10 @@ private:
     std::unique_ptr<entity::Pdcp> make_srb(std::uint32_t cu_ue, std::uint8_t srb);
     void dl_dcch(Ue& ue, Result<Bytes> msg, std::uint8_t srb = 0);
     void release_locally(Ue& ue);
+    /// Asks the AMF to release the UE (TS 38.413 §8.3.2), once: its UE CONTEXT RELEASE COMMAND
+    /// answers the request, so a UE already asked for, or being released, is not asked again
+    /// unless `again` (an operator's ksim-ctl gnb ue-release). False when nothing was sent.
+    bool ask_release(Ue& ue, const std::string& cause, bool again = false);
 
     Ue* by_cu(std::uint32_t id);
     Ue* by_ran(std::uint32_t id);

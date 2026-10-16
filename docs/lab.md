@@ -117,7 +117,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
     sudo systemctl daemon-reload && sudo systemctl restart ksim-netd
     ```
 
-    Done by the user on 2026-10-16 at 19:33 KST: netd v3 from the release build of 45bbae7's tree, with the `ksim-netd-devpc.service` unit (`--uid 1000 --dn 10.60.0.0/24`). The P2 Q12 performance harness (`tools/perf/perf.sh`, KS-PLAT-B53) uses it for the UE and DN namespaces. For Q12's profile the user also set `kernel.perf_event_paranoid=1` with sysctl, until the next reboot (it was 4).
+    Done by the user on 2026-10-16 at 19:33 KST: netd v3 from the release build of 45bbae7's tree, with the `ksim-netd-devpc.service` unit (`--uid 1000 --dn 10.60.0.0/24`). The P2 Q12 performance harness (`tools/perf/perf.sh`, KS-PLAT-B53) uses it for the UE and DN namespaces. For Q12's profile the user also set `kernel.perf_event_paranoid=1` with sysctl, until the next reboot (it was 4). On 2026-10-17 at 02:07 KST the user installed netd again from the release build of b8ffa0c's tree, with KS-PLAT-D18's fix: a SIGTERM to the PID `ksim-ctl netd exec` prints now ends the command too (checked with a `sleep` in a scratch namespace).
 
     The privileged hooks (`KSIM_CI_PRIV=1 tools/ci.d/66-netd-priv.sh full`, `67-netns.sh full`) start their own netd from `build/dev` and need no install. From Q6 they check the DN namespace's TUN with an echo, and the data plane in split mode.
   - **The VM's is mine in a window (LW1's setup, D6):** the deploy prints the same steps.
@@ -178,9 +178,9 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
       - LW1b registered 100 UEs with a session each in 18.8 s.
       - LW2 ran OCUDU at .36/.37 in our namespaces: the C3 rows, the P1 rows that apply, and 100 UEs through OCUDU in 26.4 s (KS-PLAT-T56).
       - LW2's first start failed on OCUDU's buffered console (KS-PLAT-D15) and was retried after the fix.
-    - **Two teardown defects kaluza-core-92 reported (to fix before LW5):**
-      - After the AMF has released a UE, our CU-CP asks twice more for its release when F1 goes at teardown.
-      - Our gNB ends its NG association with COMM_LOST, not a graceful SHUTDOWN after the last release. That triggers the AMF race F-77 the core is fixing.
+    - **Two teardown defects kaluza-core-92 reported, fixed before LW5 (P2 Q14 prep):**
+      - Our CU-CP asked for a UE's release again when F1 went at teardown, though our DU's radio-loss request had asked already (KS-NGAP-D5). It now asks once per UE.
+      - Our gNB ended NG with an ABORT (the AMF's COMM_LOST, which set off its race F-77) while the AMF's releases were still queued (KS-PLAT-D20). A stop now waits for the releases under way, then ends NG with a graceful SHUTDOWN. kaluza-core's F-77 fix (kaluza-amf:671c7c89, 2026-10-17 00:11 KST) is proved by LW5's teardowns.
     - **LW3** (Q15): the throughput set inside the VM against the scripted core on 127.0.0.x. Nothing crosses `ens19` or the trunk, but it needs the VM free of core sets.
     - **LW4** (Q14): the real card imsi-001010000300100 through the dev-PC bridge (§7).
     - **LW5** (Q14): the full P2 row set in split mode.

@@ -85,11 +85,37 @@ NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc
                 [this](const std::string& supi) { page(supi); },
                 [this] { return static_cast<std::uint64_t>(ex_.now()); }},
             p_.sms_sc) {
-    ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [](LinkEvent) {});
+    ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [this](LinkEvent e) { on_ng_event(e); });
     smf_.on_page([this](const std::string& supi, std::uint8_t) { page(supi); });
 }
 
 void NgapAmf::set_sms_subscribed(const std::string& supi, bool on) { sms_sub_[supi] = on; }
+
+void NgapAmf::on_ng_event(LinkEvent e) {
+    if (e == LinkEvent::shutdown) {
+        ng_end_ = "shutdown";
+    } else if (e == LinkEvent::lost) {
+        ng_end_ = "lost";
+    }
+}
+
+void NgapAmf::command_release(std::uint64_t amf_ue, const ngap::Cause& cause) {
+    const Ue* now = by_amf(amf_ue);
+    const std::uint32_t ran = now != nullptr ? now->ran_ue : 0;
+    // Late, the command is for the NG connection it was meant for: not one released meanwhile
+    // (by the other command) or a new one.
+    const auto send_it = [this, amf_ue, ran, cause] {
+        if (Ue* u = by_amf(amf_ue); u != nullptr && u->connected && !u->releasing && u->ran_ue == ran) {
+            u->releasing = true;
+            send(ngap::UeContextReleaseCommand{u->amf_ue, u->ran_ue, cause}, stream_of(*u));
+        }
+    };
+    if (release_delay_ <= 0) {
+        send_it();
+        return;
+    }
+    (void)ex_.start_timer(release_delay_, send_it);
+}
 
 std::optional<Bytes> NgapAmf::radio_capability(std::uint64_t amf_ue) {
     Ue* u = by_amf(amf_ue);
@@ -98,7 +124,7 @@ std::optional<Bytes> NgapAmf::radio_capability(std::uint64_t amf_ue) {
 
 void NgapAmf::rebind(IAssoc& ng) {
     ng_ = &ng;
-    ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [](LinkEvent) {});
+    ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [this](LinkEvent e) { on_ng_event(e); });
     ng_setup_ = false;
     for (auto& [id, ue] : ues_) {
         drop_n2(ue);
@@ -111,6 +137,7 @@ void NgapAmf::drop_n2(Ue& ue) {
     }
     ue.connected = false;
     ue.releasing = false;
+    ue.asked = false;
     ue.setups.clear();
     ue.releases.clear();
     ue.nas->on_ue_released();
@@ -351,12 +378,7 @@ void NgapAmf::relink(Ue& ue) {
             send(ngap::DownlinkNasTransport{u->amf_ue, u->ran_ue, std::move(nas)}, stream_of(*u));
         }
     };
-    link.release = [this, id] {
-        if (Ue* u = by_amf(id)) {
-            u->releasing = true;
-            send(ngap::UeContextReleaseCommand{u->amf_ue, u->ran_ue, ngap::Cause{"nas", "normal-release"}}, stream_of(*u));
-        }
-    };
+    link.release = [this, id] { command_release(id, ngap::Cause{"nas", "normal-release"}); };
     link.initial_context = [this, id](Bytes accept, SecretBytes kgnb) {
         if (Ue* u = by_amf(id)) {
             send_ics(*u, std::move(accept), std::move(kgnb), {});
@@ -474,7 +496,7 @@ void NgapAmf::on_message(ByteView msg) {
                            moved.amf_ue = next_amf_ue_++;
                            moved.ran_ue = m.ran;
                            moved.connected = true;
-                           moved.ics_sent = moved.ics_answered = moved.releasing = false;
+                           moved.ics_sent = moved.ics_answered = moved.releasing = moved.asked = false;
                            moved.setups.clear();
                            moved.releases.clear();
                            moved.paged_at.reset();
@@ -534,8 +556,12 @@ void NgapAmf::on_message(ByteView msg) {
                    [&](const ngap::UeContextReleaseRequest& m) {
                        last_release_cause_ = m.cause.value;
                        if (Ue* ue = by_amf(m.amf)) {
-                           ue->releasing = true;
-                           send(ngap::UeContextReleaseCommand{ue->amf_ue, ue->ran_ue, m.cause}, stream_of(*ue));
+                           if (ue->asked || ue->releasing) {
+                               ++repeated_requests_;   // one is enough: the command answers it
+                               return;
+                           }
+                           ue->asked = true;
+                           command_release(ue->amf_ue, m.cause);
                        }
                    },
                    [&](const ngap::UeRadioCapabilityInfoIndication& m) {

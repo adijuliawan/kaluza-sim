@@ -88,6 +88,14 @@ public:
 
     /// Tears everything down on the shard, then stops it. Idempotent.
     void stop();
+    /// P2 Q14 prep (KS-PLAT-D20): before a stop, waits while the DU still holds UE contexts the
+    /// network is releasing (a UE that switched off waits for the AMF's UE CONTEXT RELEASE
+    /// COMMAND, which a loaded core may send seconds later): until the DU holds none, its count
+    /// has not fallen for `stall`, or `bound` is up. A stop before then would leave the AMF with
+    /// releases on an association that goes, and the CU-CP would ask again when F1 goes.
+    /// Returns the DU's UE contexts left.
+    std::size_t drain(std::chrono::milliseconds bound = std::chrono::seconds(10),
+                      std::chrono::milliseconds stall = std::chrono::seconds(3));
 
     EventRing& events() noexcept { return events_; }
     const Topology& topology() const noexcept { return topo_; }

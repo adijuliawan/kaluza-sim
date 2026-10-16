@@ -68,6 +68,16 @@ public:
     /// The cause of the last UE CONTEXT RELEASE REQUEST, "" before one (P2 Q5: a peer
     /// CU-CP's release is seen here only).
     const std::string& last_release_cause() const noexcept { return last_release_cause_; }
+    /// P2 Q14 prep (KS-PLAT-D20): the UE CONTEXT RELEASE COMMAND comes `ms` late, after a
+    /// de-registration and in answer to a UE CONTEXT RELEASE REQUEST, as a loaded core's may.
+    void set_release_delay(Millis ms) noexcept { release_delay_ = ms; }
+    Millis release_delay() const noexcept { return release_delay_; }
+    /// How the last NG association ended: "shutdown" (SCTP's graceful SHUTDOWN), "lost" (an
+    /// ABORT or a lost peer), "-" while none has.
+    const std::string& ng_end() const noexcept { return ng_end_; }
+    /// UE CONTEXT RELEASE REQUESTs for a UE that had asked already, or whose release the AMF
+    /// had begun: TS 38.413 §8.3.2 wants one, the command its answer.
+    std::uint64_t repeated_release_requests() const noexcept { return repeated_requests_; }
     std::optional<ngap::Cause> last_error_cause() const { return last_error_; }
 
     /// Downlink NGAP as a test scripts it (raw octets).
@@ -106,6 +116,7 @@ private:
         bool ics_answered = false;
         bool ambr_sent = false;                // the UE AMBR went in this UE's NG connection (P2 Q4)
         bool releasing = false;
+        bool asked = false;                    // a UE CONTEXT RELEASE REQUEST came (P2 Q14 prep)
         std::optional<Bytes> radio_capability;
         std::vector<std::uint8_t> setups;      // PSIs with a resource setup awaiting its response
         std::vector<std::uint8_t> releases;    // and with a release awaiting its response
@@ -148,6 +159,13 @@ private:
     std::uint64_t notify_not_fulfilled_ = 0;
     std::uint64_t refused_flows_ = 0;
     std::string last_release_cause_;
+    Millis release_delay_ = 0;
+    std::string ng_end_ = "-";
+    std::uint64_t repeated_requests_ = 0;
+    void on_ng_event(LinkEvent e);
+    /// The UE's UE CONTEXT RELEASE COMMAND, at once or release_delay_ late (if it is still there
+    /// and not released by then).
+    void command_release(std::uint64_t amf_ue, const ngap::Cause& cause);
     std::optional<ngap::Cause> last_error_;
     std::size_t pagings_ = 0;
 };

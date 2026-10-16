@@ -158,6 +158,7 @@ public:
 
     void bind(api::Server& server, std::atomic<bool>& stop);
     void shutdown();
+    void drain();
     std::string manifest_roles() const {
         json r = json::object();
         for (const auto& c : children_) {
@@ -442,6 +443,46 @@ void Supervisor::restart_gnb() {
     restarting_ = false;
 }
 
+// P2 Q14 prep (KS-PLAT-D20): the releases under way end before any role stops, as in an
+// all-in-one run (AllInOne::drain): the DU's UE contexts go when the AMF's UE CONTEXT RELEASE
+// COMMANDs have come through the CU-CP, ours or the peer's. The DU's role is asked until it holds
+// none, its count has not fallen for 3 s, or 10 s are up. Then F1 goes with no UE left for a
+// CU-CP to ask the AMF about again, and the CU-CP's role ends NG with a graceful SHUTDOWN.
+void Supervisor::drain() {
+    Child* du = child("du");
+    if (du == nullptr || du->pid.load() <= 0) {
+        return;
+    }
+    const std::string path = "/v1/du/" + encode(t_.gnb_name + "-du") + "/ue-list";
+    const auto count = [&]() -> long {
+        const Reply r = call(*du, "GET", path, json(), std::chrono::seconds(5));
+        if (r.exit != Exit::ok || !r.kv.contains("UES") || !r.kv.at("UES").is_string()) {
+            return 0;
+        }
+        return std::atol(r.kv.at("UES").get<std::string>().c_str());
+    };
+    const auto start = std::chrono::steady_clock::now();
+    auto last_fall = start;
+    long n = count();
+    const long first = n;
+    while (n > 0) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now - start >= std::chrono::seconds(10) || now - last_fall >= std::chrono::seconds(3)) {
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        const long m = count();
+        if (m < n) {
+            last_fall = std::chrono::steady_clock::now();
+        }
+        n = m;
+    }
+    if (first > 0) {
+        log::info("ksim", "stop: {} of {} UE contexts at the DU released in {} ms", first - n, first,
+                  std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+    }
+}
+
 void Supervisor::shutdown() {
     if (stopping_.exchange(true)) {
         return;
@@ -449,6 +490,7 @@ void Supervisor::shutdown() {
     if (restarter_.joinable()) {
         restarter_.join();
     }
+    drain();
     for (const char* r : {"ue", "du", "cuup", "cucp"}) {
         if (Child* c = child(r)) {
             stop_child(*c);

@@ -188,11 +188,7 @@ void CuCp::on_f1_event(LinkEvent e) {
             continue;
         }
         ue.du_gone = true;
-        if (ue.phase != Phase::releasing) {
-            events_.emit("ran.ue.release_request", cfg_.id, {{"ran_ue", str(ue.ran_ue)}, {"cause", "radio-connection-with-ue-lost"}});
-            send_ngap(ngap::UeContextReleaseRequest{*ue.amf_ue, ue.ran_ue, ngap::Cause{"radioNetwork", "radio-connection-with-ue-lost"}},
-                      ue.ran_ue);
-        }
+        (void)ask_release(ue, "radio-connection-with-ue-lost");
     }
     for (std::uint32_t cu : local) {
         ues_.erase(cu);
@@ -382,9 +378,18 @@ Result<void> CuCp::request_release(std::uint32_t ran_ue, const std::string& caus
         // A UE whose context or sessions are being set up is not inactive.
         return make_error(Errc::invalid_argument, ran_ue, "CU-CP: a UE procedure is in progress");
     }
-    events_.emit("ran.ue.release_request", cfg_.id, {{"ran_ue", str(ue->ran_ue)}, {"cause", cause}});
-    send_ngap(ngap::UeContextReleaseRequest{*ue->amf_ue, ue->ran_ue, ngap::Cause{"radioNetwork", cause}}, ue->ran_ue);
+    (void)ask_release(*ue, cause, true);
     return {};
+}
+
+bool CuCp::ask_release(Ue& ue, const std::string& cause, bool again) {
+    if (!ue.amf_ue || (!again && (ue.release_asked || ue.phase == Phase::releasing))) {
+        return false;
+    }
+    ue.release_asked = true;
+    events_.emit("ran.ue.release_request", cfg_.id, {{"ran_ue", str(ue.ran_ue)}, {"cause", cause}});
+    send_ngap(ngap::UeContextReleaseRequest{*ue.amf_ue, ue.ran_ue, ngap::Cause{"radioNetwork", cause}}, ue.ran_ue);
+    return true;
 }
 
 void CuCp::handle(const f1ap::UeContextReleaseRequest& m) {
@@ -397,9 +402,7 @@ void CuCp::handle(const f1ap::UeContextReleaseRequest& m) {
         return;
     }
     // TS 38.413 §8.3.2 (L1): the radio connection is gone.
-    events_.emit("ran.ue.release_request", cfg_.id, {{"ran_ue", str(ue->ran_ue)}, {"cause", "radio-connection-with-ue-lost"}});
-    send_ngap(ngap::UeContextReleaseRequest{*ue->amf_ue, ue->ran_ue, ngap::Cause{"radioNetwork", "radio-connection-with-ue-lost"}},
-              ue->ran_ue);
+    (void)ask_release(*ue, "radio-connection-with-ue-lost");
 }
 
 void CuCp::handle(const f1ap::UeContextReleaseComplete& m) {
@@ -901,12 +904,8 @@ void CuCp::on_e1_event(LinkEvent e) {
     for (auto& [cu, ue] : ues_) {
         const bool had = ue.cu_up_ue.has_value();
         ue.cu_up_ue.reset();
-        if (had && ue.amf_ue && ue.phase != Phase::releasing) {
-            events_.emit("ran.ue.release_request", cfg_.id,
-                         {{"ran_ue", str(ue.ran_ue)}, {"cause", "release-due-to-ngran-generated-reason"}});
-            send_ngap(ngap::UeContextReleaseRequest{*ue.amf_ue, ue.ran_ue,
-                                                    ngap::Cause{"radioNetwork", "release-due-to-ngran-generated-reason"}},
-                      ue.ran_ue);
+        if (had) {
+            (void)ask_release(ue, "release-due-to-ngran-generated-reason");
         }
     }
 }
@@ -931,8 +930,8 @@ void CuCp::on_e1(ByteView msg) {
                        Ue* ue = by_cu(m.cu_cp_ue);
                        events_.emit("ran.e1.inactivity", cfg_.id,
                                     {{"cu_cp_ue", str(m.cu_cp_ue)}, {"active", m.active ? "1" : "0"}});
-                       if (ue != nullptr && !m.active) {
-                           (void)request_release(ue->ran_ue, "user-inactivity");
+                       if (ue != nullptr && !m.active && ue->jobs.empty()) {
+                           (void)ask_release(*ue, "user-inactivity");   // a UE asked for already is not asked again
                        }
                    },
                    [this](const e1ap::BearerContextSetupFailure& m) {
