@@ -23,6 +23,8 @@ set -u
 [ "$(ctl faults list | kv FAULTS)" = 0 ] || abort "the run has faults set"
 GNB=$(ctl info | kv GNB)
 : "${GNB:=ksim-gnb1}"
+set_run_mode
+PEER_CUUP=$(ctl info | kv PEER_CUUP)
 : "${SPLIT_UE1:=11}"
 : "${SPLIT_UE2:=12}"
 for u in "$SPLIT_UE1" "$SPLIT_UE2"; do
@@ -59,7 +61,11 @@ done
 row ksim-p2.roles-separate '^nodes=4 up=4 pids=4 dirs=4$' "nodes=$n up=$up pids=$pids dirs=$dirs"
 
 echo "-- F1-C and E1 over SCTP"
-f1=$(ctl wait ran.f1.setup --where du=$GNB-du --timeout 15s | kv EVENT)
+# Our CU-CP's event names the DU; with OCUDU's CU-CP (C3, C5) the DU's own names the cell.
+case "$KSIM_RUN_MODE" in
+    C3|C5) f1=$(ctl wait ran.f1.setup --where cell_active=1 --timeout 15s | kv EVENT) ;;
+    *) f1=$(ctl wait ran.f1.setup --where du=$GNB-du --timeout 15s | kv EVENT) ;;
+esac
 row ksim-p2.f1-setup-sctp '^f1setup=ran.f1.setup sctp=[1-9][0-9]* wrong_ppid=0$' \
     "f1setup=$f1 sctp=$(sctp_estab 38472) wrong_ppid=$(ctl du "$GNB-du" ue-list | kv WRONG_PPID)"
 e1=$(ctl wait ran.e1.setup --timeout 15s | kv EVENT)
@@ -84,15 +90,22 @@ row ksim-p2.per-ue-stream '^streams=[0-9,]+ distinct=([2-9]|[1-9][0-9]+) on_stre
 echo "-- F1-U over UDP (UE $SPLIT_UE1)"
 ctl ue "$SPLIT_UE1" ps-establish ipv4 --dnn internet $SLICE --wait 15s >/dev/null || abort "UE $SPLIT_UE1 got no session"
 ping=$(ctl ue "$SPLIT_UE1" ping "${DN_ADDR:-10.60.0.1}" -c 3 --interval 200 | kv RECEIVED)
-bearers=$(ctl cuup "$GNB-cuup" bearers)
 f1u=$(tshark_fields "$RUN/gtpu.pcapng" "udp.port == 2152 && ip.addr == 127.0.10.2" frame.number | wc -l)
+if [ -n "$PEER_CUUP" ]; then
+    # OCUDU's CU-UP (C3, C4): the user data our DU passed over F1-U, its SDUs each way.
+    du=$(ctl du "$GNB-du" ue-list)
+    dl=$(printf '%s\n' "$du" | kv DL_SDUS); ul=$(printf '%s\n' "$du" | kv UL_SDUS)
+else
+    bearers=$(ctl cuup "$GNB-cuup" bearers)
+    dl=$(printf '%s\n' "$bearers" | kv DL_PACKETS); ul=$(printf '%s\n' "$bearers" | kv UL_PACKETS)
+fi
 row ksim-p2.f1u-udp '^received=[1-9] dl=[1-9][0-9]* ul=[1-9][0-9]* f1u_frames=[1-9][0-9]*$' \
-    "received=$ping dl=$(printf '%s\n' "$bearers" | kv DL_PACKETS) ul=$(printf '%s\n' "$bearers" | kv UL_PACKETS) f1u_frames=$f1u"
+    "received=$ping dl=$dl ul=$ul f1u_frames=$f1u"
 release_all "$SPLIT_UE1"
 
-if [ "$CORE" != stub ]; then
-    skip_row ksim-p2.f1-loss-release "the DU's restart is for the stub only"
-    skip_row ksim-p2.f1-reassociation "the CU-CP's restart is for the stub only"
+if [ "$CORE" != stub ] || [ "$KSIM_RUN_MODE" != split ]; then
+    skip_row ksim-p2.f1-loss-release "the DU's restart is for the stub only, in split mode"
+    skip_row ksim-p2.f1-reassociation "the CU-CP's restart is for the stub only, in split mode"
     ctl ue "$SPLIT_UE1" deregister normal --wait 15s >/dev/null
     ctl ue "$SPLIT_UE2" deregister normal --wait 15s >/dev/null
     summary "ksim-p2-split"

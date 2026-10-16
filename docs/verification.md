@@ -81,6 +81,8 @@ P2's rows are `gates/rows/p2.tsv` ([ADR 0011](adr/0011-p2-runtime-shape.md), [AD
 
 Rows the cores cannot serve are scored where they can be (the user, 2026-10-15, and kaluza-core-df's facts): reflective QoS and the UP security policy on the stub (and Open5GS where its SMF sends the IE), GBR on the stub and Open5GS. On kaluza-core those sessions record the gNB default they get.
 
+With OCUDU's CU-CP (C3, C5) there is no ksim verb to release a UE, so the gates wait for OCUDU's own inactivity release (`gates/lib/ksim.sh`, `ran_release`). A row whose evidence is in OCUDU's own NGAP, the release request's cause, is scored from its capture once `gates/run.sh` has stopped it (`peer_row`, `gates/lib/peer_rows.sh`): OCUDU writes its captures only when it exits (KS-PLAT-B58).
+
 ## 4. Parity crosswalk (P4)
 
 - **Baseline:** the 1,633 rows of the 23 gates that start a UERANSIM gNB, in `/home/amadeus/Development/kaluza-core/docs/compliance/smf/phase-2/rows-k3s-963130e1-native-eupf-75d3202.tsv` (`phase-2-final`).

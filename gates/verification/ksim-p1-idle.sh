@@ -30,13 +30,10 @@ GNB=$(ctl info | kv GNB)
 stub() { "$KSIM_CTL" --socket "$STUB_CTL" stub "$@"; }
 on_stub() { [ "$CORE" = stub ] && [ -n "${STUB_CTL:-}" ]; }
 
+set_run_mode
 # release UE: the gNB releases the UE (user inactivity); the UE's nas.mm.cm_idle event is printed.
-release() {
-    _seq=$(ctl info | kv EVENT_SEQ)
-    ctl gnb "$GNB" ue-release "$1" >/dev/null || abort "gnb ue-release $1 refused"
-    ctl ue "$1" wait nas.mm.cm_idle --since "$_seq" --timeout 10s
-    ctl wait ran.ue.released --since "$_seq" --timeout 10s >/dev/null
-}
+# In C3 and C5 OCUDU's CU-CP does, on its inactivity timer (gates/lib/ksim.sh, ran_release).
+release() { ran_release "$1"; }
 
 # dn_ping UE SUPI PSI IP: a ping from the DN to the UE; prints answered=<0|1>.
 # In inject mode the sim answers and says so (ue.ping.answered); in netns mode
@@ -55,6 +52,7 @@ dn_ping() {
 }
 
 echo "-- CM-IDLE after a RAN release (UE 6)"
+t0=$(date +%s.%N)
 reg=$(ctl ue 6 power on --wait 30s)
 [ "$(printf '%s\n' "$reg" | kv RESULT)" = ACCEPT ] || abort "UE 6 did not register"
 supi=$(printf '%s\n' "$reg" | kv UE)
@@ -63,11 +61,25 @@ psi=$(printf '%s\n' "$est" | kv PSI); ip=$(printf '%s\n' "$est" | kv IP)
 [ -n "$psi" ] || abort "UE 6 has no session"
 seq=$(ctl info | kv EVENT_SEQ)
 idle=$(release 6)
+t1=$(date +%s.%N | awk '{printf "%.3f", $1 + 1}')
 t3512=$(ctl ue 6 wait nas.mm.t3512 --since "$seq" --timeout 5s | kv SECONDS)
-cause=$(ctl wait ran.ue.release_request --since "$seq" --timeout 5s | kv CAUSE)
-got="$(printf '%s\n' "$idle" | kv EVENT) cause=$cause"
-row amf-ueransim.023 '^nas.mm.cm_idle cause=user-inactivity$' "$got"
-row smf-ueransim.041 '^nas.mm.cm_idle cause=user-inactivity$' "$got"
+case "$KSIM_RUN_MODE" in
+    C3|C5)
+        # The release request is OCUDU's NGAP, in its capture (written when it stops): the
+        # one UE 6's registration, session and release brought, UE 6 alone being on.
+        for r in amf-ueransim.023 smf-ueransim.041; do
+            peer_row "$r" '^nas.mm.cm_idle cause=user-inactivity$' "$(printf '%s\n' "$idle" | kv EVENT) cause=@PEER@" \
+                ocudu-cucp-ngap.pcap "$t0" "$t1" ngap.UEContextReleaseRequest_element ngap.radioNetwork \
+                "20=user-inactivity,21=radio-connection-with-ue-lost,0=unspecified"
+        done
+        ;;
+    *)
+        cause=$(ctl wait ran.ue.release_request --since "$seq" --timeout 5s | kv CAUSE)
+        got="$(printf '%s\n' "$idle" | kv EVENT) cause=$cause"
+        row amf-ueransim.023 '^nas.mm.cm_idle cause=user-inactivity$' "$got"
+        row smf-ueransim.041 '^nas.mm.cm_idle cause=user-inactivity$' "$got"
+        ;;
+esac
 row amf-ueransim.024 "^t3512=$T3512_S\$" "t3512=$t3512"
 
 echo "-- an uplink ping from idle"

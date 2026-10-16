@@ -6,7 +6,9 @@
 # ksim-corestub, all on 127.0.0.x, with tools/ocudu-peer.sh's build of the pin
 # (gates/run.sh starts the peers from each topology and stops them):
 #   1. C3, our UE farm and DU with OCUDU's CU-CP and CU-UP: gates/verification/ksim-p2-ocudu.sh
-#      on topologies/ocudu-c3-stub.yaml;
+#      on topologies/ocudu-c3-stub.yaml, then (P2 Q13+) the P1 gates and the split gate in C3:
+#      their releases wait for OCUDU's inactivity timer, and the release cause is scored from
+#      OCUDU's NGAP capture once it stops (gates/lib/peer_rows.sh);
 #   2. C4, OCUDU's CU-UP with our CU-CP, and C5, OCUDU's CU-CP with our CU-UP: the E1 gate and
 #      the P1 session and data-plane gates (topologies/ocudu-c4-stub.yaml, ocudu-c5-stub.yaml);
 #   3. tools/pcap_check.py on our captures (the peer's reported apart) and the canary over
@@ -69,7 +71,8 @@ checks() {   # $1 = label: the oracles and the canary over that run
 
 rc=0
 echo "-- 1. C3: our DU and UEs, OCUDU's CU-CP and CU-UP, the stub"
-gate c3 ocudu-c3-stub.yaml "$V/ksim-p2-ocudu.sh" || rc=1
+gate c3 ocudu-c3-stub.yaml "$V/ksim-p2-ocudu.sh $V/ksim-p1-reg.sh $V/ksim-p1-session.sh $V/ksim-p1-dataplane.sh \
+    $V/ksim-p1-idle.sh $V/ksim-p1-sms.sh $V/ksim-p1-restart.sh $V/ksim-p2-split.sh" || rc=1
 cat "$OUT/c3.out"
 echo "-- 2. C4 and C5: E1 with OCUDU on either side"
 gate c4 ocudu-c4-stub.yaml "$V/ksim-p2-e1.sh $V/ksim-p1-session.sh $V/ksim-p1-dataplane.sh" || rc=1
@@ -114,8 +117,9 @@ echo "-- 5. nothing left"
 grep -qx 'OCUDU_LEFT=0' "$OUT/stop.out" || rc=1
 
 fails=$(awk -F'\t' '$2 == "FAIL"' "$OUT/c3.rows.tsv" 2>/dev/null | wc -l)
-passes=$(awk -F'\t' '$2 == "PASS"' "$OUT/c3.rows.tsv" 2>/dev/null | wc -l)
-[[ "$fails" -eq 0 && "$passes" -ge 9 ]] || rc=1
+passes=$(awk -F'\t' '$2 == "PASS" && $1 ~ /^ksim-p2\.ocudu-/' "$OUT/c3.rows.tsv" 2>/dev/null | wc -l)
+others=$(awk -F'\t' '$2 == "PASS" && $1 !~ /^ksim-p2\.ocudu-/' "$OUT/c3.rows.tsv" 2>/dev/null | wc -l)
+[[ "$fails" -eq 0 && "$passes" -ge 9 && "$others" -ge 1 ]] || rc=1
 e1_fail=$(cat "$OUT/c4.rows.tsv" "$OUT/c5.rows.tsv" 2>/dev/null | awk -F'\t' '$2 == "FAIL"' | wc -l)
 e1_pass=$(cat "$OUT/c4.rows.tsv" "$OUT/c5.rows.tsv" 2>/dev/null | awk -F'\t' '$2 == "PASS"' | wc -l)
 e1_allowed=$(cat "$OUT/c4.rows.tsv" "$OUT/c5.rows.tsv" 2>/dev/null | awk -F'\t' '$2 == "ALLOWED"' | wc -l)
@@ -125,6 +129,7 @@ e1_allowed=$(cat "$OUT/c4.rows.tsv" "$OUT/c5.rows.tsv" 2>/dev/null | awk -F'\t' 
     echo "OCUDU_PIN=$PIN"
     sed 's/^/OCUDU_/' "$HOME/kaluza-sim-peers/ocudu-$PIN/PIN" | sed -n 's/^OCUDU_\(ocucp\|ocuup\)=[^ ]* sha256=/OCUDU_\U\1\E_SHA256=/p'
     echo "OCUDU_C3_PASS=$passes"
+    echo "OCUDU_C3_OTHER_PASS=$others"   # the P1 and split rows in C3 (P2 Q13+)
     echo "OCUDU_C3_FAIL=$fails"
     echo "OCUDU_C4_C5_PASS=$e1_pass"
     echo "OCUDU_C4_C5_ALLOWED=$e1_allowed"

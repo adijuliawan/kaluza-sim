@@ -133,6 +133,53 @@ skip_row() {
     skip=$((skip + 1)); printf '  SKIP  %-66s %s\n' "$_text" "$2"; record "$1" SKIP "$2"
 }
 
+# ran_release UE: the gNB releases the UE for user inactivity, and the UE's nas.mm.cm_idle
+# event is printed. Our CU-CP does it on ksim-ctl gnb ue-release. OCUDU's (C3, C5) has no
+# verb of ours: its inactivity timer (15 s, topologies/peers/ocudu/cucp.yml.in) releases the
+# UE, so that is waited for, and a UE it released already prints that event (P2). OCUDU
+# releases for inactivity only on its CU-UP's E1 inactivity notification
+# (lib/cu_cp/cu_cp_impl.cpp, handle_bearer_context_inactivity_notification), that is for a
+# UE with a session: a UE with none (the SMS gate's) gets an internet session first.
+ran_release() {
+    [ -n "${KSIM_RUN_MODE:-}" ] || set_run_mode
+    _seq=$(ctl info | kv EVENT_SEQ)
+    case "$KSIM_RUN_MODE" in
+        C3|C5)
+            if ! ctl ue "$1" ps-list | grep -q '^PS\.[0-9][0-9]*\.DNN='; then
+                ctl ue "$1" ps-establish ipv4 --dnn internet $SLICE --wait 15s >/dev/null ||
+                    abort "UE $1 got no session for OCUDU's inactivity release"
+                _seq=$(ctl info | kv EVENT_SEQ)
+            fi
+            if [ "$(ctl ue "$1" status | kv CM_STATE)" = CM-IDLE ]; then
+                ctl ue "$1" events --since 0 | grep '"nas.mm.cm_idle"' | tail -n 1 | grep -q . &&
+                    echo "EVENT=nas.mm.cm_idle"
+            else
+                ctl ue "$1" wait nas.mm.cm_idle --since "$_seq" --timeout 40s
+            fi
+            ;;
+        *)
+            ctl gnb "${GNB:?}" ue-release "$1" >/dev/null || abort "gnb ue-release $1 refused"
+            ctl ue "$1" wait nas.mm.cm_idle --since "$_seq" --timeout 10s
+            ctl wait ran.ue.released --since "$_seq" --timeout 10s >/dev/null
+            ;;
+    esac
+}
+
+# peer_row ID WANT GOT CAPTURE T0 T1 FILTER FIELD [MAP]: a row whose evidence is in the
+# interop peer's own capture (P2): OCUDU writes its captures only when it exits. The row
+# goes to $PEER_DIR/rows-after.tsv, and gates/lib/peer_rows.sh scores it once gates/run.sh
+# has stopped the peer: @PEER@ in GOT becomes FIELD of the first frame of CAPTURE (a file
+# in $PEER_DIR) that matches the display FILTER between the wall-clock times T0 and T1
+# (date +%s.%N), named through MAP ("20=user-inactivity,21=…") when it holds the value.
+peer_row() {
+    [ -n "${PEER_DIR:-}" ] || abort "peer_row $1: no PEER_DIR (an interop run of gates/run.sh)"
+    [ -n "${KSIM_RUN_MODE:-}" ] || set_run_mode
+    _text=$(row_text "$1") || abort "row $1 is not in $(basename "$ROWS_SET")"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "${9:-}" \
+        "$KSIM_RUN_MODE" >> "$PEER_DIR/rows-after.tsv"
+    printf '  LATER %-66s scored from the peer'"'"'s %s once it stops\n' "$_text" "$4"
+}
+
 # release_all UE: releases each of the UE's PDU sessions before it de-registers, so
 # no PFCP session is left behind on a real core (agreed with kaluza-core for W1).
 release_all() {

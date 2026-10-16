@@ -24,6 +24,19 @@ set -u
 : "${DN_ADDR:=10.60.0.1}"
 GNB=$(ctl info | kv GNB)
 UE=9
+set_run_mode
+case "$KSIM_RUN_MODE" in
+    C3|C4|C5)
+        # Its rows restart our gNB (aio, split): with an interop peer there is none of ours
+        # to restart, and the AMF's restart would be the peer's to survive (P2).
+        for r in amf-ueransim.032 amf-ueransim.033 amf-ueransim.034 amf-ueransim.063 amf-ueransim.064 \
+                 amf-ueransim.065 amf-ueransim.066 amf-ueransim.069; do
+            skip_row "$r" "not a $KSIM_RUN_MODE row (modes aio,split)"
+        done
+        summary ksim-p1-restart
+        exit $?
+        ;;
+esac
 stub() { "$KSIM_CTL" --socket "$STUB_CTL" stub "$@"; }
 on_stub() { [ "$CORE" = stub ] && [ -n "${STUB_CTL:-}" ]; }
 

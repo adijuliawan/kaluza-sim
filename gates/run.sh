@@ -45,7 +45,7 @@ done
 
 RUN="$KSIM_RUNS/$core-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$KSIM_RUNS"
-stub_pid=""; ksim_pid=""
+stub_pid=""; ksim_pid=""; peer_rows_rc=0
 # A UE left registered stays in a real core's AMF: before ksim stops, every UE
 # still registered releases its sessions and switches off, a gate's abort
 # included (W1, 2026-10-15).
@@ -72,6 +72,10 @@ switch_off_left() {
 stop_peers() {
     # shellcheck disable=SC2086
     "$ROOT/tools/ocudu-peer.sh" stop ${lab:-} > "$peer_dir/stop.out" 2>&1 || echo "CLEANUP: an OCUDU process is left" >&2
+    # The rows whose evidence is in the peer's captures, now written (P2): before redaction.
+    if [ -f "$peer_dir/rows-after.tsv" ]; then
+        RUN="$RUN" CORE="$core" sh "$ROOT/gates/lib/peer_rows.sh" "$peer_dir" || peer_rows_rc=1
+    fi
     # The peer's NGAP and E1AP captures hold K_gNB and the UP keys in clear:
     # redacted, or without the oracle venv removed (tools/peer_redact.py).
     if [ -x "$ROOT/.venv/bin/python" ] &&
@@ -173,6 +177,7 @@ start_peer_cuup() {
 if [ "$peer_cucp" = 1 ] || [ "$peer_cuup" = 1 ]; then
     peer_dir="$RUN-peer"
     mkdir -p "$peer_dir"
+    PEER_DIR="$peer_dir"; export PEER_DIR   # gates/lib/ksim.sh's peer_row
 fi
 if [ "$peer_cucp" = 1 ]; then
     amf=${STUB_LISTEN:-$(sed -n 's/^amf: *\[{addr: *\([0-9.]*\), *port: *\([0-9]*\)}.*/\1:\2/p' "$topo")}
@@ -241,5 +246,6 @@ if [ -n "$stub_pid" ]; then
     "$KSIM_CTL" --socket "$KSIM_RUNS/$core-stub.sock" stub > "$RUN/stub.txt" 2>&1 || true
 fi
 cleanup; ksim_pid=""; stub_pid=""
+[ "$peer_rows_rc" = 0 ] || rc=1
 echo "RUN_DIR=$RUN"
 exit "$rc"

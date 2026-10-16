@@ -24,18 +24,16 @@ command -v tshark >/dev/null 2>&1 || abort "tshark is needed for the pcap rows"
 : "${SMS_UE2:=11}"
 : "${NOSMS_UE3:=12}"
 GNB=$(ctl info | kv GNB)
+set_run_mode
 stub() { "$KSIM_CTL" --socket "$STUB_CTL" stub "$@"; }
 on_stub() { [ "$CORE" = stub ] && [ -n "${STUB_CTL:-}" ]; }
 # The sim range's MSISDN: 999 and the MSIN's last eight digits.
 msisdn() { printf '999%s\n' "$(printf '%s' "$1" | sed 's/^imsi-//' | cut -c8-15)"; }
 supi_of() { ctl ue "$1" status | kv UE; }
 
-release() {
-    _seq=$(ctl info | kv EVENT_SEQ)
-    ctl gnb "$GNB" ue-release "$1" >/dev/null || abort "gnb ue-release $1 refused"
-    ctl ue "$1" wait nas.mm.cm_idle --since "$_seq" --timeout 10s >/dev/null || abort "UE $1 not idle"
-    ctl wait ran.ue.released --since "$_seq" --timeout 10s >/dev/null
-}
+# release UE: the gNB releases the UE, by our CU-CP's ue-release or, in C3 and C5, OCUDU's
+# inactivity timer (gates/lib/ksim.sh, ran_release).
+release() { ran_release "$1" | grep -q '^EVENT=nas.mm.cm_idle$' || abort "UE $1 not idle"; }
 
 echo "-- registration: two UEs with SMS, one without"
 if on_stub; then
