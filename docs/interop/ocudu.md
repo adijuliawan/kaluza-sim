@@ -132,6 +132,14 @@ Each alone blocks all user data.
   - The C3 gate left its UE on after deregistering, and the next gate's power-on was refused. The gate now switches the UE off (`--abrupt`).
 - The lab run (LW2) uses `topologies/ocudu-c3-lab.yaml` and `tools/ocudu-peer.sh run --lab`. OCUDU's roles run in our namespaces `ksim-ocucp` (.36) and `ksim-ocuup` (.37), from `topologies/peers/ocudu/*-lab.yml.in` ([`lab.md`](../lab.md) §6).
 
+## C3 against kaluza-core, LW2 (P2 Q7, 2026-10-16)
+
+OCUDU's `ocucp` (.36, gNB 0x1A1) and `ocuup` (.37) run in our namespaces on kaluza-uesim (`tools/ocudu-peer.sh run --lab`), with our DU and UEs, against kaluza-core's AMF `f51ccdb1` and its V-UPF.
+- Every C3 row passed except downlink paging, which needs the stub's DN trigger.
+- The P1 registration and session rows that apply passed.
+- 100 UEs registered with a session each through OCUDU in 26.4 s (KS-PLAT-T56).
+- Nothing new from OCUDU. Its console has to be line-buffered when written to a file (KS-PLAT-D15).
+
 ## Evidence
 
 - `build/ocudu/last/` holds the hook's last runs (`c3/`, `c4/`, `c5/`): the summary, our

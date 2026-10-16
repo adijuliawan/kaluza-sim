@@ -171,6 +171,14 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
       - Each role's event stream held a server thread for every supervisor follower that had left.
       - After about 80 quiet seconds a role answered nothing. Each held 82 to 206 connections on its ctl.sock.
       - …0008 was again left registered and was again cleaned up (11:19:50, accepted). kaluza-core-92 found nothing of ours left on the core.
+    - **LW1 and LW2 passed (2026-10-16 12:35–13:34 KST, kaluza-core-92's window, AMF f51ccdb1):**
+      - LW1a ran the P1 row set in split mode in 3 minutes (KS-PLAT-T55). The split gate's SCTP and F1-U counts still assume the dev PC.
+      - LW1b registered 100 UEs with a session each in 18.8 s.
+      - LW2 ran OCUDU at .36/.37 in our namespaces: the C3 rows, the P1 rows that apply, and 100 UEs through OCUDU in 26.4 s (KS-PLAT-T56).
+      - LW2's first start failed on OCUDU's buffered console (KS-PLAT-D15) and was retried after the fix.
+    - **Two teardown defects kaluza-core-92 reported (to fix before LW5):**
+      - After the AMF has released a UE, our CU-CP asks twice more for its release when F1 goes at teardown.
+      - Our gNB ends its NG association with COMM_LOST, not a graceful SHUTDOWN after the last release. That triggers the AMF race F-77 the core is fixing.
     - **LW3** (Q15): the throughput set inside the VM against the scripted core on 127.0.0.x. Nothing crosses `ens19` or the trunk, but it needs the VM free of core sets.
     - **LW4** (Q14): the real card imsi-001010000300100 through the dev-PC bridge (§7).
     - **LW5** (Q14): the full P2 row set in split mode.
