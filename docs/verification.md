@@ -91,6 +91,22 @@ Rows the cores cannot serve are scored where they can be (the user, 2026-10-15, 
 
 With OCUDU's CU-CP (C3, C5) there is no ksim verb to release a UE, so the gates wait for OCUDU's own inactivity release (`gates/lib/ksim.sh`, `ran_release`). A row whose evidence is in OCUDU's own NGAP, the release request's cause, is scored from its capture once `gates/run.sh` has stopped it (`peer_row`, `gates/lib/peer_rows.sh`): OCUDU writes its captures only when it exits (KS-PLAT-B58).
 
+### 3.3 P3's exit accounting
+
+P3's rows are `gates/rows/p3.tsv` ([ADR 0013](adr/0013-p3-runtime-shape.md), [ADR 0014](adr/0014-ocudu-mobility-combinations.md)): kaluza-sim's own `ksim-p3.*` rows, frozen at R0, with a **topology** per row (`1g`, `1g2d`, `3g`, `3g7`, `oc`) and modes aio, split and the OCUDU mobility combinations C6, C7, C8. The P1 and P2 rows are scored again in the three-gNB topology from their own files.
+
+| What | Requirement |
+|---|---|
+| The stub | every `ksim-p3` stub row PASS in its modes; the P1/P2 rows in the three-gNB topology |
+| Open5GS | the rig's rows (Xn, N2, the key chain, mobility registration, idle) PASS or ALLOWED |
+| kaluza-core | PASS or a KF for what its AMF serves; a row marked `kaluza=gap` is **CORE_GAP**: named, never counted, backed by a baseline row's evidence, until wave 40's roll serves the procedure |
+| OCUDU | every C6, C7 (both ways) and C8 row PASS or ALLOWED by `gates/allow/ocudu.tsv` |
+| Key chain | A→B→C→A on the stub and Open5GS, every hop verified by `tests/oracles/keychain.py` from public inputs |
+| Loss | the dev-PC and VM reports: 0 lost and 0 reordered on AM DRBs with forwarding (ledger A-15) |
+| The rest | the radio replica hash; the fault rows, and `FAULTS=0` in every other exit run; every v1 requirement built (`UNBUILT=0`) or moved by the user; every mutant killed; no malformed frame, canary hit or NULL AS run |
+
+*As built (P3 R0):* `tools/p3_exit.sh` (`tools/p3_exit.py`; CI's hook 92 runs its `--stub-only` part) requires a row from its milestone on: `REACHED` names the last milestone committed, and a later row is NOT_YET. The topology key is added when R4's and R7's topologies exist.
+
 ## 4. Parity crosswalk (P4)
 
 - **Baseline:** the 1,633 rows of the 23 gates that start a UERANSIM gNB, in `/home/amadeus/Development/kaluza-core/docs/compliance/smf/phase-2/rows-k3s-963130e1-native-eupf-75d3202.tsv` (`phase-2-final`).

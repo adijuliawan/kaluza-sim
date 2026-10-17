@@ -12,6 +12,11 @@ guard requires:
 - row ids are unique;
 - each row's modes are from aio, split, C3, C4, C5 (or '-'), and its cores
   from stub, open5gs, kaluza, uesim, card (open5gs=allow after a ';').
+
+From P3 R0, gates/rows/p3.tsv (ADR 0013 point 12) holds kaluza-sim's ksim-p3.*
+rows only, each once, p3=yes, modes from aio, split, C6, C7, C8, cores from
+stub, open5gs (=allow), kaluza (=gap), uesim, a topology from 1g, 1g2d, 3g,
+3g7, oc, and a milestone R0 to R21.
 """
 
 from __future__ import annotations
@@ -24,8 +29,14 @@ from _common import Violation, main, run_self_test  # noqa: E402
 
 P1 = Path("gates/rows/p1.tsv")
 P2 = Path("gates/rows/p2.tsv")
+P3 = Path("gates/rows/p3.tsv")
 MODES = {"aio", "split", "C3", "C4", "C5"}
 CORES = {"stub", "open5gs", "kaluza", "uesim", "card"}
+P3_MODES = {"aio", "split", "C6", "C7", "C8"}
+P3_CORES = {"stub", "open5gs", "open5gs=allow", "kaluza", "kaluza=gap", "uesim"}
+P3_TOPOLOGIES = {"1g", "1g2d", "3g", "3g7", "oc"}
+P3_COLUMNS = ("id", "gate", "n", "text", "family", "observable", "trigger", "p3", "cores", "modes",
+              "topology", "milestone", "mutant", "evidence")
 
 
 def rows(root: Path, rel: Path) -> tuple[list[str], list[tuple[int, dict[str, str]]]]:
@@ -45,7 +56,40 @@ def rows(root: Path, rel: Path) -> tuple[list[str], list[tuple[int, dict[str, st
     return head, out
 
 
+def check_p3(root: Path) -> list[Violation]:
+    out: list[Violation] = []
+    head, p3 = rows(root, P3)
+    if not head:
+        return out
+    if tuple(head) != P3_COLUMNS:
+        return [Violation(P3.as_posix(), 1, "rows-columns", f"the columns are not {', '.join(P3_COLUMNS)}")]
+    seen: dict[str, int] = {}
+    for n, r in p3:
+        rid = r["id"]
+        if rid in seen:
+            out.append(Violation(P3.as_posix(), n, "rows-duplicate", f"'{rid}' also on line {seen[rid]}"))
+        seen[rid] = n
+        if not rid.startswith("ksim-p3."):
+            out.append(Violation(P3.as_posix(), n, "rows-foreign", f"'{rid}' is not ksim-p3.*"))
+        if r["p3"] != "yes":
+            out.append(Violation(P3.as_posix(), n, "rows-p3", f"'{rid}' has p3 '{r['p3']}'"))
+        if not set(r["modes"].split(",")) <= P3_MODES:
+            out.append(Violation(P3.as_posix(), n, "rows-modes", f"'{rid}' has modes '{r['modes']}'"))
+        if not set(r["cores"].split(",")) <= P3_CORES:
+            out.append(Violation(P3.as_posix(), n, "rows-cores", f"'{rid}' has cores '{r['cores']}'"))
+        if r["topology"] not in P3_TOPOLOGIES:
+            out.append(Violation(P3.as_posix(), n, "rows-topology", f"'{rid}' has topology '{r['topology']}'"))
+        ms = r["milestone"]
+        if not (ms.startswith("R") and ms[1:].isdigit() and 0 <= int(ms[1:]) <= 21):
+            out.append(Violation(P3.as_posix(), n, "rows-milestone", f"'{rid}' has milestone '{ms}'"))
+    return out
+
+
 def check(root: Path) -> list[Violation]:
+    return check_p3(root) + check_p2(root)
+
+
+def check_p2(root: Path) -> list[Violation]:
     out: list[Violation] = []
     _, p1 = rows(root, P1)
     head, p2 = rows(root, P2)
@@ -92,14 +136,20 @@ def self_test() -> int:
     head = "id\tgate\tn\ttext\tcores\tmodes\n"
     good = ("amf-ueransim.006\tkaluza-amf-ueransim\t6\tthe UE completed Initial Registration\tstub,kaluza\taio,split\n"
             "ksim-p2.f1-setup-sctp\tkaluza-sim\t-\tthe DU completed F1 Setup\tstub\tsplit,C3\n")
-    clean = {"gates/rows/p1.tsv": p1, "gates/rows/p2.tsv": head + good}
+    h3 = "\t".join(P3_COLUMNS) + "\n"
+    r3 = "ksim-p3.xn.success\tkaluza-sim\t-\tan Xn handover\tho\tsim\tsim\tyes\tstub,kaluza=gap\taio,split\t3g\tR8\t-\tpcap\n"
+    clean = {"gates/rows/p1.tsv": p1, "gates/rows/p2.tsv": head + good, "gates/rows/p3.tsv": h3 + r3}
     dirty = {"gates/rows/p1.tsv": p1 + "ksim-p1.imeisv\tkaluza-sim\t-\tthe UE returned its IMEISV\tyes\n",
              "gates/rows/p2.tsv": head + good.replace("Initial Registration", "Initial registration")
              + "other.001\tx\t1\tforeign\tstub\tsplit\n"
-             + "ksim-p2.f1-setup-sctp\tkaluza-sim\t-\ttwice\tstub\tC9\n"}
+             + "ksim-p2.f1-setup-sctp\tkaluza-sim\t-\ttwice\tstub\tC9\n",
+             "gates/rows/p3.tsv": h3 + r3 + r3.replace("stub,kaluza=gap", "stub,kaluza=maybe").replace("3g", "9g")
+             + r3.replace("ksim-p3.xn.success", "ksim-p2.xn").replace("R8", "Q8")}
     expect = [("gates/rows/p2.tsv", "rows-p1-missing"), ("gates/rows/p2.tsv", "rows-p1-text"),
               ("gates/rows/p2.tsv", "rows-foreign"), ("gates/rows/p2.tsv", "rows-duplicate"),
-              ("gates/rows/p2.tsv", "rows-modes")]
+              ("gates/rows/p2.tsv", "rows-modes"), ("gates/rows/p3.tsv", "rows-duplicate"),
+              ("gates/rows/p3.tsv", "rows-cores"), ("gates/rows/p3.tsv", "rows-topology"),
+              ("gates/rows/p3.tsv", "rows-foreign"), ("gates/rows/p3.tsv", "rows-milestone")]
     return run_self_test("rows", check, clean, dirty, expect)
 
 

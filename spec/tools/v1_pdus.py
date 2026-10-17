@@ -157,6 +157,14 @@ def norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", s.lower())
 
 
+def procedure_title(title: str) -> str:
+    """A clause title as its procedure is named in the ASN.1 (P3 R0): the initiator in
+    parentheses dropped ("UE Context Modification (gNB-CU initiated)") and the -ation
+    nouns of NGAP's handover clauses ("Handover Cancellation") as the procedure's verb."""
+    t = re.sub(r"\s*\([^)]*\)\s*$", "", title)
+    return re.sub(r"\bCancellation\b", "Cancel", t)
+
+
 def ap_procedures(proto: str) -> list[dict]:
     """Elementary procedures of an AP protocol's PDU-Descriptions module."""
     text = next((ROOT / "spec" / "asn1" / proto).glob("*-PDU-Descriptions.asn")).read_text()
@@ -293,7 +301,7 @@ def main() -> None:
                 if c is None:
                     continue           # a whole-document citation of an AP spec: no procedures
                 for n in cands:
-                    p = procs.get(norm(titles[n]))
+                    p = procs.get(norm(titles[n])) or procs.get(norm(procedure_title(titles[n])))
                     if p:
                         for kind, msg in p["messages"].items():
                             add(proto, msg, r["id"], f"{doc} {n} {p['procedure']}", kind)

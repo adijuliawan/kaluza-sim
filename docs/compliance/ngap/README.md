@@ -12,7 +12,7 @@ Row suffixes (requirements.md): -D defect in the sim, -B a choice the spec leave
 
 | What | Count |
 |---|---|
-| v1 NGAP types (spec/v1-pdus.tsv) | 46 |
+| v1 NGAP types (spec/v1-pdus.tsv) | 51 |
 | ASN.1 construct classes present in the NGAP modules (spec/asn1/constructs.tsv) | 25 |
 | of them with a recorded handling and vector | 25 |
 | type assignments (scale) | 1313 |

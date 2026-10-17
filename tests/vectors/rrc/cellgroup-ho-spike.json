@@ -1,0 +1,58 @@
+{
+  "cellGroupId": 0,
+  "rlc-BearerToAddModList": [
+    {
+      "logicalChannelIdentity": 1,
+      "servedRadioBearer": {"srb-Identity": 1},
+      "rlc-Config": {"am": {
+        "ul-AM-RLC": {"sn-FieldLength": "size12", "t-PollRetransmit": "ms45", "pollPDU": "infinity", "pollByte": "infinity", "maxRetxThreshold": "t8"},
+        "dl-AM-RLC": {"sn-FieldLength": "size12", "t-Reassembly": "ms35", "t-StatusProhibit": "ms0"}}}
+    }
+  ],
+  "spCellConfig": {
+    "reconfigurationWithSync": {
+      "spCellConfigCommon": {
+        "physCellId": 102,
+        "downlinkConfigCommon": {
+          "frequencyInfoDL": {
+            "absoluteFrequencySSB": 632628,
+            "frequencyBandList": [78],
+            "absoluteFrequencyPointA": 631656,
+            "scs-SpecificCarrierList": [{"offsetToCarrier": 0, "subcarrierSpacing": "kHz30", "carrierBandwidth": 106}]
+          },
+          "initialDownlinkBWP": {"genericParameters": {"locationAndBandwidth": 28875, "subcarrierSpacing": "kHz30"}}
+        },
+        "uplinkConfigCommon": {
+          "frequencyInfoUL": {"scs-SpecificCarrierList": [{"offsetToCarrier": 0, "subcarrierSpacing": "kHz30", "carrierBandwidth": 106}]},
+          "initialUplinkBWP": {"genericParameters": {"locationAndBandwidth": 28875, "subcarrierSpacing": "kHz30"}},
+          "dummy": "infinity"
+        },
+        "ssb-PositionsInBurst": {"mediumBitmap": "80"},
+        "ssb-periodicityServingCell": "ms20",
+        "dmrs-TypeA-Position": "pos2",
+        "ssbSubcarrierSpacing": "kHz30",
+        "tdd-UL-DL-ConfigurationCommon": {
+          "referenceSubcarrierSpacing": "kHz30",
+          "pattern1": {"dl-UL-TransmissionPeriodicity": "ms5", "nrofDownlinkSlots": 7, "nrofDownlinkSymbols": 6, "nrofUplinkSlots": 2, "nrofUplinkSymbols": 4}
+        },
+        "ss-PBCH-BlockPower": -16
+      },
+      "newUE-Identity": 17921,
+      "t304": "ms1000",
+      "rach-ConfigDedicated": {
+        "uplink": {
+          "cfra": {
+            "occasions": {
+              "rach-ConfigGeneric": {
+                "prach-ConfigurationIndex": 159, "msg1-FDM": "one", "msg1-FrequencyStart": 0, "zeroCorrelationZoneConfig": 15,
+                "preambleReceivedTargetPower": -110, "preambleTransMax": "n7", "powerRampingStep": "dB4", "ra-ResponseWindow": "sl20"
+              },
+              "ssb-perRACH-Occasion": "one"
+            },
+            "resources": {"ssb": {"ssb-ResourceList": [{"ssb": 0, "ra-PreambleIndex": 63}], "ra-ssb-OccasionMaskIndex": 0}}
+          }
+        }
+      }
+    }
+  }
+}

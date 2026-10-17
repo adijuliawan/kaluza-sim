@@ -59,6 +59,7 @@ doc	version	file	sha256	bytes	origin	source_url	fetched_utc	derived
 38.133	j60	spec/3gpp/38/38133-j60.zip	a4203e77fe0d44d7375f06a751da64915b36176d3562f22c8684e7fbec8e2e9c	35334445	download	https://www.3gpp.org/ftp/Specs/archive/38_series/38.133/38133-j60.zip	2026-10-14T07:56:50Z	-
 38.215	j40	spec/3gpp/38/38215-j40.zip	e3a529d152fa37bf8093969bee60033eca5b20d2a4bebe2b928d8e8e91bd429f	176748	download	https://www.3gpp.org/ftp/Specs/archive/38_series/38.215/38215-j40.zip	2026-10-14T07:56:50Z	-
 38.901	j50	spec/3gpp/38/38901-j50.zip	6c3d1e599fa4d9e64e3f29554270780f5f2c731caf3e53a209beead44b54da7b	2798245	download	https://www.3gpp.org/ftp/Specs/archive/38_series/38.901/38901-j50.zip	2026-10-14T07:56:50Z	-
+28.552	j90	spec/3gpp/28/28552-j90.zip	f85bae823768f6140fd8e6c88a19eb9431d5edc4dd712129fce1c56357de3173	1363319	kaluza-core-copy	https://www.3gpp.org/ftp/Specs/archive/28_series/28.552/28552-j90.zip	2026-10-17T12:02:14Z	-
 38.306	j40	spec/3gpp/38/38306-j40.zip	97f3d1d66e12f2b5f210dfe6ee31131a27d974db2d8ec6973f877049debd9b3e	1146680	download	https://www.3gpp.org/ftp/Specs/archive/38_series/38.306/38306-j40.zip	2026-10-14T07:56:50Z	-
 31.101	j00	spec/3gpp/31/31101-j00.zip	4744d7048ded16837042377f0698882342d8eee8fad5f797f33bac409cfe2e23	134772	download	https://www.3gpp.org/ftp/Specs/archive/31_series/31.101/31101-j00.zip	2026-10-14T07:56:50Z	-
 31.102	j60	spec/3gpp/31/31102-j60.zip	7f3c4671257e2b9a87a44b7d82d6f1d421e3d8a3efa03ef87828e253f160719e	1598368	download	https://www.3gpp.org/ftp/Specs/archive/31_series/31.102/31102-j60.zip	2026-10-14T07:56:50Z	-

@@ -61,6 +61,7 @@
 - **Handover:** Xn, N2 and intra-CU, with forwarding, End Marker, RAN status transfer and NH/NCC.
 - **Mobility:** mobility registration; several AMFs and NNSF.
 - **Tooling:** fault injection, and the TS 28.552 metric labels (events and `wait` came in P1, ADR 0009; metrics v0 and the watchdog in P2, ADR 0011).
+- **As planned (2026-10-17; ADR 0013, ADR 0014; the plan's R0–R21):** handover comes before the radio model, since the CU-CP triggers wave 40's steps and the target is named in the reconfiguration; R2's static RadioView keeps the two apart. One cell per DU (D7): a multi-cell site is several DUs, so intra-CU handover is inter-DU, and intra-DU inter-cell handover is v1.x. The row set is `gates/rows/p3.tsv` (141 rows). On kaluza-core the handover rows are CORE_GAP until wave 40's roll (D1); they pass on the stub and the Open5GS rig and are offered as wave 40's gate contract. The v1 residue is built in P3 (D3), and P3's exit commit sets VERSION 1.0.0, with the tag on the user's word (D9).
 
 ## Fit with kaluza-core's phase 3
 

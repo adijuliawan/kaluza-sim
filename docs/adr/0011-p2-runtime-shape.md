@@ -17,6 +17,7 @@
 
      The all-in-one node and each role process run the same node code: a node hosts a set of roles, and each link between two roles is memlink when both are in the process and a real socket when one is not (tenet 1), so the two shapes cannot drift. The role apps are thin mains over it.
   2. **KAIR between processes:** UNIX SOCK_SEQPACKET on path sockets in the run directory, which cross namespaces. The DU listens and keeps a CELL_ANNOUNCE/SUBSCRIBE registry; each farm shard connects and subscribes; broadcast and paging go once per subscribed shard; the farm demuxes by `radio_id`. SFN runs on a shared CLOCK_REALTIME epoch. UDP stays for multi-host use later.
+     - *Amended 2026-10-17 (P3 R0):* not built in P2. The DU never sends CELL_ANNOUNCE (with one DU per run every shard subscribes to it), and its SFN runs from the monotonic clock (`du.cpp`). P3 R2 builds both, with several DUs (rows ksim-p3.cell.announce and ksim-p3.cell.sfn-epoch; ADR 0013 point 2).
   3. **Where the roles live:**
      - **kaluza-uesim:** a namespace per RAN role. The CU-CP holds .30 (N2) and the CU-UP .31 (N3) as ipvlan children of `ens19`, as in P1. F1-C, F1-U and E1 run on `ksim-mid`, an uplink-free bridge (10.250.0.0/24, never `ens19`) with a veth leg into each role's namespace. The DU has a mid leg only. The farm runs in the root namespace; each UE keeps its own namespace and TUNs.
      - **The dev PC:** every role runs on 127.0.0.x in the root namespace, unprivileged. No bridge and no veth (P-64).

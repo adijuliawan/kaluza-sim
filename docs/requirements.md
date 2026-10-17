@@ -189,7 +189,7 @@
 | ID | Requirement | § | Pri | Ver |
 |---|---|---|---|---|
 | KS-XNAP-001 | SCTP (PPID 61, port 38422); Xn Setup; NG-RAN node configuration update; Error Indication; Reset | 38.423 §8.4 (T0) | v1 | I, L, F |
-| KS-XNAP-002 | Handover Preparation with the UE context (security capabilities, K_NG-RAN\*, NCC, PDU sessions, RRC container); Ack and Failure; SN Status Transfer; Handover Cancel; UE Context Release | 38.423 §8.2 (T0) | v1 | I, L |
+| KS-XNAP-002 | Handover Preparation with the UE context (security capabilities, K_NG-RAN\*, NCC, PDU sessions, RRC container: HandoverPreparationInformation out, HandoverCommand back); Ack and Failure; SN Status Transfer; Handover Cancel; UE Context Release | 38.423 §8.2 (T0) | v1 | I, L |
 | KS-XNAP-003 | Xn-U forwarding (DL, and UL when offered) with NR-U framing; End Marker relayed | 38.424; 38.425 | v1 | L |
 | KS-XNAP-004 | Retrieve UE Context; RAN Paging; Xn-U Address Indication | 38.423 §8.2 (T0) | v1.x (P3b) | L |
 | KS-F1AP-001 | The DU opens SCTP (PPID 62, port 38472); F1 Setup with a DU-built MIB and SIB1; gNB-DU/CU configuration updates | 38.472; 38.473 §8.2 (T0) | v1 | I |

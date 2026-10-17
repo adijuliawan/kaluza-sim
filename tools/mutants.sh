@@ -44,7 +44,7 @@ while IFS=$'\t' read -r name row _; do
         continue
     fi
     total=$((total + 1))
-    gate=$(grep -l "row $row " "$ROOT"/gates/verification/ksim-p[12]-*.sh | head -n 1)
+    gate=$(grep -l "row $row " "$ROOT"/gates/verification/ksim-p[123]-*.sh | head -n 1)
     if [[ -z "$gate" ]]; then
         echo "MUTANT=$name SURVIVED row=$row gate=none (no gate scores the row)" | tee -a "$OUT/summary.txt"
         continue
@@ -59,7 +59,7 @@ while IFS=$'\t' read -r name row _; do
     topo=$(sed -n 's/^# topology: //p' "$gate" | head -n 1)
     KSIM_TOPOLOGY_FILE="${topo:+$ROOT/$topo}" KSIM_MUTANT="$name" KSIM_BIN="$T/bin" KSIM_RUNS="$T/runs-$name" KSIM_MASTER="$T/keys/master.key" \
         KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
-        KSIM_PHASE="$(case "$gate" in *ksim-p2-*) echo p2 ;; *) echo p1 ;; esac)" \
+        KSIM_PHASE="$(case "$gate" in *ksim-p3-*) echo p3 ;; *ksim-p2-*) echo p2 ;; *) echo p1 ;; esac)" \
         sh "$ROOT/gates/run.sh" stub "$gate" > "$OUT/$name.out" 2>&1
     run=$(sed -n 's/^RUN_DIR=//p' "$OUT/$name.out")
     res=$(awk -F'\t' -v r="$row" '$1 == r {print $2}' "$run/rows.tsv" 2>/dev/null | head -n 1)

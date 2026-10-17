@@ -40,6 +40,7 @@
 | **TS 38.304** | j30 | fetch | UE idle and inactive procedures (cell selection, paging occasions) |
 | **TS 38.133 / 38.215** | j60 / j40 | fetch | RRM (RLM thresholds); physical-layer measurements (RSRP, RSRQ, SINR) |
 | **TR 38.901** | j50 | fetch | Channel models (pathloss, shadowing) |
+| **TS 28.552** | j90 | kaluza-core copy (P3 R0) | 5G performance measurements: the handover, RLF and RRC counters' names, used as metric labels (KS-CTL-005) |
 | **TS 38.306** | j40 | fetch | UE radio access capabilities (personas) |
 | **TS 31.101 / 31.102** | j00 / **j60** | fetch | UICC-terminal interface (3GPP); USIM application (DF.5GS, GET IDENTITY) |
 | **ETSI TS 102 221** | **V18.4.0** | fetch (etsi.org) | UICC-terminal interface: physical and logical characteristics |
@@ -66,7 +67,7 @@
 | GSMA NG.114 | v11.0 (local at `/home/amadeus/Development/kaluza-core/docs/gsma/ng-series/`) | IMS profile for voice, video and messaging over 5GS |
 | TS 24.502 | j40 (local) | Non-3GPP access NAS |
 | TS 38.214 | j50 | MCS and TBS tables for the full-L2 PHY abstraction |
-| TS 28.541 / 28.552 | local | NRM for O1; PM counter names (already used as metric labels in v1) |
+| TS 28.541 | local | NRM for O1 |
 | **O-RAN Alliance** (free registration) | latest at download | WG3: E2GAP, E2AP, E2SM-KPM, E2SM-RC, E2SM-CCC. WG10: O1 Interface, OAM architecture and information model. WG1: architecture description. WG4: CUS and M-plane (only if an O-RU facade is built). WG5: C-plane and U-plane profiles for F1/E1/Xn/NG interop |
 
 ## 4. Later

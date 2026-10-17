@@ -12,7 +12,7 @@ Row suffixes (requirements.md): -D defect in the sim, -B a choice the spec leave
 
 | What | Count |
 |---|---|
-| v1 F1AP types (spec/v1-pdus.tsv) | 43 |
+| v1 F1AP types (spec/v1-pdus.tsv) | 52 |
 | ASN.1 construct classes present in the F1AP modules (spec/asn1/constructs.tsv) | 25 |
 | of them with a recorded handling and vector | 25 |
 | type assignments (scale) | 1860 |

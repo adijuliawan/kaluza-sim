@@ -146,7 +146,8 @@ fi
 # logs and captures are in <run>-peer meanwhile, <run>/peer after (ksim wants
 # its run directory new).
 topo="${KSIM_TOPOLOGY_FILE:-$ROOT/$KSIM_TOPOLOGY}"
-peer_line=$(grep -m 1 '^ *peers: *{' "$topo" 2>/dev/null)
+# Every gNB's peers line (P3 R0: a topology of several gNBs names OCUDU on one of them).
+peer_line=$(grep '^ *peers: *{' "$topo" 2>/dev/null | tr '\n' ' ')
 peer_cucp=0; peer_cuup=0
 case "$peer_line" in *"cucp: ocudu"*) peer_cucp=1 ;; esac
 case "$peer_line" in *"cuup: ocudu"*) peer_cuup=1 ;; esac
@@ -235,13 +236,18 @@ fi
 case "$KSIM_PHASE" in
     p1) KSIM_ROWS="$ROOT/gates/rows/p1.tsv" ;;
     p2) KSIM_ROWS="$ROOT/gates/rows/p2.tsv" ;;
-    *) echo "KSIM_PHASE is p1 or p2" >&2; exit 2 ;;
+    p3) KSIM_ROWS="$ROOT/gates/rows/p3.tsv" ;;
+    *) echo "KSIM_PHASE is p1, p2 or p3" >&2; exit 2 ;;
 esac
 export KSIM_ROWS
 if [ $# -eq 0 ]; then
     set -- "$ROOT"/gates/verification/ksim-p1-*.sh
     if [ "$KSIM_PHASE" = p2 ]; then
         for g in "$ROOT"/gates/verification/ksim-p2-*.sh; do [ -f "$g" ] && set -- "$@" "$g"; done
+    elif [ "$KSIM_PHASE" = p3 ]; then
+        # P3 R0: the phase's own gates (its rows); the P1/P2 rows are scored with KSIM_PHASE=p2.
+        set --
+        for g in "$ROOT"/gates/verification/ksim-p3-*.sh; do [ -f "$g" ] && set -- "$@" "$g"; done
     fi
 fi
 rc=0

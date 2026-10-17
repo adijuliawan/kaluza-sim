@@ -59,6 +59,7 @@ doc	version	origin	purpose
 38.133	j60	3gpp	RRM
 38.215	j40	3gpp	physical-layer measurements
 38.901	j50	3gpp	channel models (TR)
+28.552	j90	3gpp	5G performance measurements (the handover counters' names and labels, KS-CTL-005)
 38.306	j40	3gpp	UE radio access capabilities
 31.101	j00	3gpp	UICC-terminal interface (3GPP)
 31.102	j60	3gpp	USIM application

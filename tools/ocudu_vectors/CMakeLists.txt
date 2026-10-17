@@ -20,7 +20,7 @@ include_directories(
     "${OCUDU_BUILD}" "${OCUDU_BUILD}/lib/support/versioning")
 
 set(_t "${OCUDU_SRC}/tests")
-add_executable(ocudu-vectors
+set(_vector_sources
     main.cpp
     "${_t}/test_doubles/f1ap/f1ap_test_messages.cpp"
     "${_t}/test_doubles/pdcp/pdcp_pdu_generator.cpp"
@@ -32,6 +32,23 @@ add_executable(ocudu-vectors
     "${_t}/unittests/ngap/ngap_test_messages.cpp"
     "${_t}/unittests/xnap/xnap_test_messages.cpp")
 file(GLOB_RECURSE _libs "${OCUDU_BUILD}/lib/*.a")
-target_link_libraries(ocudu-vectors
+# The producer needs OCUDU's test builders at the paths of the tree it was written for; a tree
+# without them (the pinned peer tree, P3 R0) builds ocudu-unpack only.
+set(_have_tests TRUE)
+foreach(_f IN LISTS _vector_sources)
+    if(NOT _f STREQUAL "main.cpp" AND NOT EXISTS "${_f}")
+        set(_have_tests FALSE)
+    endif()
+endforeach()
+if(_have_tests)
+    add_executable(ocudu-vectors ${_vector_sources})
+    target_link_libraries(ocudu-vectors
+        -Wl,--start-group ${_libs} "${OCUDU_BUILD}/external/fmt/libfmt.a" -Wl,--end-group
+        mbedcrypto sctp pthread dl)
+endif()
+
+# P3 R0: OCUDU's ASN.1 decoder reading our RRC (tools/ocudu_vectors/unpack.sh).
+add_executable(ocudu-unpack unpack.cpp)
+target_link_libraries(ocudu-unpack
     -Wl,--start-group ${_libs} "${OCUDU_BUILD}/external/fmt/libfmt.a" -Wl,--end-group
     mbedcrypto sctp pthread dl)

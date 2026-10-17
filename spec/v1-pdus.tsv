@@ -66,6 +66,14 @@ apdu	UPDATE BINARY		KS-UICC-002	102 221 Table 10.5
 apdu	UPDATE RECORD		KS-UICC-002	102 221 Table 10.5
 apdu	VERIFY PIN		KS-UICC-003	102 221 Table 10.5
 e1ap	BearerContextInactivityNotification	INITIATING MESSAGE	KS-E1AP-002,KS-E1AP-003	37.483 8.3.6 bearerContextInactivityNotification
+e1ap	BearerContextModificationConfirm	SUCCESSFUL OUTCOME	KS-E1AP-002,KS-E1AP-003	37.483 8.3.3 bearerContextModificationRequired
+e1ap	BearerContextModificationFailure	UNSUCCESSFUL OUTCOME	KS-E1AP-002,KS-E1AP-003	37.483 8.3.2 bearerContextModification
+e1ap	BearerContextModificationRequest	INITIATING MESSAGE	KS-E1AP-002,KS-E1AP-003	37.483 8.3.2 bearerContextModification
+e1ap	BearerContextModificationRequired	INITIATING MESSAGE	KS-E1AP-002,KS-E1AP-003	37.483 8.3.3 bearerContextModificationRequired
+e1ap	BearerContextModificationResponse	SUCCESSFUL OUTCOME	KS-E1AP-002,KS-E1AP-003	37.483 8.3.2 bearerContextModification
+e1ap	BearerContextReleaseCommand	INITIATING MESSAGE	KS-E1AP-002,KS-E1AP-003	37.483 8.3.4 bearerContextRelease
+e1ap	BearerContextReleaseComplete	SUCCESSFUL OUTCOME	KS-E1AP-002,KS-E1AP-003	37.483 8.3.4 bearerContextRelease
+e1ap	BearerContextReleaseRequest	INITIATING MESSAGE	KS-E1AP-002,KS-E1AP-003	37.483 8.3.5 bearerContextReleaseRequest
 e1ap	BearerContextSetupFailure	UNSUCCESSFUL OUTCOME	KS-E1AP-002,KS-E1AP-003	37.483 8.3.1 bearerContextSetup
 e1ap	BearerContextSetupRequest	INITIATING MESSAGE	KS-E1AP-002,KS-E1AP-003	37.483 8.3.1 bearerContextSetup
 e1ap	BearerContextSetupResponse	SUCCESSFUL OUTCOME	KS-E1AP-002,KS-E1AP-003	37.483 8.3.1 bearerContextSetup
@@ -124,6 +132,15 @@ f1ap	ResourceStatusFailure	UNSUCCESSFUL OUTCOME	KS-F1AP-001	38.473 8.2.10 resour
 f1ap	ResourceStatusRequest	INITIATING MESSAGE	KS-F1AP-001	38.473 8.2.10 resourceStatusReportingInitiation
 f1ap	ResourceStatusResponse	SUCCESSFUL OUTCOME	KS-F1AP-001	38.473 8.2.10 resourceStatusReportingInitiation
 f1ap	ResourceStatusUpdate	INITIATING MESSAGE	KS-F1AP-001	38.473 8.2.11 resourceStatusReporting
+f1ap	UEContextModificationConfirm	SUCCESSFUL OUTCOME	KS-F1AP-003	38.473 8.3.5 uEContextModificationRequired
+f1ap	UEContextModificationFailure	UNSUCCESSFUL OUTCOME	KS-F1AP-003	38.473 8.3.4 uEContextModification
+f1ap	UEContextModificationRefuse	UNSUCCESSFUL OUTCOME	KS-F1AP-003	38.473 8.3.5 uEContextModificationRequired
+f1ap	UEContextModificationRequest	INITIATING MESSAGE	KS-F1AP-003	38.473 8.3.4 uEContextModification
+f1ap	UEContextModificationRequired	INITIATING MESSAGE	KS-F1AP-003	38.473 8.3.5 uEContextModificationRequired
+f1ap	UEContextModificationResponse	SUCCESSFUL OUTCOME	KS-F1AP-003	38.473 8.3.4 uEContextModification
+f1ap	UEContextReleaseCommand	INITIATING MESSAGE	KS-F1AP-003	38.473 8.3.3 uEContextRelease
+f1ap	UEContextReleaseComplete	SUCCESSFUL OUTCOME	KS-F1AP-003	38.473 8.3.3 uEContextRelease
+f1ap	UEContextReleaseRequest	INITIATING MESSAGE	KS-F1AP-003	38.473 8.3.2 uEContextReleaseRequest
 f1ap	UEContextSetupFailure	UNSUCCESSFUL OUTCOME	KS-F1AP-003	38.473 8.3.1 uEContextSetup
 f1ap	UEContextSetupRequest	INITIATING MESSAGE	KS-F1AP-003	38.473 8.3.1 uEContextSetup
 f1ap	UEContextSetupResponse	SUCCESSFUL OUTCOME	KS-F1AP-003	38.473 8.3.1 uEContextSetup
@@ -143,6 +160,8 @@ ngap	AMFStatusIndication	INITIATING MESSAGE	KS-NGAP-013	38.413 8.7.6 aMFStatusIn
 ngap	DownlinkNASTransport	INITIATING MESSAGE	KS-NGAP-003	38.413 8.6.2 downlinkNASTransport
 ngap	DownlinkRANStatusTransfer	INITIATING MESSAGE	KS-NGAP-009	38.413 8.4.7 downlinkRANStatusTransfer
 ngap	ErrorIndication	INITIATING MESSAGE	KS-NGAP-011	38.413 8.7.5 errorIndication
+ngap	HandoverCancel	INITIATING MESSAGE	KS-NGAP-009	38.413 8.4.5 handoverCancel
+ngap	HandoverCancelAcknowledge	SUCCESSFUL OUTCOME	KS-NGAP-009	38.413 8.4.5 handoverCancel
 ngap	HandoverCommand	SUCCESSFUL OUTCOME	KS-NGAP-009	38.413 8.4.1 handoverPreparation
 ngap	HandoverFailure	UNSUCCESSFUL OUTCOME	KS-NGAP-009	38.413 8.4.2 handoverResourceAllocation
 ngap	HandoverNotify	INITIATING MESSAGE	KS-NGAP-009	38.413 8.4.3 handoverNotification
@@ -179,6 +198,9 @@ ngap	RANConfigurationUpdateFailure	UNSUCCESSFUL OUTCOME	KS-NGAP-002	38.413 8.7.2
 ngap	UEContextModificationFailure	UNSUCCESSFUL OUTCOME	KS-NGAP-006	38.413 8.3.4 uEContextModification
 ngap	UEContextModificationRequest	INITIATING MESSAGE	KS-NGAP-006	38.413 8.3.4 uEContextModification
 ngap	UEContextModificationResponse	SUCCESSFUL OUTCOME	KS-NGAP-006	38.413 8.3.4 uEContextModification
+ngap	UEContextReleaseCommand	INITIATING MESSAGE	KS-NGAP-005	38.413 8.3.3 uEContextRelease
+ngap	UEContextReleaseComplete	SUCCESSFUL OUTCOME	KS-NGAP-005	38.413 8.3.3 uEContextRelease
+ngap	UEContextReleaseRequest	INITIATING MESSAGE	KS-NGAP-005	38.413 8.3.2 uEContextReleaseRequest
 ngap	UERadioCapabilityInfoIndication	INITIATING MESSAGE	KS-NGAP-014,KS-RRCC-002	38.413 8.14.1 uERadioCapabilityInfoIndication
 ngap	UplinkNASTransport	INITIATING MESSAGE	KS-NGAP-003	38.413 8.6.3 uplinkNASTransport
 ngap	UplinkRANStatusTransfer	INITIATING MESSAGE	KS-NGAP-009	38.413 8.4.6 uplinkRANStatusTransfer
@@ -190,7 +212,8 @@ rrc	CG-Config		KS-F1AP-003	38.473 8.3
 rrc	CG-ConfigInfo		KS-F1AP-003	38.473 8.3
 rrc	DLInformationTransfer		KS-RRCU-011	38.331 5.7.1
 rrc	FailureInformation		KS-RRCU-011	38.331 5.7.2
-rrc	HandoverPreparationInformation		KS-F1AP-003	38.473 8.3
+rrc	HandoverCommand		KS-XNAP-002	row
+rrc	HandoverPreparationInformation		KS-F1AP-003,KS-XNAP-002	38.473 8.3; row
 rrc	LocationMeasurementIndication		KS-RRCU-007	38.331 5.5
 rrc	MIB		KS-F1AP-001,KS-RRCU-001,KS-RRCU-005,KS-RRCU-006,KS-RRCU-007	38.331 5.3.5; 38.331 5.3.5.5.2; 38.331 5.5; row
 rrc	MeasurementReport		KS-RRCU-007,KS-RRCU-011	38.331 5.5; 38.331 5.7.2

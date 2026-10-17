@@ -52,6 +52,17 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 | .34 / .35 | gNB 3: CU-CP / CU-UP. Three gNBs allow A→B→C→A handover chains that prove the NH/NCC chain |
 | .36–.39 | Spare: OCUDU CU-CP/CU-UP peers for Xn and E1 interop runs against the core, extra gNBs |
 
+**P3's placement (ADR 0013 points 1–2; for LW6, after wave 40's roll):**
+
+| gNB | ID | CU-CP / CU-UP | Cells (one per DU, D7) | TAC |
+|---|---|---|---|---|
+| ksim-gnb1 | 0x1A0/22 | .30 / .31 | PCI 101, 102 | 000001 |
+| ksim-gnb2 | 0x1A2/22 | .32 / .33 | PCI 103, 104 | 000001 |
+| ksim-gnb3 | 0x1A3/22 | .34 / .35 | PCI 105, 106 | 000007 once wave 40's roll serves it (D5); 000001 until then |
+| OCUDU (C6) | 0x1A1/22 | .36 / .37 | our two DUs | 000001 |
+
+The DUs have mid legs only. Each gNB's Xn-C is its CU-CP's address, port 38422 (ADR 0013 point 4); Xn-U is its CU-UP's N3 address. kaluza-core's AMF takes several gNBs on one TAC with no allow-list, and paging goes to every gNB serving the TA (kaluza-core-92, 2026-10-17).
+
 **What stays off VLAN 30:**
 - **UEs.** A UE's traffic leaves inside GTP-U from its gNB's CU-UP address. UE netns get only their PDU session addresses.
 - **F1-C, F1-U and E1** between the nodes of one gNB. They run on a host-internal bridge `ksim-mid` (10.250.0.0/24, no uplink), so they never load the trunk.
@@ -66,7 +77,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
 | **000001** | 001/01 3GPP cells: every kaluza-sim cell by default |
 | **000003** | SNPN cells (001/01, NID 000007ed9d5), which broadcast NPN-Support |
 | 000002, 000004, 000005, 000006 | The dedicated non-3GPP TACs (N3IWF, TNGF, TWIF, W-AGF; TS 23.501 §5.3.2.3). **A gNB never advertises them**; `ksim` refuses a topology that does |
-| **000007** | The second 001/01 TAC. It arrives with wave 40 (a list entry and an AMF roll), for P3's mobility-registration rows |
+| **000007** | The second 001/01 TAC. It arrives with wave 40's roll (a list entry, the SMF's and NSSF's TA view; the user's decision, start-phase-3-plan 2026-10-17), for P3's mobility-registration rows. Until then those rows run on the stub and the Open5GS rig (D5), whose config copy gets TAC 000007 (D6) |
 
 - **999/70 has no AMF.** Its subscribers register as roamers through 001/01 cells (the AMF's roaming partners are 999-70 and 999-71). No kaluza-sim cell broadcasts 999/70 against kaluza-core.
 

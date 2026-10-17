@@ -11,8 +11,8 @@ This guard requires:
 
 - each name used in the code is registered, and each registered name is used;
 - names are lower-case identifiers, registered once;
-- the row a mutant targets exists in a phase's row set, gates/rows/p1.tsv or
-  gates/rows/p2.tsv ('-' for a mutant that only a procedure test kills);
+- the row a mutant targets exists in a phase's row set, gates/rows/p1.tsv,
+  p2.tsv or p3.tsv ('-' for a mutant that only a procedure test kills);
 - KSIM_MUTANT is always given a literal.
 """
 
@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _common import Violation, main, read_text, repo_files, run_self_test, under  # noqa: E402
 
 REGISTRY = Path("tests/mutants.tsv")
-ROWS = (Path("gates/rows/p1.tsv"), Path("gates/rows/p2.tsv"))
+ROWS = (Path("gates/rows/p1.tsv"), Path("gates/rows/p2.tsv"), Path("gates/rows/p3.tsv"))
 CODE_SUFFIXES = {".cpp", ".hpp", ".h", ".cc", ".ipp"}
 SCANNED = ("src", "apps")
 EXEMPT = ("src/platform/mutation.hpp", "src/platform/mutation.cpp")
