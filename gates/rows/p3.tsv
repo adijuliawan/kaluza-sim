@@ -16,17 +16,19 @@
 #   topology    1g: one gNB, one DU (the P1/P2 topologies); 1g2d: one gNB, two DUs of one cell each
 #               (D7); 3g: three gNBs of two DUs each, Xn mesh (design point a); oc: our gNB beside
 #               OCUDU's; 3g7: 3g with the third gNB's cells on TAC 000007
-#   milestone   where the row is first scored (R2..R20)
+#   milestone   where the row is first scored (R3..R20). R2's rows are scored from R4, whose
+#               topologies run one gNB with two DUs; R2 itself is proven by the virtual-time
+#               procedure tests (tests/procedure/net2_test.cpp)
 #   mutant      the KSIM_MUTATIONS switch that must fail the row ('-': interop rows, whose control
 #               is the peer; measured rows, whose control is the number; fault rows, whose control
 #               is the fault itself)
 #   evidence    what the gate reads; clause cites per row in the text's spec column
 id	gate	n	text	family	observable	trigger	p3	cores	modes	topology	milestone	mutant	evidence
-ksim-p3.camp.cell-selection	kaluza-sim	-	the UE camps by cell selection over the cells it hears, not on the last SIB1 it read (TS 38.304 §5.2.3)	cells	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R2	camp_last_sib1	event rrc.camped with the cell's NCI and PCI; uu pcap
-ksim-p3.camp.tai-from-cell	kaluza-sim	-	the UE's registration names the TAI of the cell it camps on (TS 24.501 §5.5.1.2.2)	cells	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R2	-	nas pcap REGISTRATION REQUEST; rrc.camped tac
-ksim-p3.cell.announce	kaluza-sim	-	each DU announces its cell (NCI, PCI, SSB ARFCN) on the air and the CU-CP serves it with its own TAC and ULI	cells	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R2	-	KAIR CELL_ANNOUNCE in uu pcap; F1 Setup served cells; ngap ULI
-ksim-p3.cell.sfn-epoch	kaluza-sim	-	the DUs' SFNs follow one CLOCK_REALTIME epoch (ledger A-09)	cells	sim	sim	yes	stub	aio,split	1g2d	R2	-	event ran.du.sfn per DU; uu pcap
-ksim-p3.ng.ran-config-update	kaluza-sim	-	the gNB sends RAN CONFIGURATION UPDATE when its served TAs change and the AMF acknowledges (TS 38.413 §8.7.2)	ran	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R2	-	ngap RANConfigurationUpdate/Acknowledge
+ksim-p3.camp.cell-selection	kaluza-sim	-	the UE camps by cell selection over the cells it hears, not on the last SIB1 it read (TS 38.304 §5.2.3)	cells	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R4	camp_last_sib1	event rrc.camped with the cell's NCI and PCI; uu pcap
+ksim-p3.camp.tai-from-cell	kaluza-sim	-	the UE's registration names the TAI of the cell it camps on (TS 24.501 §5.5.1.2.2)	cells	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R4	-	nas pcap REGISTRATION REQUEST; rrc.camped tac
+ksim-p3.cell.announce	kaluza-sim	-	each DU announces its cell (NCI, PCI, SSB ARFCN) on the air and the CU-CP serves it with its own TAC and ULI	cells	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R4	-	KAIR CELL_ANNOUNCE in uu pcap; F1 Setup served cells; ngap ULI
+ksim-p3.cell.sfn-epoch	kaluza-sim	-	the DUs' SFNs follow one CLOCK_REALTIME epoch (ledger A-09)	cells	sim	sim	yes	stub	aio,split	1g2d	R4	-	event ran.du.sfn per DU; uu pcap
+ksim-p3.ng.ran-config-update	kaluza-sim	-	the gNB sends RAN CONFIGURATION UPDATE when its served TAs change and the AMF acknowledges (TS 38.413 §8.7.2)	ran	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R4	-	ngap RANConfigurationUpdate/Acknowledge
 ksim-p3.faults.zero	kaluza-sim	-	a run with no fault set prints FAULTS=0 and its manifest records none	faults	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g	R3	-	ksim-ctl faults list; manifest.json faults
 ksim-p3.faults.msg-drop	kaluza-sim	-	a message rule drops the matching PDU the number of times it says, and the drop is evented and in the manifest	faults	sim	sim	yes	stub	aio,split	1g	R3	-	event fault.hit; manifest.json faults; the PDU absent from the pcap
 ksim-p3.faults.link-loss	kaluza-sim	-	loss and delay set on a UE's air link are applied and measured; RLC AM's maximum retransmissions reached maps to RLF (KS-L2R-001)	faults	sim	sim	yes	stub	aio,split	1g	R3	-	event fault.link; ping loss and RTT; rrc.connection_lost reason

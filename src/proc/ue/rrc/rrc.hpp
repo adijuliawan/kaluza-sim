@@ -48,6 +48,7 @@
 #include "platform/rng.hpp"
 #include "platform/secret.hpp"
 #include "proc/ue/nas_mm/ports.hpp"
+#include "radio/view.hpp"
 
 namespace ksim::proc::ue {
 
@@ -67,6 +68,10 @@ struct RrcConfig {
     /// channel name ("nr-rrc.ul.dcch", …) for the run's Uu capture. Broadcast
     /// is reported when it makes the UE camp, not at every period.
     std::function<void(std::string_view channel, ByteView pdu)> tap;
+    /// P3 R2 (ADR 0013 point 3): what this UE hears (mac.radio_id). With a view the UE
+    /// takes frames only from cells it hears and camps on the strongest suitable one
+    /// (TS 38.304 §5.2.3); without one it camps on the first suitable cell, as in P1.
+    const radio::IRadioView* view = nullptr;
 };
 
 /// The NAS and the user plane above RRC, as the UE node wires them.
@@ -160,7 +165,18 @@ private:
     std::unique_ptr<entity::IdealRlc> srb0_;
 
     RrcState state_ = RrcState::idle;
-    bool mib_ok_ = false;
+    std::map<std::uint32_t, bool> mib_ok_;   // per cell: its MIB read and not barred
+    /// P3 R2: the suitable cells whose SIB1 the UE read (TS 38.304 §4.5), by handle.
+    struct Candidate {
+        std::uint32_t tac = 0;
+        std::uint64_t nci = 0;
+        std::uint8_t plmn_index = 1;
+        Millis t300 = 1000;
+    };
+    std::map<std::uint32_t, Candidate> candidates_;
+    /// The cell to camp on now: the strongest heard suitable cell, or (no view) `f_cell`.
+    std::optional<std::uint32_t> select(std::uint32_t f_cell) const;
+    void camp(std::uint32_t cell, ByteView sib1);
     bool camped_ = false;
     bool off_after_setup_ = false;   // power_off_after_nas waits for the setup
     bool radio_on_ = true;           // off: nothing heard, nothing sent

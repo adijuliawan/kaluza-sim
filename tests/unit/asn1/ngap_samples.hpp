@@ -35,6 +35,13 @@ inline std::vector<Sample> all() {
     s.push_back({"NGSetupRequest", setup});
     s.push_back({"NGSetupResponse", NgSetupResponse{"ksim-stub-amf", {guami}, 255, {{kPlmn, {Snssai{1, std::nullopt}}}}}});
     s.push_back({"NGSetupFailure", NgSetupFailure{Cause{"misc", "unspecified"}, "v10s"}});
+    // P3 R2 (TS 38.413 8.7.2): a DU with a second TAC joined after NG Setup.
+    RanConfigurationUpdate rcu;
+    rcu.tas = setup.tas;
+    rcu.tas.push_back({7, setup.tas.front().plmns});
+    s.push_back({"RANConfigurationUpdate", rcu});
+    s.push_back({"RANConfigurationUpdateAcknowledge", RanConfigurationUpdateAcknowledge{}});
+    s.push_back({"RANConfigurationUpdateFailure", RanConfigurationUpdateFailure{Cause{"misc", "unspecified"}, "v5s"}});
     s.push_back({"NGReset", NgReset{Cause{"misc", "om-intervention"}, true, {}}});
     s.push_back({"NGReset.partial", NgReset{Cause{"radioNetwork", "unspecified"}, false, {UeIds{7, 1}, UeIds{std::nullopt, 2}}}});
     s.push_back({"NGResetAcknowledge", NgResetAcknowledge{{UeIds{7, 1}}}});

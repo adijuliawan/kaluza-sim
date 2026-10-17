@@ -60,6 +60,7 @@ struct UeDeviceConfig {
     std::string netns;                        // with an IUeNet: "ksim-ue-<index>"
     std::optional<proc::ue::MmTimerValues> mm_timers;   // the defaults of TS 24.501 10.2 unless set
     std::optional<Persona> persona;           // N15: a device persona, applied as node/ue/persona says
+    const radio::IRadioView* view = nullptr;  // P3 R2: what the UE hears (none: every cell, P1's camping)
 };
 
 /// A session's interface as `ifaces` shows it.

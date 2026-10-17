@@ -53,6 +53,7 @@ const char* name_of(const ngap::Pdu& p) {
                           [](const ngap::PduSessionResourceReleaseResponse&) { return "PDUSessionResourceReleaseResponse"; },
                           [](const ngap::PduSessionResourceModifyResponse&) { return "PDUSessionResourceModifyResponse"; },
                           [](const ngap::PduSessionResourceNotify&) { return "PDUSessionResourceNotify"; },
+                          [](const ngap::RanConfigurationUpdate&) { return "RANConfigurationUpdate"; },
                           [](const auto&) { return "other"; },
                       },
                       p);
@@ -62,7 +63,16 @@ const char* name_of(const ngap::Pdu& p) {
 
 NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc& ng, IDatagram* n3,
                  std::array<std::uint8_t, 4> n3_addr)
-    : ex_(ex), home_(home), plmn_(std::move(plmn)), p_(std::move(p)), ng_(&ng),
+    : NgapAmf(ex, home, std::move(plmn), std::move(p), std::make_unique<SingleAssocPool>(ng), nullptr, n3, n3_addr) {}
+
+NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssocPool& ng, IDatagram* n3,
+                 std::array<std::uint8_t, 4> n3_addr)
+    : NgapAmf(ex, home, std::move(plmn), std::move(p), nullptr, &ng, n3, n3_addr) {}
+
+NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, std::unique_ptr<IAssocPool> own, IAssocPool* ng,
+                 IDatagram* n3, std::array<std::uint8_t, 4> n3_addr)
+    : ex_(ex), home_(home), plmn_(std::move(plmn)), p_(std::move(p)), own_ng_(std::move(own)),
+      ng_(ng != nullptr ? ng : own_ng_.get()),
       upf_(n3 != nullptr ? std::make_unique<Upf>(*n3, n3_addr) : nullptr), smf_(p_.session, upf_.get()),
       smsf_(Smsf::Link{
                 [this](const std::string& msisdn) {
@@ -85,17 +95,49 @@ NgapAmf::NgapAmf(Executor& ex, Home& home, nas::ie::Plmn plmn, Profile p, IAssoc
                 [this](const std::string& supi) { page(supi); },
                 [this] { return static_cast<std::uint64_t>(ex_.now()); }},
             p_.sms_sc) {
-    ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [this](LinkEvent e) { on_ng_event(e); });
+    wire_ng();
     smf_.on_page([this](const std::string& supi, std::uint8_t) { page(supi); });
+}
+
+void NgapAmf::wire_ng() {
+    ng_->set_handlers(
+        [this](LinkId link, ByteView msg, SctpMeta) {
+            rx_link_ = link;
+            on_message(msg);
+        },
+        [this](LinkId link, LinkEvent e) { on_ng_event(link, e); });
+}
+
+bool NgapAmf::serves(std::uint32_t tac) const {
+    return p_.tacs.empty() ? tac == 1 : std::find(p_.tacs.begin(), p_.tacs.end(), tac) != p_.tacs.end();
+}
+
+std::vector<std::uint32_t> NgapAmf::gnb_tacs(std::uint32_t gnb_id) const {
+    for (const auto& [link, g] : gnbs_) {
+        if (g.gnb_id == gnb_id) {
+            return g.tacs;
+        }
+    }
+    return {};
 }
 
 void NgapAmf::set_sms_subscribed(const std::string& supi, bool on) { sms_sub_[supi] = on; }
 
-void NgapAmf::on_ng_event(LinkEvent e) {
+void NgapAmf::on_ng_event(LinkId link, LinkEvent e) {
     if (e == LinkEvent::shutdown) {
         ng_end_ = "shutdown";
     } else if (e == LinkEvent::lost) {
         ng_end_ = "lost";
+    }
+    if ((e == LinkEvent::shutdown || e == LinkEvent::lost) && own_ng_ == nullptr) {
+        // P3 R2: with several gNBs, the one that went takes its UEs' N2 connections with it
+        // (one gNB's go at its next association, rebind()).
+        for (auto& [id, ue] : ues_) {
+            if (ue.link == link && ue.connected) {
+                drop_n2(ue);
+            }
+        }
+        gnbs_.erase(link);
     }
 }
 
@@ -107,7 +149,7 @@ void NgapAmf::command_release(std::uint64_t amf_ue, const ngap::Cause& cause) {
     const auto send_it = [this, amf_ue, ran, cause] {
         if (Ue* u = by_amf(amf_ue); u != nullptr && u->connected && !u->releasing && u->ran_ue == ran) {
             u->releasing = true;
-            send(ngap::UeContextReleaseCommand{u->amf_ue, u->ran_ue, cause}, stream_of(*u));
+            send_ue(*u, ngap::UeContextReleaseCommand{u->amf_ue, u->ran_ue, cause});
         }
     };
     if (release_delay_ <= 0) {
@@ -123,8 +165,10 @@ std::optional<Bytes> NgapAmf::radio_capability(std::uint64_t amf_ue) {
 }
 
 void NgapAmf::rebind(IAssoc& ng) {
-    ng_ = &ng;
-    ng_->set_handlers([this](ByteView msg, SctpMeta) { on_message(msg); }, [this](LinkEvent e) { on_ng_event(e); });
+    own_ng_ = std::make_unique<SingleAssocPool>(ng);
+    ng_ = own_ng_.get();
+    wire_ng();
+    gnbs_.clear();
     ng_setup_ = false;
     for (auto& [id, ue] : ues_) {
         drop_n2(ue);
@@ -146,7 +190,9 @@ void NgapAmf::drop_n2(Ue& ue) {
 
 void NgapAmf::status_indication() {
     const ngap::PlmnId plmn = ngap::plmn_id(plmn_.mcc, plmn_.mnc);
-    send(ngap::AmfStatusIndication{{ngap::Guami{plmn, p_.amf_region, p_.amf_set, p_.amf_pointer}}}, 0);
+    for (const auto& [link, g] : gnbs_) {
+        send_to(link, ngap::AmfStatusIndication{{ngap::Guami{plmn, p_.amf_region, p_.amf_set, p_.amf_pointer}}}, 0);
+    }
 }
 
 bool NgapAmf::deregister(const std::string& supi, bool reregistration_required) {
@@ -194,7 +240,12 @@ void NgapAmf::page(const std::string& supi) {
     for (std::uint32_t tac : p_.tacs) {
         tais.push_back(ngap::Tai{ngap::plmn_id(plmn_.mcc, plmn_.mnc), tac});
     }
-    send(ngap::Paging{ngap::FiveGSTmsi::of(*s), std::move(tais), std::nullopt}, 0);
+    // TS 38.413 §8.5.1: to every gNB serving one of those TAs.
+    for (const auto& [link, g] : gnbs_) {
+        if (std::any_of(g.tacs.begin(), g.tacs.end(), [&](std::uint32_t t) { return serves(t); })) {
+            send_to(link, ngap::Paging{ngap::FiveGSTmsi::of(*s), tais, std::nullopt}, 0);
+        }
+    }
 }
 
 NgapAmf::Ue* NgapAmf::returning(const ngap::InitialUeMessage& m) {
@@ -292,21 +343,26 @@ NgapAmf::Ue* NgapAmf::by_amf(std::uint64_t id) {
 }
 
 std::uint16_t NgapAmf::stream_of(const Ue& ue) const {
-    if (ng_->out_streams() <= 1) {
+    const std::uint16_t n = ng_->out_streams(ue.link);
+    if (n <= 1) {
         return 0;
     }
-    return static_cast<std::uint16_t>(1U + ue.ran_ue % (ng_->out_streams() - 1U));
+    return static_cast<std::uint16_t>(1U + ue.ran_ue % (n - 1U));
 }
 
-void NgapAmf::send_raw(ByteView pdu, std::uint16_t stream) { (void)ng_->send(pdu, SctpMeta{kNgapPpid, stream}); }
+void NgapAmf::send_raw(ByteView pdu, std::uint16_t stream) { (void)ng_->send(rx_link_, pdu, SctpMeta{kNgapPpid, stream}); }
 
-void NgapAmf::send(const ngap::Pdu& p, std::uint16_t stream) {
+void NgapAmf::send(const ngap::Pdu& p, std::uint16_t stream) { send_to(rx_link_, p, stream); }
+
+void NgapAmf::send_to(LinkId link, const ngap::Pdu& p, std::uint16_t stream) {
     auto wire = ngap::encode(p);
     check(wire.has_value(), "9", "the stub encoded its NGAP message", wire ? "" : wire.error().what);
     if (wire) {
-        send_raw(*wire, stream);
+        (void)ng_->send(link, *wire, SctpMeta{kNgapPpid, stream});
     }
 }
+
+void NgapAmf::send_ue(const Ue& ue, const ngap::Pdu& p) { send_to(ue.link, p, stream_of(ue)); }
 
 void NgapAmf::release(std::size_t n, ngap::Cause cause) {
     if (n >= order_.size()) {
@@ -317,7 +373,7 @@ void NgapAmf::release(std::size_t n, ngap::Cause cause) {
         return;
     }
     ue->releasing = true;
-    send(ngap::UeContextReleaseCommand{ue->amf_ue, ue->ran_ue, std::move(cause)}, stream_of(*ue));
+    send_ue(*ue, ngap::UeContextReleaseCommand{ue->amf_ue, ue->ran_ue, std::move(cause)});
 }
 
 void NgapAmf::attach_nas(Ue& ue) {
@@ -366,7 +422,7 @@ void NgapAmf::send_ics(Ue& u, Bytes nas, SecretBytes kgnb, std::vector<ngap::Ses
     r.nas = std::move(nas);
     u.ics_sent = true;
     u.ics_answered = false;
-    send(r, stream_of(u));
+    send_ue(u, r);
     secure_zero(r.security_key);
 }
 
@@ -375,7 +431,7 @@ void NgapAmf::relink(Ue& ue) {
     Amf::Link link;
     link.to_ue = [this, id](Bytes nas) {
         if (Ue* u = by_amf(id)) {
-            send(ngap::DownlinkNasTransport{u->amf_ue, u->ran_ue, std::move(nas)}, stream_of(*u));
+            send_ue(*u, ngap::DownlinkNasTransport{u->amf_ue, u->ran_ue, std::move(nas)});
         }
     };
     link.release = [this, id] { command_release(id, ngap::Cause{"nas", "normal-release"}); };
@@ -399,7 +455,7 @@ void NgapAmf::relink(Ue& ue) {
             u->setups.push_back(it.psi);
         }
         ngap::PduSessionResourceSetupRequest r{u->amf_ue, u->ran_ue, std::move(accept), std::move(items), first_ambr(*u)};
-        send(r, stream_of(*u));
+        send_ue(*u, r);
     };
     link.session_setup = [this, id](Bytes nas, ngap::SessionSetupItem item) {
         Ue* u = by_amf(id);
@@ -410,7 +466,7 @@ void NgapAmf::relink(Ue& ue) {
         item.nas = std::move(nas);
         u->setups.push_back(item.psi);
         ngap::PduSessionResourceSetupRequest r{u->amf_ue, u->ran_ue, std::nullopt, {std::move(item)}, first_ambr(*u)};
-        send(r, stream_of(*u));
+        send_ue(*u, r);
     };
     link.session_release = [this, id](Bytes nas, std::uint8_t psi) {
         Ue* u = by_amf(id);
@@ -418,9 +474,8 @@ void NgapAmf::relink(Ue& ue) {
             return;
         }
         u->releases.push_back(psi);
-        send(ngap::PduSessionResourceReleaseCommand{u->amf_ue, u->ran_ue, std::move(nas),
-                                                    {ngap::SessionCause{psi, ngap::Cause{"nas", "normal-release"}}}},
-             stream_of(*u));
+        send_ue(*u, ngap::PduSessionResourceReleaseCommand{u->amf_ue, u->ran_ue, std::move(nas),
+                                                           {ngap::SessionCause{psi, ngap::Cause{"nas", "normal-release"}}}});
     };
     link.session_modify = [this, id](Bytes nas, ngap::SessionModifyItem item) {
         Ue* u = by_amf(id);
@@ -430,7 +485,7 @@ void NgapAmf::relink(Ue& ue) {
         // P2 Q10 (TS 38.413 9.2.1.5): the 5GSM command as the session's NAS-PDU.
         item.nas = std::move(nas);
         u->modifies.push_back(item.psi);
-        send(ngap::PduSessionResourceModifyRequest{u->amf_ue, u->ran_ue, {std::move(item)}}, stream_of(*u));
+        send_ue(*u, ngap::PduSessionResourceModifyRequest{u->amf_ue, u->ran_ue, {std::move(item)}});
     };
     link.sms_uplink = [this, id](Bytes cp) {
         if (Ue* u = by_amf(id)) {
@@ -456,34 +511,65 @@ void NgapAmf::on_message(ByteView msg) {
         return;
     }
     received_.emplace_back(name_of(*p));
-    const ngap::Tai our_tai{ngap::plmn_id(plmn_.mcc, plmn_.mnc), p_.tacs.empty() ? 1U : p_.tacs.front()};
+    const ngap::PlmnId our_plmn = ngap::plmn_id(plmn_.mcc, plmn_.mnc);
+    // P3 R2: a TAI is the AMF's when it is a TA of its own that this gNB serves.
+    const auto our_tai = [&](const ngap::Tai& t) {
+        auto g = gnbs_.find(rx_link_);
+        return t.plmn == our_plmn && serves(t.tac) &&
+               (g == gnbs_.end() || std::find(g->second.tacs.begin(), g->second.tacs.end(), t.tac) != g->second.tacs.end());
+    };
+    const auto tas_ok = [&](const std::vector<ngap::NgSetupRequest::Ta>& tas) {
+        return std::any_of(tas.begin(), tas.end(), [&](const auto& t) {
+            return serves(t.tac) && std::any_of(t.plmns.begin(), t.plmns.end(),
+                                                [&](const ngap::PlmnSlices& ps) { return ps.plmn == our_plmn; });
+        });
+    };
+    const auto tacs_of = [](const std::vector<ngap::NgSetupRequest::Ta>& tas) {
+        std::vector<std::uint32_t> out;
+        out.reserve(tas.size());
+        for (const auto& t : tas) {
+            out.push_back(t.tac);
+        }
+        return out;
+    };
     std::visit(Overload{
                    [&](const ngap::NgSetupRequest& m) {
                        check(m.gnb_id_bits >= 22 && m.gnb_id_bits <= 32, "TS 38.413 9.3.1.6", "a 22..32-bit gNB ID");
-                       const bool ta = std::any_of(m.tas.begin(), m.tas.end(), [&](const auto& t) {
-                           return t.tac == our_tai.tac &&
-                                  std::any_of(t.plmns.begin(), t.plmns.end(),
-                                              [&](const ngap::PlmnSlices& s) { return s.plmn == our_tai.plmn; });
-                       });
-                       check(ta, "TS 38.413 8.7.1.2", "the supported TAs include the AMF's TA and PLMN");
+                       check(tas_ok(m.tas), "TS 38.413 8.7.1.2", "the supported TAs include a TA and PLMN of the AMF's");
                        ngap::NgSetupResponse r;
                        r.amf_name = "ksim-stub-amf";
-                       r.guamis = {ngap::Guami{our_tai.plmn, p_.amf_region, p_.amf_set, p_.amf_pointer}};
+                       r.guamis = {ngap::Guami{our_plmn, p_.amf_region, p_.amf_set, p_.amf_pointer}};
                        r.capacity = 255;
                        std::vector<ngap::Snssai> slices;
                        slices.reserve(p_.allowed_sst.size());
                        for (std::uint8_t sst : p_.allowed_sst) {
                            slices.push_back(ngap::Snssai{sst, std::nullopt});
                        }
-                       r.plmns = {{our_tai.plmn, slices}};
+                       r.plmns = {{our_plmn, slices}};
                        ng_setup_ = true;
+                       gnbs_[rx_link_] = Gnb{m.gnb_id, tacs_of(m.tas)};
                        for (auto& [uid, ue] : ues_) {
-                           drop_n2(ue);   // TS 38.413 8.7.1.2: the NG-RAN node's UE contexts are gone
+                           if (ue.link == rx_link_) {
+                               drop_n2(ue);   // TS 38.413 8.7.1.2: the NG-RAN node's UE contexts are gone
+                           }
                        }
                        send(r, 0);
                    },
+                   [&](const ngap::RanConfigurationUpdate& m) {
+                       // TS 38.413 §8.7.2.2: the gNB's served TAs as they are now.
+                       auto g = gnbs_.find(rx_link_);
+                       check(g != gnbs_.end(), "TS 38.413 8.7.2.1", "a RAN CONFIGURATION UPDATE after NG Setup");
+                       if (!m.tas.empty()) {
+                           check(tas_ok(m.tas), "TS 38.413 8.7.2.2", "the supported TAs still include one of the AMF's");
+                           if (g != gnbs_.end()) {
+                               g->second.tacs = tacs_of(m.tas);
+                           }
+                       }
+                       send(ngap::RanConfigurationUpdateAcknowledge{}, 0);
+                   },
                    [&](const ngap::InitialUeMessage& m) {
-                       check(m.tai == our_tai, "TS 38.413 9.2.5.1", "the user location's TAI is the cell's", "");
+                       check(our_tai(m.tai), "TS 38.413 9.2.5.1", "the user location's TAI is one the gNB serves for this AMF",
+                             "");
                        check(!m.cause.empty(), "TS 38.413 9.2.5.1", "an RRC establishment cause");
                        if (Ue* old = returning(m)) {
                            // A returning UE: its NAS context under a new N2 connection (N12).
@@ -495,6 +581,7 @@ void NgapAmf::on_message(ByteView msg) {
                            }
                            moved.amf_ue = next_amf_ue_++;
                            moved.ran_ue = m.ran;
+                           moved.link = rx_link_;
                            moved.connected = true;
                            moved.ics_sent = moved.ics_answered = moved.releasing = moved.asked = false;
                            moved.setups.clear();
@@ -511,6 +598,7 @@ void NgapAmf::on_message(ByteView msg) {
                        Ue ue;
                        ue.amf_ue = next_amf_ue_++;
                        ue.ran_ue = m.ran;
+                       ue.link = rx_link_;
                        const std::uint64_t id = ue.amf_ue;
                        ues_.emplace(id, std::move(ue));
                        order_.push_back(id);
@@ -521,7 +609,7 @@ void NgapAmf::on_message(ByteView msg) {
                    [&](const ngap::UplinkNasTransport& m) {
                        Ue* ue = by_amf(m.amf);
                        check(ue != nullptr && ue->ran_ue == m.ran, "TS 38.413 10.6", "the UE NGAP IDs are a known pair");
-                       check(m.tai == our_tai, "TS 38.413 9.2.5.3", "the user location's TAI is the cell's");
+                       check(our_tai(m.tai), "TS 38.413 9.2.5.3", "the user location's TAI is one the gNB serves for this AMF");
                        if (ue != nullptr) {
                            ue->nas->on_uplink(m.nas, false);
                        }

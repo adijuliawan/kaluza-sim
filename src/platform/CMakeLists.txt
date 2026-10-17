@@ -24,7 +24,8 @@ add_library(ksim_platform STATIC
     transport.cpp
     memlink.cpp
     blocking.cpp
-    assoc_slot.cpp)
+    assoc_slot.cpp
+    assoc_pool.cpp)
 add_library(ksim::platform ALIAS ksim_platform)
 target_include_directories(ksim_platform PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_platform PUBLIC OpenSSL::Crypto ${KSIM_FMT} Threads::Threads PRIVATE ${KSIM_YAML} ksim::warnings)

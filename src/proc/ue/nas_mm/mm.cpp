@@ -547,7 +547,10 @@ void Mm::on_registration_accept(const nas::Message& m) {
         nssai += (nssai.empty() ? "" : ",") + str(s.sst);
     }
     if (tai_list_ && !tai_list_->tais.empty()) {
-        last_tai_ = tai_list_->tais.front();   // the cell's TA is in the list (fixed camping, A-12)
+        // §5.5.1.2.4: the last visited registered TAI is the camped cell's when the list holds it
+        // (P3 R2: the cell selected, no longer the first of the list, ledger A-12).
+        const auto& l = tai_list_->tais;
+        last_tai_ = current_tai_ && std::find(l.begin(), l.end(), *current_tai_) != l.end() ? *current_tai_ : l.front();
     }
     persist_loci();
     events_.emit("nas.reg.accept", cfg_.id,

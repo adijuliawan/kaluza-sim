@@ -120,6 +120,19 @@ struct NgSetupFailure {
     std::optional<std::string> time_to_wait;   // v1s, v2s, v5s, v10s, v20s, v60s
     friend bool operator==(const NgSetupFailure&, const NgSetupFailure&) = default;
 };
+// P3 R2 (TS 38.413 §8.7.2): a gNB's served TAs changed after NG Setup (a DU came or went).
+struct RanConfigurationUpdate {
+    std::vector<NgSetupRequest::Ta> tas;   // the Supported TA List as it is now
+    friend bool operator==(const RanConfigurationUpdate&, const RanConfigurationUpdate&) = default;
+};
+struct RanConfigurationUpdateAcknowledge {
+    friend bool operator==(const RanConfigurationUpdateAcknowledge&, const RanConfigurationUpdateAcknowledge&) = default;
+};
+struct RanConfigurationUpdateFailure {
+    Cause cause;
+    std::optional<std::string> time_to_wait;
+    friend bool operator==(const RanConfigurationUpdateFailure&, const RanConfigurationUpdateFailure&) = default;
+};
 struct NgReset {
     Cause cause;
     bool all = true;                   // nG-Interface, else partOfNG-Interface
@@ -443,7 +456,8 @@ using Pdu = std::variant<NgSetupRequest, NgSetupResponse, NgSetupFailure, NgRese
                          UeContextModificationRequest, UeContextModificationResponse, UeRadioCapabilityInfoIndication,
                          PduSessionResourceSetupRequest, PduSessionResourceSetupResponse, PduSessionResourceReleaseCommand,
                          PduSessionResourceReleaseResponse, PduSessionResourceModifyRequest, PduSessionResourceModifyResponse,
-                         PduSessionResourceNotify>;
+                         PduSessionResourceNotify, RanConfigurationUpdate, RanConfigurationUpdateAcknowledge,
+                         RanConfigurationUpdateFailure>;
 
 Result<Bytes> encode(const Pdu& p);
 

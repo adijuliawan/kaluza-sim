@@ -39,7 +39,7 @@ from p2_exit import Results, account, allow_ids, kv_file, mode_of, null_as  # no
 
 ROOT = Path(__file__).resolve().parents[1]
 # The last P3 milestone committed: rows of later milestones are not required yet.
-REACHED = "R1"
+REACHED = "R2"
 OCUDU_MODES = ("C6", "C7", "C8")
 
 

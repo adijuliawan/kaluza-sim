@@ -26,7 +26,7 @@ nas.dereg.sent	24.501 5.5.2.2.1	a DEREGISTRATION REQUEST sent; switch_off, ident
 nas.dereg.accept	24.501 5.5.2.2.2	a DEREGISTRATION ACCEPT taken: the UE is deregistered
 nas.dereg.abort	24.501 5.5.2.2.6	a UE-initiated de-registration ended without an accept; reason=T3521|released
 rrc.unexpected	38.331 5.3.7	a DL-DCCH message the UE did not ask for in its state (P3 R1: RRCReestablishment until R5); message
-rrc.camped	38.331 5.2.2	the UE camps on a cell (fixed camping, ledger A-12): MIB not barred, SIB1 lists the selected PLMN; cell (KAIR handle), tac, nci, plmn
+rrc.camped	38.304 5.2.3	the UE camps on a cell: MIB not barred, SIB1 lists the selected PLMN, and (P3 R2) with a radio view the strongest such cell it hears; cell (KAIR handle), tac, nci, plmn, rsrp with a view
 rrc.cell_barred	38.331 5.2.2.5	the camped cell's MIB says barred
 rrc.paging	38.331 5.3.2.3	a Paging record matched this UE's 5G-S-TMSI; state
 rrc.setup.request	38.331 5.3.3.3	RRCSetupRequest sent in Msg3; identity=ng-5G-S-TMSI-Part1|randomValue, cause
@@ -44,7 +44,7 @@ rrc.integrity_failure	38.323 5.2.2.1	a PDCP integrity failure on an SRB (re-esta
 rrc.connection_lost	38.331 5.3.11	the UE left RRC_CONNECTED on its own (integrity failure, bearers before AS security, a reconfiguration it cannot follow); reason
 rrc.decode_error	38.331 5.7.3	a DL-DCCH message the UE could not decode; bearer, what
 rrc.encode_error	sim	a message the UE's builders refused (a sim bug); what
-ran.f1.setup	38.473 8.2.3	F1 Setup done: at the CU-CP (du, tac) and at the DU (cu, cell_active)
+ran.f1.setup	38.473 8.2.3	F1 Setup done: at the CU-CP (du, tac, dus: the DUs set up now) and at the DU (cu, cell_active)
 ran.f1.setup.failure	38.473 8.2.3.3	F1 SETUP FAILURE taken at the DU, retried after its time to wait; cause, retry_ms
 ran.f1.lost	38.413 8.3.2	P2 Q2: F1 lost at the CU-CP (link: lost or shutdown, ues); each UE the AMF knows is asked to be released, radio connection with UE lost
 ran.e1.lost	38.413 8.3.2	P2 Q2: E1 lost at the CU-CP (link: lost or shutdown); each UE that had a bearer context is asked to be released
@@ -59,6 +59,8 @@ platform.loop_lag	ADR 0011 6	P2 Q7, the watchdog: a timer fired more than the to
 ran.e1.inactivity	37.483 8.6.3	BEARER CONTEXT INACTIVITY NOTIFICATION (P2 Q5): sent by the CU-UP (cu_up_ue, active) after the UE Inactivity Timer without user data; taken at the CU-CP (cu_cp_ue, active), which then asks the AMF to release the UE
 ran.f1.cu_config_update	38.473 8.2.5	gNB-CU Configuration Update answered (P2 Q4): at the DU (activate, deactivate, failed, cell_active), at the CU-CP the acknowledge (transaction, failed)
 ran.f1.ue_mod_failure	38.473 8.3.4.3	the DU made none of a UE Context Modification and refused it (P2 Q4); du_ue, cause
+ran.ng.config_update	38.413 8.7.2	P3 R2: RAN CONFIGURATION UPDATE sent after NG Setup, the served TAs changed (a DU with a new TAC); tacs
+ran.ng.config_update.ack	38.413 8.7.2.2	P3 R2: RAN CONFIGURATION UPDATE ACKNOWLEDGE taken; or failure with cause
 ran.ng.setup	38.413 8.7.1.2	NG Setup done: NG SETUP RESPONSE taken; amf, capacity
 ran.ng.setup.failure	38.413 8.7.1.3	NG SETUP FAILURE taken, retried after its time to wait; cause, retry_ms
 ran.ng.reset	38.413 8.7.4.2.2	an NG RESET from the AMF: UE contexts released locally and acknowledged; all, released

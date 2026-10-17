@@ -64,7 +64,7 @@ struct Stub {
     std::unique_ptr<ksim::net::SctpListener> listener;
     std::unique_ptr<ksim::net::UdpSocket> n3;
     std::array<std::uint8_t, 4> n3_addr{127, 0, 0, 1};
-    std::unique_ptr<ksim::IAssoc> assoc;
+    ksim::AssocPool ng;                          // P3 R2: every gNB's association at once
     std::unique_ptr<ksim::corestub::NgapAmf> amf;
     std::unique_ptr<ksim::net::TunPort> dn;      // P2 Q12: the DN namespace's TUN, when --dn-netd
     std::vector<ksim::corestub::Verdict> past;   // the verdicts of associations that ended
@@ -282,16 +282,14 @@ static int run_main(int argc, char** argv) {
         }
         s.n3 = std::move(*u);
         ksim::net::SctpOptions opt;
-        opt.out_streams = 3;
-        opt.max_in_streams = 3;
+        opt.out_streams = 10;   // P3 R2: as our CU-CP's (KS-NGAP-D6) and kaluza-core's AMF
+        opt.max_in_streams = 10;
         auto l = ksim::net::SctpListener::listen(s.shard.reactor(), {*ep}, opt, [&s](std::unique_ptr<ksim::IAssoc> a) {
-            // One gNB at a time: a new association replaces the last. The AMF keeps
-            // its UE contexts across it (N12: a gNB or AMF restart), its N2 connections go.
-            s.assoc = std::move(a);
-            if (s.amf) {
-                s.amf->rebind(*s.assoc);
-            } else {
-                s.amf = std::make_unique<ksim::corestub::NgapAmf>(s.shard, s.home, s.plmn, s.profile, *s.assoc, s.n3.get(),
+            // P3 R2: several gNBs at once, each its own link in the pool. The AMF keeps its UE
+            // contexts across a gNB's new association (N12: a gNB or AMF restart); the N2
+            // connections of a gNB whose association went are dropped.
+            if (!s.amf) {
+                s.amf = std::make_unique<ksim::corestub::NgapAmf>(s.shard, s.home, s.plmn, s.profile, s.ng, s.n3.get(),
                                                                   s.n3_addr);
                 s.amf->set_release_delay(s.release_delay_ms);
                 if (s.dn && s.amf->upf() != nullptr) {
@@ -301,6 +299,7 @@ static int run_main(int argc, char** argv) {
                     s.amf->set_sms_subscribed(supi, on);
                 }
             }
+            (void)s.ng.take(std::move(a));
             ++s.associations;
         });
         if (!l) {
@@ -614,15 +613,11 @@ static int run_main(int argc, char** argv) {
         // INDICATION, then the association aborted after a moment; the UE
         // contexts stay for the gNB's next association (L11).
         auto r = s.call<bool>([&s] {
-            if (!s.amf || !s.assoc) {
+            if (!s.amf || s.ng.links().empty()) {
                 return false;
             }
             s.amf->status_indication();
-            s.shard.start_timer(300, [&s] {
-                if (s.assoc) {
-                    s.assoc->abort();
-                }
-            });
+            s.shard.start_timer(300, [&s] { s.ng.abort_all(); });
             return true;
         });
         if (!r) {
@@ -654,8 +649,9 @@ static int run_main(int argc, char** argv) {
     }
     server.stop();
     (void)s.call<bool>([&s] {
+        s.ng.set_handlers({}, {});
         s.amf.reset();
-        s.assoc.reset();
+        s.ng.clear();
         s.listener.reset();
         s.n3.reset();
         s.dn.reset();

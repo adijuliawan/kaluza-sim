@@ -55,6 +55,7 @@ constexpr int kPduSessionResourceModify = 26;
 constexpr int kPduSessionResourceNotify = 30;   // P2 Q10
 constexpr int kPduSessionResourceRelease = 28;
 constexpr int kPduSessionResourceSetup = 29;
+constexpr int kRanConfigurationUpdate = 35;   // P3 R2
 
 // Protocol IE identifiers.
 constexpr int kAllowedNssai = 0;
@@ -277,13 +278,10 @@ Result<Bytes> per(const json& j) { return jer::encode(asn_DEF_NGAP_NGAP_PDU, j, 
 
 // ---- builders ---------------------------------------------------------------------------
 
-Result<Bytes> build(const NgSetupRequest& m) {
-    if (m.gnb_id_bits < 22 || m.gnb_id_bits > 32 || (m.gnb_id_bits < 32 && m.gnb_id >> m.gnb_id_bits != 0) ||
-        m.tas.empty()) {
-        return bad("NGAP: a gNB ID of 22..32 bits and at least one TA");
-    }
+/// SupportedTAList (TS 38.413 §9.3.3.x): each TA with its broadcast PLMNs and their slices.
+Result<json> supported_tas(const std::vector<NgSetupRequest::Ta>& list) {
     json tas = json::array();
-    for (const auto& t : m.tas) {
+    for (const auto& t : list) {
         if (!plmns_ok(t.plmns) || t.tac >> 24 != 0) {
             return bad("NGAP: each TA needs a 24-bit TAC and PLMNs with slices");
         }
@@ -293,6 +291,32 @@ Result<Bytes> build(const NgSetupRequest& m) {
         }
         tas.push_back({{"tAC", octets(t.tac, 3)}, {"broadcastPLMNList", plmns}});
     }
+    return tas;
+}
+
+std::vector<NgSetupRequest::Ta> read_supported_tas(const json& l) {
+    std::vector<NgSetupRequest::Ta> out;
+    for (const auto& t : l) {
+        NgSetupRequest::Ta ta;
+        ta.tac = static_cast<std::uint32_t>(read_number(t.at("tAC")));
+        for (const auto& p : t.at("broadcastPLMNList")) {
+            ta.plmns.push_back({read_plmn(p.at("pLMNIdentity")), read_slice_list(p.at("tAISliceSupportList"))});
+        }
+        out.push_back(std::move(ta));
+    }
+    return out;
+}
+
+Result<Bytes> build(const NgSetupRequest& m) {
+    if (m.gnb_id_bits < 22 || m.gnb_id_bits > 32 || (m.gnb_id_bits < 32 && m.gnb_id >> m.gnb_id_bits != 0) ||
+        m.tas.empty()) {
+        return bad("NGAP: a gNB ID of 22..32 bits and at least one TA");
+    }
+    auto tl = supported_tas(m.tas);
+    if (!tl) {
+        return tl.error();
+    }
+    json tas = std::move(*tl);
     json ies = json::array();
     ies.push_back(ie(kGlobalRanNodeId, "reject", "GlobalRANNodeID",
                      {{"globalGNB-ID",
@@ -334,6 +358,30 @@ Result<Bytes> build(const NgSetupFailure& m) {
         ies.push_back(ie(kTimeToWait, "ignore", "TimeToWait", *m.time_to_wait));
     }
     return per(unsuccessful(kNgSetup, "reject", "NGSetupFailure", ies));
+}
+
+Result<Bytes> build(const RanConfigurationUpdate& m) {
+    json ies = json::array();
+    if (!m.tas.empty()) {
+        auto tl = supported_tas(m.tas);
+        if (!tl) {
+            return tl.error();
+        }
+        ies.push_back(ie(kSupportedTaList, "reject", "SupportedTAList", std::move(*tl)));
+    }
+    return per(initiating(kRanConfigurationUpdate, "reject", "RANConfigurationUpdate", ies));
+}
+
+Result<Bytes> build(const RanConfigurationUpdateAcknowledge&) {
+    return per(successful(kRanConfigurationUpdate, "reject", "RANConfigurationUpdateAcknowledge", json::array()));
+}
+
+Result<Bytes> build(const RanConfigurationUpdateFailure& m) {
+    json ies = json::array({ie(kCause, "ignore", "Cause", cause(m.cause))});
+    if (m.time_to_wait) {
+        ies.push_back(ie(kTimeToWait, "ignore", "TimeToWait", *m.time_to_wait));
+    }
+    return per(unsuccessful(kRanConfigurationUpdate, "reject", "RANConfigurationUpdateFailure", ies));
 }
 
 Result<Bytes> build(const NgReset& m) {
@@ -1210,6 +1258,25 @@ std::vector<PlmnSlices> read_plmn_support(const json& j) {
 Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
     using K = Header::Kind;
     switch (code) {
+    case kRanConfigurationUpdate:
+        if (kind == K::initiating) {
+            RanConfigurationUpdate m;
+            if (const json* l = maybe(ies, kSupportedTaList)) {
+                m.tas = read_supported_tas(*l);
+            }
+            return Pdu{m};
+        }
+        if (kind == K::successful) {
+            return Pdu{RanConfigurationUpdateAcknowledge{}};
+        }
+        {
+            RanConfigurationUpdateFailure m;
+            m.cause = read_cause(need(ies, kCause));
+            if (const json* t = maybe(ies, kTimeToWait)) {
+                m.time_to_wait = t->get<std::string>();
+            }
+            return Pdu{m};
+        }
     case kNgSetup:
         if (kind == K::initiating) {
             NgSetupRequest m;
@@ -1224,14 +1291,7 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             if (const json* n = maybe(ies, kRanNodeName)) {
                 m.name = n->get<std::string>();
             }
-            for (const auto& t : need(ies, kSupportedTaList)) {
-                NgSetupRequest::Ta ta;
-                ta.tac = static_cast<std::uint32_t>(read_number(t.at("tAC")));
-                for (const auto& p : t.at("broadcastPLMNList")) {
-                    ta.plmns.push_back({read_plmn(p.at("pLMNIdentity")), read_slice_list(p.at("tAISliceSupportList"))});
-                }
-                m.tas.push_back(std::move(ta));
-            }
+            m.tas = read_supported_tas(need(ies, kSupportedTaList));
             m.paging_drx = need(ies, kDefaultPagingDrx).get<std::string>();
             return Pdu{m};
         }

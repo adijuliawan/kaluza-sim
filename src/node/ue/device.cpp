@@ -49,6 +49,7 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     rc.plmn = {cfg_.plmn.mcc, cfg_.plmn.mnc};
     rc.mac.radio_id = cfg_.radio_id;
     rc.allow_null_integrity = cfg_.allow_null_integrity;
+    rc.view = cfg_.view;
     if (cfg_.persona) {
         rc.nr_capability = cfg_.persona->nr_capability();   // N15: the phone's UE-NR-Capability, as it came
     }

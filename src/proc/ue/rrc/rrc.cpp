@@ -71,7 +71,8 @@ void UeRrc::power(bool on) {
             go_idle();   // gone without a word: the network finds out by itself
         }
         camped_ = false;
-        mib_ok_ = false;
+        mib_ok_.clear();
+        candidates_.clear();
         events_.emit("rrc.power", cfg_.id, {{"on", "0"}});
         return;
     }
@@ -111,6 +112,9 @@ void UeRrc::on_frame(const air::Frame& f) {
     if (!radio_on_) {
         return;
     }
+    if (cfg_.view != nullptr && !cfg_.view->level(cfg_.mac.radio_id, f.cell_handle)) {
+        return;   // P3 R2: a cell this UE does not hear
+    }
     if (camped_ && f.cell_handle == cell_) {
         last_dl_ = ex_.now();
     }
@@ -124,6 +128,8 @@ void UeRrc::on_frame(const air::Frame& f) {
     case air::FrameType::pcch:
         on_paging(f);
         return;
+    case air::FrameType::cell_announce:
+        return;   // the cell is learnt from its MIB and SIB1 (TS 38.304 §5.2.3)
     default:
         if (camped_ && f.cell_handle == cell_) {
             mac_->on_frame(f);
@@ -137,7 +143,8 @@ void UeRrc::on_mib(const air::Frame& f) {
     if (!mib) {
         return;
     }
-    if (!mib_ok_ && !mib->barred && cfg_.tap) {
+    const bool known = mib_ok_[f.cell_handle];
+    if (!known && !mib->barred && cfg_.tap) {
         cfg_.tap("nr-rrc.bcch.bch", f.sdus.front().data);
     }
     if (mib->barred) {
@@ -145,14 +152,28 @@ void UeRrc::on_mib(const air::Frame& f) {
             camped_ = false;
             events_.emit("rrc.cell_barred", cfg_.id, {{"cell", str(f.cell_handle)}});
         }
-        mib_ok_ = false;
+        mib_ok_[f.cell_handle] = false;
+        candidates_.erase(f.cell_handle);
         return;
     }
-    mib_ok_ = true;
+    mib_ok_[f.cell_handle] = true;
+}
+
+std::optional<std::uint32_t> UeRrc::select(std::uint32_t f_cell) const {
+    if (cfg_.view == nullptr) {
+        return f_cell;
+    }
+    // TS 38.304 §5.2.3.1: the strongest cell heard that is suitable; R17 adds the S-criterion.
+    for (const radio::Heard& h : cfg_.view->heard(cfg_.mac.radio_id)) {
+        if (candidates_.count(h.cell) != 0) {
+            return h.cell;
+        }
+    }
+    return std::nullopt;
 }
 
 void UeRrc::on_sib1(const air::Frame& f) {
-    if (!mib_ok_) {
+    if (!mib_ok_[f.cell_handle]) {
         return;
     }
     auto sib1 = rrc::decode_sib1(f.sdus.front().data);
@@ -161,24 +182,47 @@ void UeRrc::on_sib1(const air::Frame& f) {
     }
     const auto it = std::find(sib1->plmns.begin(), sib1->plmns.end(), cfg_.plmn);
     if (it == sib1->plmns.end()) {
+        candidates_.erase(f.cell_handle);
         return;   // not a suitable cell for the selected PLMN (TS 38.304 §4.5)
     }
+    candidates_[f.cell_handle] = Candidate{sib1->tac, sib1->cell_identity,
+                                           static_cast<std::uint8_t>(it - sib1->plmns.begin() + 1),
+                                           sib1->timers ? sib1->timers->t300 : cfg_.t300_default};
     if (camped_ && cell_ == f.cell_handle && tac_ == sib1->tac && nci_ == sib1->cell_identity) {
         return;   // the same SIB1 again
     }
+    // P3 R2: a connecting or connected UE stays on its cell (TS 38.304 §5.2.2: selection and
+    // reselection are RRC_IDLE's); a handover moves it.
+    if (camped_ && state_ != RrcState::idle) {
+        return;
+    }
+    const auto best = select(f.cell_handle);
+    if (!best || *best != f.cell_handle) {
+        return;   // a stronger suitable cell is heard: its SIB1 makes the UE camp there
+    }
+    camp(f.cell_handle, f.sdus.front().data);
+}
+
+void UeRrc::camp(std::uint32_t cell, ByteView sib1) {
+    const Candidate& c = candidates_.at(cell);
     camped_ = true;
-    cell_ = f.cell_handle;
-    tac_ = sib1->tac;
-    nci_ = sib1->cell_identity;
-    plmn_index_ = static_cast<std::uint8_t>(it - sib1->plmns.begin() + 1);
-    t300_ = sib1->timers ? sib1->timers->t300 : cfg_.t300_default;
+    cell_ = cell;
+    tac_ = c.tac;
+    nci_ = c.nci;
+    plmn_index_ = c.plmn_index;
+    t300_ = c.t300;
     mac_->camp(cell_);
     if (cfg_.tap) {
-        cfg_.tap("nr-rrc.bcch.dl.sch", f.sdus.front().data);
+        cfg_.tap("nr-rrc.bcch.dl.sch", sib1);
     }
-    events_.emit("rrc.camped", cfg_.id,
-                 {{"cell", str(cell_)}, {"tac", str(tac_)}, {"nci", str(static_cast<std::int64_t>(nci_))},
-                  {"plmn", cfg_.plmn.mcc + cfg_.plmn.mnc}});
+    std::vector<EventField> fields{{"cell", str(cell_)}, {"tac", str(tac_)}, {"nci", str(static_cast<std::int64_t>(nci_))},
+                                   {"plmn", cfg_.plmn.mcc + cfg_.plmn.mnc}};
+    if (cfg_.view != nullptr) {
+        if (auto l = cfg_.view->level(cfg_.mac.radio_id, cell_)) {
+            fields.push_back({"rsrp", str(static_cast<std::int64_t>(*l))});
+        }
+    }
+    events_.emit("rrc.camped", cfg_.id, fields);
     if (upper_.camped) {
         upper_.camped(tac_);
     }
@@ -188,6 +232,9 @@ void UeRrc::on_sib1(const air::Frame& f) {
 }
 
 void UeRrc::on_paging(const air::Frame& f) {
+    if (!camped_ || f.cell_handle != cell_) {
+        return;   // P3 R2: paging is read on the camped cell (TS 38.304 §7.1)
+    }
     auto p = rrc::decode_paging(f.sdus.front().data);
     if (!p || !upper_.s_tmsi) {
         return;

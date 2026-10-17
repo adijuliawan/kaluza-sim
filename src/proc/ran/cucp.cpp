@@ -41,7 +41,17 @@ bool supports(std::uint16_t map, std::uint8_t alg) { return alg == 0 || (map & (
 } // namespace
 
 CuCp::CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1, IAssoc* e1)
-    : ex_(ex), events_(events), cfg_(std::move(cfg)), ng_(ngap), f1_(f1), alive_(std::make_shared<bool>(true)), e1_(e1) {
+    : ex_(ex), events_(events), cfg_(std::move(cfg)), ng_(ngap), own_f1_(std::make_unique<SingleAssocPool>(f1)),
+      f1_(own_f1_.get()), alive_(std::make_shared<bool>(true)), e1_(e1) {
+    wire();
+}
+
+CuCp::CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssocPool& f1s, IAssoc* e1)
+    : ex_(ex), events_(events), cfg_(std::move(cfg)), ng_(ngap), f1_(&f1s), alive_(std::make_shared<bool>(true)), e1_(e1) {
+    wire();
+}
+
+void CuCp::wire() {
     // P2 Q2: a message under another protocol's PPID is dropped and counted (TS 38.412, 38.472, 37.482 §7).
     ng_.set_handlers(
         [this](ByteView msg, SctpMeta m) {
@@ -50,14 +60,15 @@ CuCp::CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAsso
             }
         },
         [this](LinkEvent e) { on_ng_event(e); });
-    f1_.set_handlers(
-        [this](ByteView msg, SctpMeta m) {
+    f1_->set_handlers(
+        [this](LinkId link, ByteView msg, SctpMeta m) {
             if (ppid_ok(m, kF1apPpid, "f1ap")) {
                 f1_rx_stream_ = m.stream;
+                rx_link_ = link;
                 on_f1(msg);
             }
         },
-        [this](LinkEvent e) { on_f1_event(e); });
+        [this](LinkId link, LinkEvent e) { on_f1_event(link, e); });
     if (e1_ != nullptr) {
         e1_->set_handlers(
             [this](ByteView msg, SctpMeta m) {
@@ -76,9 +87,23 @@ CuCp::~CuCp() {
     }
 }
 
-ngap::NrCgi CuCp::nr_cgi() const { return du_ ? ngap::NrCgi{du_->cgi.plmn, du_->cgi.nci} : ngap::NrCgi{}; }
-ngap::Tai CuCp::tai() const {
-    return {ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc), du_ ? du_->tac : 0};
+ngap::NrCgi CuCp::nr_cgi(const Ue& ue) const {
+    auto it = dus_.find(ue.du_link);
+    return it != dus_.end() ? ngap::NrCgi{it->second.cgi.plmn, it->second.cgi.nci} : ngap::NrCgi{};
+}
+ngap::Tai CuCp::tai(const Ue& ue) const {
+    auto it = dus_.find(ue.du_link);
+    return {ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc), it != dus_.end() ? it->second.tac : 0};
+}
+
+std::vector<std::uint32_t> CuCp::served_tacs() const {
+    std::vector<std::uint32_t> out;
+    for (const auto& [link, d] : dus_) {
+        if (std::find(out.begin(), out.end(), d.tac) == out.end()) {
+            out.push_back(d.tac);
+        }
+    }
+    return out;
 }
 
 std::uint8_t CuCp::next_tid(Ue& ue) {
@@ -126,23 +151,57 @@ bool CuCp::ppid_ok(const SctpMeta& m, std::uint32_t want, const char* link) {
     return false;
 }
 
-Result<void> CuCp::cu_configuration_update(std::vector<f1ap::NrCgi> activate, std::vector<f1ap::NrCgi> deactivate) {
-    if (!du_) {
+Result<void> CuCp::cu_configuration_update(const std::vector<f1ap::NrCgi>& activate,
+                                           const std::vector<f1ap::NrCgi>& deactivate) {
+    if (dus_.empty()) {
         return make_error(Errc::closed, 0, "no F1 with a DU");
     }
+    // Each DU is told about its own cell (one per DU, D7) and about any cell no DU serves,
+    // which it reports as failed (TS 38.473 §8.2.5.2).
     f1_transaction_ = static_cast<std::uint8_t>(f1_transaction_ + 1);
-    send_f1(f1ap::GnbCuConfigurationUpdate{f1_transaction_, std::move(activate), std::move(deactivate)}, false);
+    const auto owned = [this](const f1ap::NrCgi& c) {
+        return std::any_of(dus_.begin(), dus_.end(), [&](const auto& d) { return d.second.cgi == c; });
+    };
+    for (const auto& [link, d] : dus_) {
+        f1ap::GnbCuConfigurationUpdate u{f1_transaction_, {}, {}};
+        for (const auto& c : activate) {
+            if (c == d.cgi || !owned(c)) {
+                u.activate.push_back(c);
+            }
+        }
+        for (const auto& c : deactivate) {
+            if (c == d.cgi || !owned(c)) {
+                u.deactivate.push_back(c);
+            }
+        }
+        if (!u.activate.empty() || !u.deactivate.empty()) {
+            send_f1_to(link, u, false);
+        }
+    }
     return {};
 }
 
 void CuCp::send_f1(const f1ap::Pdu& p, bool ue_associated) {
+    LinkId link = rx_link_;
+    if (ue_associated) {
+        if (const auto id = f1ap::cu_ue_of(p)) {
+            if (const Ue* ue = by_cu(*id)) {
+                link = ue->du_link;
+            }
+        }
+    }
+    send_f1_to(link, p, ue_associated);
+}
+
+void CuCp::send_f1_to(LinkId link, const f1ap::Pdu& p, bool ue_associated) {
     auto wire = f1ap::encode(p);
     if (!wire) {
         events_.emit("ran.encode_error", cfg_.id, {{"what", wire.error().what}});
         return;
     }
     const auto ue = ue_associated ? f1ap::cu_ue_of(p) : std::nullopt;
-    (void)f1_.send(*wire, SctpMeta{kF1apPpid, ue ? ue_stream(f1_.out_streams(), *ue) : static_cast<std::uint16_t>(0)});
+    (void)f1_->send(link, *wire,
+                    SctpMeta{kF1apPpid, ue ? ue_stream(f1_->out_streams(link), *ue) : static_cast<std::uint16_t>(0)});
 }
 
 void CuCp::error_indication(ngap::UeIds ids, const char* group, const char* value) {
@@ -173,16 +232,24 @@ void CuCp::on_ng_event(LinkEvent e) {
     }
 }
 
-void CuCp::on_f1_event(LinkEvent e) {
+void CuCp::on_f1_event(LinkId link, LinkEvent e) {
     if (e == LinkEvent::up || e == LinkEvent::restart || e == LinkEvent::refused) {
         return;
     }
     // P2 Q2 (row ksim-p2.f1-loss-release): with F1 gone the UEs' radio connections are gone too.
     // A UE the AMF knows is asked to be released (TS 38.413 §8.3.2); the others go at once.
-    du_.reset();
-    events_.emit("ran.f1.lost", cfg_.id, {{"link", link_event_name(e)}, {"ues", std::to_string(ues_.size())}});
+    // P3 R2 (row ksim-p3.multi-du.f1-loss): only the UEs of that DU.
+    dus_.erase(link);
+    std::size_t on_link = 0;
+    for (const auto& [cu, ue] : ues_) {
+        on_link += ue.du_link == link || KSIM_MUTANT("f1_loss_releases_all") ? 1 : 0;
+    }
+    events_.emit("ran.f1.lost", cfg_.id, {{"link", link_event_name(e)}, {"ues", std::to_string(on_link)}});
     std::vector<std::uint32_t> local;
     for (auto& [cu, ue] : ues_) {
+        if (ue.du_link != link && !KSIM_MUTANT("f1_loss_releases_all")) {
+            continue;
+        }
         if (!ue.amf_ue || KSIM_MUTANT("f1_loss_silent")) {
             local.push_back(cu);
             continue;
@@ -196,17 +263,35 @@ void CuCp::on_f1_event(LinkEvent e) {
 }
 
 void CuCp::ng_setup() {
-    if (!du_) {
-        return;   // the TAs come from the DU's cell
+    if (dus_.empty()) {
+        return;   // the TAs come from the DUs' cells
     }
     ngap::NgSetupRequest r;
     r.plmn = ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc);
     r.gnb_id = cfg_.gnb_id;
     r.gnb_id_bits = cfg_.gnb_id_bits;
     r.name = cfg_.name;
-    r.tas = {{du_->tac, {{r.plmn, cfg_.slices}}}};
+    ng_tacs_ = served_tacs();
+    for (std::uint32_t tac : ng_tacs_) {
+        r.tas.push_back({tac, {{r.plmn, cfg_.slices}}});
+    }
     r.paging_drx = cfg_.paging_drx;
     send_ngap(r, std::nullopt);
+}
+
+void CuCp::ran_configuration_update() {
+    const auto tacs = served_tacs();
+    if (!ng_ready_ || tacs == ng_tacs_) {
+        return;
+    }
+    ng_tacs_ = tacs;
+    ngap::RanConfigurationUpdate u;
+    const ngap::PlmnId plmn = ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc);
+    for (std::uint32_t tac : tacs) {
+        u.tas.push_back({tac, {{plmn, cfg_.slices}}});
+    }
+    events_.emit("ran.ng.config_update", cfg_.id, {{"tacs", str(static_cast<std::int64_t>(tacs.size()))}});
+    send_ngap(u, std::nullopt);
 }
 
 // ---- F1 ------------------------------------------------------------------------------------
@@ -265,12 +350,15 @@ void CuCp::handle(const f1ap::F1SetupRequest& m) {
         send_f1(f1ap::F1SetupFailure{m.transaction, f1ap::Cause{"misc", "unspecified"}, std::nullopt}, false);
         return;
     }
+    // One cell per DU (D7): a DU serving more is set up with its first.
     const f1ap::ServedCell& cell = m.cells.front();
-    du_ = DuInfo{m.du_id, cell.cgi, cell.tac};
+    dus_[rx_link_] = DuInfo{m.du_id, cell.cgi, cell.tac};
     send_f1(f1ap::F1SetupResponse{m.transaction, cfg_.name, {cell.cgi}}, false);
-    events_.emit("ran.f1.setup", cfg_.id, {{"du", m.du_name}, {"tac", str(cell.tac)}});
+    events_.emit("ran.f1.setup", cfg_.id, {{"du", m.du_name}, {"tac", str(cell.tac)}, {"dus", str(static_cast<std::int64_t>(dus_.size()))}});
     if (ng_.up() && !ng_ready_) {
         ng_setup();
+    } else {
+        ran_configuration_update();
     }
 }
 
@@ -315,6 +403,7 @@ void CuCp::handle(const f1ap::InitialUlRrcMessageTransfer& m) {
     Ue ue;
     ue.cu_ue = id;
     ue.du_ue = m.du_ue;
+    ue.du_link = rx_link_;
     ue.ran_ue = id;
     ue.c_rnti = m.c_rnti;
     ue.cause = req->cause;
@@ -485,6 +574,15 @@ void CuCp::on_ngap(ByteView msg) {
                    [this](const ngap::AmfConfigurationUpdate&) {
                        send_ngap(ngap::AmfConfigurationUpdateAcknowledge{}, std::nullopt);
                    },
+                   [this](const ngap::RanConfigurationUpdateAcknowledge&) {
+                       events_.emit("ran.ng.config_update.ack", cfg_.id, {{"result", "ack"}});
+                   },
+                   [this](const ngap::RanConfigurationUpdateFailure& m) {
+                       // TS 38.413 §8.7.2.3: the AMF keeps the TAs it had; the gNB may try again.
+                       ng_tacs_.clear();
+                       events_.emit("ran.ng.config_update.ack", cfg_.id,
+                                    {{"result", "failure"}, {"cause", m.cause.group + "/" + m.cause.value}});
+                   },
                    [this](const auto&) {
                        events_.emit("ran.ngap.unexpected", cfg_.id, {});
                    },
@@ -591,7 +689,8 @@ void CuCp::handle(ngap::InitialContextSetupRequest& m) {
             break;
         }
     }
-    if (!ue->nea || !ue->nia || !du_) {
+    const auto du = dus_.find(ue->du_link);
+    if (!ue->nea || !ue->nia || du == dus_.end()) {
         ics_failed(*ue, "radioNetwork", "encryption-and-or-integrity-protection-algorithms-not-supported");
         return;
     }
@@ -599,7 +698,7 @@ void CuCp::handle(ngap::InitialContextSetupRequest& m) {
     f1ap::UeContextSetupRequest r;
     r.cu_ue = ue->cu_ue;
     r.du_ue = ue->du_ue;
-    r.spcell = du_->cgi;
+    r.spcell = du->second.cgi;
     r.srbs = {2};
     send_f1(r, true);
 }
@@ -625,7 +724,7 @@ void CuCp::handle(const ngap::UeContextReleaseCommand& m) {
         send_e1(e1ap::BearerContextReleaseCommand{ue->cu_ue, *ue->cu_up_ue, e1ap::Cause{"radioNetwork", "normal-release"}}, true);
         ue->cu_up_ue.reset();
     }
-    if (ue->du_gone || !f1_.up()) {
+    if (ue->du_gone || !f1_->up(ue->du_link)) {
         // No DU to release it on (F1 lost): the release completes here.
         send_ngap(ngap::UeContextReleaseComplete{*ue->amf_ue, ue->ran_ue}, ue->ran_ue);
         events_.emit("ran.ue.released", cfg_.id, {{"ran_ue", str(ue->ran_ue)}});
@@ -659,11 +758,14 @@ void CuCp::handle(const ngap::UeContextModificationRequest& m) {
 
 void CuCp::handle(const ngap::Paging& m) {
     events_.emit("ran.ngap.paging", cfg_.id, {{"s_tmsi", str(static_cast<std::int64_t>(m.s_tmsi.value()))}});
-    if (!du_ || std::find(m.tais.begin(), m.tais.end(), tai()) == m.tais.end()) {
-        return;
-    }
+    // TS 38.413 §8.5.1: every cell of a listed TA (each DU's own, D7).
     const std::uint64_t s = m.s_tmsi.value();
-    send_f1(f1ap::Paging{static_cast<std::uint16_t>(s % 1024), s, {du_->cgi}, m.drx}, false);
+    const ngap::PlmnId plmn = ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc);
+    for (const auto& [link, d] : dus_) {
+        if (std::find(m.tais.begin(), m.tais.end(), ngap::Tai{plmn, d.tac}) != m.tais.end()) {
+            send_f1_to(link, f1ap::Paging{static_cast<std::uint16_t>(s % 1024), s, {d.cgi}, m.drx}, false);
+        }
+    }
 }
 
 void CuCp::handle(const ngap::NgReset& m) {
@@ -715,8 +817,8 @@ void CuCp::on_dcch(std::uint32_t cu_ue, Bytes sdu) {
                        ngap::InitialUeMessage i;
                        i.ran = ue->ran_ue;
                        i.nas = m.nas;
-                       i.cgi = nr_cgi();
-                       i.tai = tai();
+                       i.cgi = nr_cgi(*ue);
+                       i.tai = tai(*ue);
                        i.cause = rrc::cause_name(ue->cause);
                        if (ue->s_tmsi_part1 && m.s_tmsi_part2) {
                            i.s_tmsi = ngap::FiveGSTmsi::of(std::uint64_t{*m.s_tmsi_part2} << 39 |
@@ -730,7 +832,7 @@ void CuCp::on_dcch(std::uint32_t cu_ue, Bytes sdu) {
                            events_.emit("ran.rrc.error", cfg_.id, {{"what", "uplink NAS before the AMF knows the UE"}});
                            return;
                        }
-                       send_ngap(ngap::UplinkNasTransport{*ue->amf_ue, ue->ran_ue, m.nas, nr_cgi(), tai()}, ue->ran_ue);
+                       send_ngap(ngap::UplinkNasTransport{*ue->amf_ue, ue->ran_ue, m.nas, nr_cgi(*ue), tai(*ue)}, ue->ran_ue);
                    },
                    [&](const rrc::SecurityModeComplete&) {
                        if (ue->phase != Phase::securing) {

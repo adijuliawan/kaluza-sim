@@ -72,6 +72,7 @@
 #include "proc/ran/up_security.hpp"
 #include "codec/asn1/msg/rrc.hpp"
 #include "entity/pdcp/pdcp.hpp"
+#include "platform/assoc_pool.hpp"
 #include "platform/event.hpp"
 #include "platform/executor.hpp"
 #include "platform/secret.hpp"
@@ -139,12 +140,17 @@ public:
     std::uint64_t gbr_used() const;
     /// `e1`: the CU-UP's association (none: sessions are refused).
     CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssoc& f1, IAssoc* e1 = nullptr);
+    /// P3 R2 (ADR 0013 point 2): several DUs, each its own F1-C association in `f1s`
+    /// (one cell per DU, D7). The UEs keep the DU they came on; F1 loss on one link
+    /// releases only its UEs.
+    CuCp(Executor& ex, IEventSink& events, CuCpConfig cfg, IAssoc& ngap, IAssocPool& f1s, IAssoc* e1 = nullptr);
     ~CuCp();
     CuCp(const CuCp&) = delete;
     CuCp& operator=(const CuCp&) = delete;
 
     bool ng_ready() const noexcept { return ng_ready_; }
-    bool f1_ready() const noexcept { return du_.has_value(); }
+    bool f1_ready() const noexcept { return !dus_.empty(); }
+    std::size_t dus() const noexcept { return dus_.size(); }
     /// P2 Q2: the SCTP streams the DU's UE-associated F1AP came on (stream 0 counted apart).
     const std::set<std::uint16_t>& f1_ue_streams() const noexcept { return f1_ue_streams_; }
     std::size_t ues() const noexcept { return ues_.size(); }
@@ -175,7 +181,7 @@ public:
     /// The gNB-CU-initiated cell (de)activation (TS 38.473 8.2.5; P2 Q4): a GNB-CU
     /// CONFIGURATION UPDATE to the DU; its answer comes as ran.f1.cu_config_update.
     /// Errc::closed without F1.
-    Result<void> cu_configuration_update(std::vector<f1ap::NrCgi> activate, std::vector<f1ap::NrCgi> deactivate);
+    Result<void> cu_configuration_update(const std::vector<f1ap::NrCgi>& activate, const std::vector<f1ap::NrCgi>& deactivate);
     /// The AMF Name of the last NG SETUP RESPONSE, "" before one.
     const std::string& amf_name() const noexcept { return amf_name_; }
 
@@ -191,6 +197,7 @@ private:
     struct Ue {
         std::uint32_t cu_ue = 0;
         std::uint32_t du_ue = 0;
+        LinkId du_link = 1;              // P3 R2: the F1 link of the UE's DU
         bool du_gone = false;            // P2 Q2: F1 was lost while the AMF knew the UE
         bool release_asked = false;      // a UE CONTEXT RELEASE REQUEST went to the AMF (P2 Q14 prep)
         std::uint32_t ran_ue = 0;
@@ -264,10 +271,13 @@ private:
     };
 
     void on_ng_event(LinkEvent e);
-    void on_f1_event(LinkEvent e);
+    void wire();
+    void on_f1_event(LinkId link, LinkEvent e);
     void on_f1(ByteView msg);
     void send_ngap(const ngap::Pdu& p, std::optional<std::uint32_t> ran_ue);
+    /// A UE's PDU goes on its DU's link, any other on the link being handled (a reply).
     void send_f1(const f1ap::Pdu& p, bool ue_associated);
+    void send_f1_to(LinkId link, const f1ap::Pdu& p, bool ue_associated);
     void ng_setup();
     void error_indication(ngap::UeIds ids, const char* group, const char* value);
 
@@ -338,8 +348,12 @@ private:
 
     Ue* by_cu(std::uint32_t id);
     Ue* by_ran(std::uint32_t id);
-    ngap::NrCgi nr_cgi() const;
-    ngap::Tai tai() const;
+    ngap::NrCgi nr_cgi(const Ue& ue) const;
+    ngap::Tai tai(const Ue& ue) const;
+    /// The TAs the gNB serves now: its DUs' TACs, each once, in the order they joined.
+    std::vector<std::uint32_t> served_tacs() const;
+    /// P3 R2 (TS 38.413 §8.7.2): after NG Setup, a DU whose TAC is new makes the gNB tell the AMF.
+    void ran_configuration_update();
     std::uint8_t next_tid(Ue& ue);
     std::uint8_t f1_transaction_ = 0;   // P2 Q4: gNB-CU-initiated F1 procedures
 
@@ -347,7 +361,9 @@ private:
     IEventSink& events_;
     CuCpConfig cfg_;
     IAssoc& ng_;
-    IAssoc& f1_;
+    std::unique_ptr<IAssocPool> own_f1_;   // P1/P2's one DU, seen as a pool of one
+    IAssocPool* f1_ = nullptr;
+    LinkId rx_link_ = 1;                  // the F1 link the PDU being handled came on
     std::shared_ptr<bool> alive_;
 
     IAssoc* e1_ = nullptr;
@@ -362,7 +378,8 @@ private:
     };
     std::uint16_t f1_rx_stream_ = 0;
     std::set<std::uint16_t> f1_ue_streams_;
-    std::optional<DuInfo> du_;
+    std::map<LinkId, DuInfo> dus_;   // by F1 link, one cell each
+    std::vector<std::uint32_t> ng_tacs_;   // the TAs the AMF was last told
     std::map<std::uint32_t, Ue> ues_;   // by gNB-CU UE F1AP ID
     std::uint32_t next_ue_ = 1;
     CuCpStats stats_;

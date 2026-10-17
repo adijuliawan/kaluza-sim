@@ -8,6 +8,7 @@
 #include <iterator>
 #include <map>
 #include <algorithm>
+#include <ctime>
 #include <thread>
 #include <utility>
 
@@ -660,6 +661,12 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         dc.arfcn = topo_.arfcn;
         dc.ssb_arfcn = topo_.ssb_arfcn;
         dc.f1u_addr = v4_of(du_f1u_addr);
+        // P3 R2 (ledger A-09): every DU of a run counts SFN from the same CLOCK_REALTIME epoch.
+        dc.sfn_clock_ms = [] {
+            timespec ts{};
+            ::clock_gettime(CLOCK_REALTIME, &ts);
+            return static_cast<std::int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1'000'000;
+        };
         du_ = std::make_unique<proc::ran::Du>(*shard_, events_, dc, *f1_du, [this](const air::Frame& f) { du_to_air(f); },
                                               du_f1u_.get());
     }

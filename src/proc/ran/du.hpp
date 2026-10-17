@@ -69,10 +69,14 @@ struct DuConfig {
     std::uint32_t ddds_buffer = 8U << 20;     // bytes
     Millis ddds_delay = 10;
     Millis supervision = 200;                 // how often the DU looks
+    /// P3 R2 (ledger A-09, ADR 0011 point 2): the clock SFN counts from, in ms since an epoch
+    /// every DU of a run shares (the node gives CLOCK_REALTIME); none: the executor's own.
+    std::function<std::int64_t()> sfn_clock_ms;
 };
 
 struct DuStats {
     std::uint64_t wrong_ppid = 0;      // P2 Q2: F1-C messages under another PPID, dropped
+    std::uint64_t announces = 0;       // P3 R2: CELL_ANNOUNCE frames sent
     std::uint64_t prach = 0;
     std::uint64_t rar = 0;
     std::uint64_t msg3_lost_contention = 0;
@@ -111,6 +115,7 @@ public:
     std::vector<DrbView> drb_list() const;
     const DuStats& stats() const noexcept { return stats_; }
     f1ap::NrCgi cgi() const;
+    std::uint32_t cell_handle() const noexcept { return cfg_.cell_handle; }   // P3 R2
 
 private:
     struct Ue {
@@ -144,6 +149,7 @@ private:
     void broadcast();
     void send_mib();
     void send_sib1();
+    void send_announce();   // P3 R2: CELL_ANNOUNCE with the cell's NCI, PCI, SSB ARFCN, PLMN and TAC
     void schedule_si(Millis period, bool mib);
     void on_prach(const air::Frame& f);
     void on_msg3(const air::Frame& f);

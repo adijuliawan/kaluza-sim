@@ -89,14 +89,17 @@ void Du::supervise() {
 
 f1ap::NrCgi Du::cgi() const { return {ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc), cfg_.nci}; }
 
-std::uint16_t Du::sfn() const noexcept { return static_cast<std::uint16_t>((ex_.now() / 10) % 1024); }
+std::uint16_t Du::sfn() const noexcept {
+    const std::int64_t ms = cfg_.sfn_clock_ms ? cfg_.sfn_clock_ms() : static_cast<std::int64_t>(ex_.now());
+    return static_cast<std::uint16_t>((ms / 10) % 1024);
+}
 
 air::Frame Du::frame(air::FrameType t, std::uint32_t radio_id) const {
     air::Frame f;
     f.type = t;
     f.cell_handle = cfg_.cell_handle;
     f.radio_id = radio_id;
-    const Millis now = ex_.now();
+    const std::int64_t now = cfg_.sfn_clock_ms ? cfg_.sfn_clock_ms() : static_cast<std::int64_t>(ex_.now());
     f.tx_time_ns = static_cast<std::uint64_t>(now) * 1'000'000;
     f.sfn_slot = static_cast<std::uint32_t>(sfn()) << 8 | static_cast<std::uint32_t>((now % 10) * 2);
     return f;
@@ -299,8 +302,20 @@ void Du::send_sib1() {
     to_air_(std::move(si));
 }
 
+void Du::send_announce() {
+    // P3 R2 (ADR 0011 point 2, made true): the cell's identity and carrier, so a farm knows
+    // the cells before their system information.
+    air::Frame a = frame(air::FrameType::cell_announce, 0);
+    const auto p = ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc);
+    a.cell = air::CellInfo{cfg_.nci, cfg_.pci, cfg_.ssb_arfcn, {p[0], p[1], p[2]}, cfg_.tac};
+    a.seq = seq_++;
+    ++stats_.announces;
+    to_air_(std::move(a));
+}
+
 void Du::broadcast() {
     if (active_) {
+        send_announce();
         send_mib();
         send_sib1();
     }
@@ -317,6 +332,7 @@ void Du::schedule_si(Millis period, bool mib) {
             send_mib();
         } else {
             sib1_timer_.reset();
+            send_announce();
             send_sib1();
         }
         schedule_si(period, mib);
