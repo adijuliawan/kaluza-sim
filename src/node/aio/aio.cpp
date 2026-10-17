@@ -531,6 +531,7 @@ Result<void> AllInOne::build_gnb(std::string& why) {
     if (hosts_cucp()) {
         net::SctpOptions opt;
         opt.out_streams = topo_.ng_streams;
+        opt.max_in_streams = topo_.ng_streams;
         ng_ = std::make_unique<net::SctpClient>(shard_->reactor(), *shard_, std::vector<Endpoint>{topo_.ng_bind},
                                                 std::vector<Endpoint>{topo_.amf}, opt, net::SctpBackoff{}, cucp_source);
         ng_tap_ = std::make_unique<TapAssoc>(*ng_, [cap](bool tx, ByteView m) { cap->ngap(tx, m); });

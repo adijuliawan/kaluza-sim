@@ -120,7 +120,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
     Done by the user on 2026-10-16 at 19:33 KST: netd v3 from the release build of 45bbae7's tree, with the `ksim-netd-devpc.service` unit (`--uid 1000 --dn 10.60.0.0/24`). The P2 Q12 performance harness (`tools/perf/perf.sh`, KS-PLAT-B53) uses it for the UE and DN namespaces. For Q12's profile the user also set `kernel.perf_event_paranoid=1` with sysctl, until the next reboot (it was 4). On 2026-10-17 at 02:07 KST the user installed netd again from the release build of b8ffa0c's tree, with KS-PLAT-D18's fix: a SIGTERM to the PID `ksim-ctl netd exec` prints now ends the command too (checked with a `sleep` in a scratch namespace).
 
     The privileged hooks (`KSIM_CI_PRIV=1 tools/ci.d/66-netd-priv.sh full`, `67-netns.sh full`) start their own netd from `build/dev` and need no install. From Q6 they check the DN namespace's TUN with an echo, and the data plane in split mode.
-  - **The VM's is mine in a window (LW1's setup, D6):** the deploy prints the same steps.
+  - **The VM's is mine in a window (LW1's setup, D6):** the deploy prints the same steps. Reinstalled on 2026-10-17 at 08:57 KST, at the start of LW5, from release ab9e23a1bb32, with KS-PLAT-D18's fix; the VM was clean (no namespace) when it restarted.
 - **Deploy v3 (P2 Q6):** `tools/deploy-uesim.sh` also ships the role apps and `ksim-corestub`, and with `--peers` OCUDU's `ocucp`/`ocuup` and their PIN.
   - A peer library missing on the VM is named (`PEER_LDD=MISSING …`): the D7 list.
   - A run that outlives SSH is the user unit `tools/systemd/ksim-run@.service` (`systemctl --user start ksim-run@split-lab`). It needs lingering (`loginctl enable-linger`, root, once).
@@ -181,11 +181,18 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
     - **Two teardown defects kaluza-core-92 reported, fixed before LW5 (P2 Q14 prep):**
       - Our CU-CP asked for a UE's release again when F1 went at teardown, though our DU's radio-loss request had asked already (KS-NGAP-D5). It now asks once per UE.
       - Our gNB ended NG with an ABORT (the AMF's COMM_LOST, which set off its race F-77) while the AMF's releases were still queued (KS-PLAT-D20). A stop now waits for the releases under way, then ends NG with a graceful SHUTDOWN. kaluza-core's F-77 fix (kaluza-amf:671c7c89, 2026-10-17 00:11 KST) is proved by LW5's teardowns.
-    - **LW3** (Q15): the throughput set inside the VM against the scripted core on 127.0.0.x. Nothing crosses `ens19` or the trunk, but it needs the VM free of core sets.
-    - **LW4** (Q14): the real card imsi-001010000300100 through the dev-PC bridge (§7), with `topologies/aio-lab-card.yaml`.
-    - **LW5** (Q14): the full P2 row set in split mode (`split-lab.yaml`; NEA1/NIA1 with `split-lab-nea1.yaml`), 100 UEs (`split-lab-100.yaml`), and C3 (`ocudu-c3-lab.yaml` for the OCUDU rows, `ocudu-c3-lab-p1.yaml` for the P1 rows: split-lab's 13 UEs, whose SMS and short-timer subscriptions the rows need).
-    - Agreed with kaluza-core-92 for 2026-10-17: LW5 and LW4 from about 09:00 KST, LW3 straight after; each starts on the core session's GO, after a green CI.
-    - After each: every session released, every UE switched off, no `ksim-` or OCUDU process or namespace left.
+    - **LW5, LW4 and LW3 passed (2026-10-17 08:56–09:26 KST, kaluza-core-92's GO, AMF kaluza-amf:671c7c89):**
+      - **LW5** (Q14, KS-PLAT-T61), from release ab9e23a1bb32:
+        - `split-lab.yaml`: the P1 rows as in LW1, and the P2 rows kaluza-core can serve;
+        - `split-lab-nea1.yaml`: NEA1/NIA1 at AS gave nia2/nea1, because the AMF's UE Security Capabilities are one bit off (KF-002, kaluza-core's F-80, fixed on their branch);
+        - `split-lab-100.yaml`: 100 UEs with a session each, 10 at a time, at 161 MiB;
+        - C3: `ocudu-c3-lab.yaml` (the 9 OCUDU rows and 100 UEs through OCUDU) and `ocudu-c3-lab-p1.yaml` (the P1 gates in C3).
+        - The split gate's SCTP and F1-U rows failed for the placement, not the protocol (KS-PLAT-D22). They passed in split and C3 after the fix, from release ab9e23a1bb32-dirty.
+      - **LW4** (Q14, KS-UICC-T9): the real card through the dev-PC bridge (§7). In its first run, aio with `aio-lab-card.yaml`, the card registered: IDENTITY REQUEST, one Synch failure and the resync, ACCEPT. That run could not score the row, which is split's (KS-PLAT-D23). The second run (`split-lab-card.yaml`) registered without a Synch failure and passed. The bridge ran 09:13–09:16 only.
+      - **LW3** (Q15, KS-PLAT-T62): the §3.5 set inside the VM against the scripted core on 127.0.0.x, 8/8 targets met. Its 3.8 GB of headers-only GTP-U captures were deleted from the VM after the evidence was copied.
+      - **NG ends, for kaluza-core's F-77:** a headers-only capture on the VM (`sudo tcpdump -i ens19 -s 62`, SCTP port 38412 of .30–.39, in a root-owned directory under `/tmp`, removed after). The ipvlan legs' traffic is seen on `ens19`. All 10 NG ends were graceful SHUTDOWNs from the RAN, ours and OCUDU's; kaluza-core-92 matched all 10 in the AMF's log, 2 of them from before the capture started.
+      - kaluza-core-92 found nothing left: 101 IMSIs, 245 accepts and 245 context removals, 237 sessions closed with their final usage.
+    - After each window: every session released, every UE switched off, no `ksim-` or OCUDU process or namespace left.
 - **The dev-PC guard.** The real AMF listens on the dev PC itself (172.30.30.1:38412), so `ksim` refuses any peer in 172.30.0.0/16 unless it runs with `--lab` on `kaluza-uesim`, and the scripted core binds 127.0.0.x only ([ADR 0009](adr/0009-p1-runtime-shape.md), point 11). vmnet8 (192.168.134.0/24, host-only) is allowed for the Open5GS control.
 - **W0 and later lab runs (P1 N9).** Steps 1–3 run once per release or provisioning change:
   1. `tools/deploy-uesim.sh --window-agreed --secrets` installs a release under `~/ksim/releases` and sends the sealed cards and the KEK.

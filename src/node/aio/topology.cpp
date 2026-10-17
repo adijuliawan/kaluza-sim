@@ -165,7 +165,7 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
                 g.at("cucp").at("ng_bind").fail("a numeric address of the AMF's family");
             }
             t.ng_bind = *bind;
-            t.ng_streams = g.at("cucp").get<std::uint16_t>("ng_streams", 2);
+            t.ng_streams = g.at("cucp").get<std::uint16_t>("ng_streams", t.ng_streams);
             t.ue_inactivity_s = g.at("cucp").get<std::uint16_t>("ue_inactivity_s", t.ue_inactivity_s);
             if (t.ue_inactivity_s < 1 || t.ue_inactivity_s > 7200) {
                 g.at("cucp").at("ue_inactivity_s").fail("1..7200 s (TS 37.483 9.3.1.54)");

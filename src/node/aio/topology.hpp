@@ -146,7 +146,11 @@ struct Topology {
     std::uint32_t watchdog_ms = 250;
     // P2 Q7 (ADR 0011 point 5): the UE role's farm shards in a split run, 1..8.
     unsigned farm_shards = 1;
-    std::uint16_t ng_streams = 2;
+    // NG-C's SCTP streams, each way (cucp: {ng_streams: N}): stream 0 and N-1 for UEs. TS 38.412 §7
+    // wants "a few pairs (i.e. more than one)" for UE-associated signalling; with 2 every UE shared one
+    // stream, and an AMF that orders per stream served LW5b's 100 switch-offs one at a time
+    // (KS-NGAP-D6). 10 is Linux SCTP's default and OCUDU's.
+    std::uint16_t ng_streams = 10;
     std::uint16_t ue_inactivity_s = 7200;   // P2 Q5: cucp: {ue_inactivity_s: N}, 1..7200
     std::vector<std::uint8_t> nea_pref{2, 1, 0};   // P2 Q8: cucp: {nea: [..], nia: [..]}, preference order
     std::vector<std::uint8_t> nia_pref{2, 1};

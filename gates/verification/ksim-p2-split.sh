@@ -46,8 +46,25 @@ if [ "$(ctl info | kv ROLE)" != split ]; then
     exit $?
 fi
 
-# established SCTP associations on PORT, from ss.
-sctp_estab() { ss -S -n state established "( sport = :$1 or dport = :$1 )" 2>/dev/null | grep -c ":$1"; }
+# established SCTP associations on PORT, from ss, in the namespace NS when the run has it: in the
+# lab ksim-netd made the role's sockets there (split-lab.yaml's ksim-du, ksim-cuup, ksim-cucp), and
+# ss here would not see them (P2 Q14, LW5), so ss runs there through netd's exec, as the caller.
+# On the dev PC the roles' sockets are in this namespace.
+sctp_estab() {
+    if [ -n "${2:-}" ] && ip netns list 2>/dev/null | grep -q "^$2\( \|\$\)"; then
+        _log="$RUN/ss-$2-$1.txt"
+        _pid=$("$KSIM_CTL" netd exec "$2" --log "$_log" -- ss -S -n state established \
+            "( sport = :$1 or dport = :$1 )" | sed -n 's/^PID=//p')
+        _i=0
+        while [ -n "$_pid" ] && ps -p "$_pid" >/dev/null 2>&1 && [ "$_i" -lt 50 ]; do
+            sleep 0.1; _i=$((_i + 1))
+        done
+        _c=$(grep -c ":$1" "$_log" 2>/dev/null)
+        echo "${_c:-0}"
+    else
+        ss -S -n state established "( sport = :$1 or dport = :$1 )" 2>/dev/null | grep -c ":$1"
+    fi
+}
 
 echo "-- the roles"
 nodes=$(ctl nodes)
@@ -67,10 +84,15 @@ case "$KSIM_RUN_MODE" in
     *) f1=$(ctl wait ran.f1.setup --where du=$GNB-du --timeout 15s | kv EVENT) ;;
 esac
 row ksim-p2.f1-setup-sctp '^f1setup=ran.f1.setup sctp=[1-9][0-9]* wrong_ppid=0$' \
-    "f1setup=$f1 sctp=$(sctp_estab 38472) wrong_ppid=$(ctl du "$GNB-du" ue-list | kv WRONG_PPID)"
+    "f1setup=$f1 sctp=$(sctp_estab 38472 "${SPLIT_DU_NETNS:-ksim-du}") wrong_ppid=$(ctl du "$GNB-du" ue-list | kv WRONG_PPID)"
 e1=$(ctl wait ran.e1.setup --timeout 15s | kv EVENT)
+# E1's association, seen from our end of it: our CU-UP's, or our CU-CP's with OCUDU's CU-UP (C4).
+case "$KSIM_RUN_MODE" in
+    C4) e1_ns=${SPLIT_CUCP_NETNS:-ksim-cucp} ;;
+    *) e1_ns=${SPLIT_CUUP_NETNS:-ksim-cuup} ;;
+esac
 row ksim-p2.e1-setup-sctp '^e1setup=ran.e1.setup sctp=[1-9][0-9]* e1_ready=1$' \
-    "e1setup=$e1 sctp=$(sctp_estab 38462) e1_ready=$(ctl cuup "$GNB-cuup" bearers | kv E1_READY)"
+    "e1setup=$e1 sctp=$(sctp_estab 38462 "$e1_ns") e1_ready=$(ctl cuup "$GNB-cuup" bearers | kv E1_READY)"
 
 echo "-- KAIR"
 farms=$(ctl wait ran.du.kair.subscribe --timeout 15s | kv FARMS)
@@ -90,7 +112,10 @@ row ksim-p2.per-ue-stream '^streams=[0-9,]+ distinct=([2-9]|[1-9][0-9]+) on_stre
 echo "-- F1-U over UDP (UE $SPLIT_UE1)"
 ctl ue "$SPLIT_UE1" ps-establish ipv4 --dnn internet $SLICE --wait 15s >/dev/null || abort "UE $SPLIT_UE1 got no session"
 ping=$(ctl ue "$SPLIT_UE1" ping "${DN_ADDR:-10.60.0.1}" -c 3 --interval 200 | kv RECEIVED)
-f1u=$(tshark_fields "$RUN/gtpu.pcapng" "udp.port == 2152 && ip.addr == 127.0.10.2" frame.number | wc -l)
+# The DU's F1-U address, whatever the placement (127.0.10.2 on the dev PC, its ksim-mid leg in the
+# lab): only the DU sends DL DATA DELIVERY STATUS (TS 38.425), NR-U PDU type 1.
+du_f1u=$(tshark_fields "$RUN/gtpu.pcapng" "nrup.pdu_type == 1" ip.src | head -n 1)
+f1u=$(tshark_fields "$RUN/gtpu.pcapng" "udp.port == 2152 && ip.addr == ${du_f1u:-127.0.10.2}" frame.number | wc -l)
 if [ -n "$PEER_CUUP" ]; then
     # OCUDU's CU-UP (C3, C4): the user data our DU passed over F1-U, its SDUs each way.
     du=$(ctl du "$GNB-du" ue-list)

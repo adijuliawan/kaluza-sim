@@ -98,6 +98,16 @@ row_modes() {
         $1 == id { print $col; exit }' "$ROWS_SET"
 }
 
+# row_in_mode ID: true when the row's modes hold the run's (or it has none), for a gate that
+# must not act at all for a row the run cannot score: the real card's registration (P2 Q14, LW4).
+row_in_mode() {
+    _m=$(row_modes "$1")
+    [ -z "$_m" ] || [ "$_m" = - ] && return 0
+    [ -n "${KSIM_RUN_MODE:-}" ] || set_run_mode
+    case ",$_m," in *",$KSIM_RUN_MODE,"*) return 0 ;; esac
+    return 1
+}
+
 # row ID WANT GOT: PASS when GOT matches the extended regex WANT. A row whose modes
 # do not hold the run's is skipped instead (P2 Q5). With ROW_NO_ALLOW=1
 # a FAIL is not looked up in the allow-lists (the gate saw it fail for another reason).

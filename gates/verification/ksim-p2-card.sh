@@ -51,6 +51,21 @@ if [ -z "${BRIDGE:-}" ] && [ "${REAL_CARD:-0}" != 1 ] && [ "${reader#pcsc:}" = "
     summary "ksim-p2-card"
     exit $?
 fi
+# The row first: a real card is registered only for a row this run's mode can score. Its first
+# registration on a core uses up the one Synch failure that core's agreement expects (LW4 registered
+# the card in an aio run whose row is split's, 2026-10-17).
+id=ksim-p2.pcsc-register
+if [ "${REAL_CARD:-0}" = 1 ]; then
+    id=ksim-p2.real-card-register
+    [ -n "${BRIDGE:-}" ] && id=ksim-p2.real-card-bridge
+fi
+if [ -z "${BRIDGE:-}" ] || [ "${REAL_CARD:-0}" = 1 ]; then
+    if ! row_in_mode "$id"; then
+        row "$id" '' ''   # a SKIP naming the row's modes; the card is not touched
+        summary "ksim-p2-card"
+        exit $?
+    fi
+fi
 reg=$(ctl ue "$CARD_UE" power on --wait 30s)
 complete=$(ctl ue "$CARD_UE" wait nas.reg.complete --timeout 5s | kv EVENT)
 got="$reader $(printf '%s\n' "$reg" | kv RESULT) complete=$complete"

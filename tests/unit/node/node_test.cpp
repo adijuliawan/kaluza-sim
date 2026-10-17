@@ -87,7 +87,8 @@ TEST(Topology, TheP2TopologiesLoad) {
     const std::string root = KSIM_SOURCE_DIR;
     for (const char* f : {"split-stub.yaml", "split-open5gs.yaml", "split-stub-e1.yaml", "split-lab.yaml",
                           "ocudu-c3-stub.yaml", "ocudu-c4-stub.yaml", "ocudu-c5-stub.yaml", "split-stub-nea1.yaml",
-                          "split-open5gs-nea1.yaml", "ocudu-c3-open5gs.yaml", "split-lab-nea1.yaml", "ocudu-c3-lab-p1.yaml"}) {
+                          "split-open5gs-nea1.yaml", "ocudu-c3-open5gs.yaml", "split-lab-nea1.yaml", "ocudu-c3-lab-p1.yaml",
+                          "split-lab-card.yaml"}) {
         std::string why;
         auto t = load_topology(root + "/topologies/" + f, why);
         ASSERT_TRUE(t) << f << ": " << why;
@@ -99,6 +100,8 @@ TEST(Topology, TheP2TopologiesLoad) {
     EXPECT_TRUE(lab->netd.mid);
     EXPECT_EQ(lab->netd.du_netns, "ksim-du");
     EXPECT_EQ(lab->split.du, Endpoint::v4(10, 250, 0, 2, 2152));
+    // TS 38.412 §7: more than one stream pair for UE-associated NG signalling by default (KS-NGAP-D6).
+    EXPECT_EQ(lab->ng_streams, 10);
     auto e1 = load_topology(root + "/topologies/split-stub-e1.yaml", why);
     ASSERT_TRUE(e1) << why;
     EXPECT_EQ(e1->ue_inactivity_s, 15);
@@ -119,6 +122,13 @@ TEST(Topology, TheP2TopologiesLoad) {
     EXPECT_EQ(card->ues[0].count, 1u);
     EXPECT_EQ(card->ues[0].first_imsi, "001010000300100");
     EXPECT_EQ(card->ues[0].card_bridge, "192.168.0.8:35970");
+    // The same card in split mode, the mode of row ksim-p2.real-card-bridge (LW4, 2026-10-17).
+    auto split_card = load_topology(root + "/topologies/split-lab-card.yaml", why);
+    ASSERT_TRUE(split_card) << why;
+    ASSERT_EQ(split_card->ues.size(), 1u);
+    EXPECT_EQ(split_card->ues[0].first_imsi, "001010000300100");
+    EXPECT_EQ(split_card->ues[0].card_bridge, "192.168.0.8:35970");
+    EXPECT_EQ(split_card->netd.du_netns, "ksim-du");
     auto c3p1 = load_topology(root + "/topologies/ocudu-c3-lab-p1.yaml", why);
     ASSERT_TRUE(c3p1) << why;
     ASSERT_EQ(c3p1->ues.size(), 3u);
