@@ -59,6 +59,7 @@ UeDevice::UeDevice(Executor& ex, IEventSink& events, UeDeviceConfig cfg, std::un
     up.nas = [this](Bytes b) { mm_->on_nas(b); };
     up.connection_failure = [this](std::uint16_t up_psis) { mm_->on_connection_failure(up_psis); };
     up.released = [this] { mm_->on_released(); };
+    up.establishment_failed = [this] { mm_->on_establishment_failed(); };
     up.camped = [this](std::uint32_t tac) { mm_->on_camped(tac); };
     up.kgnb = [this] { return mm_->kgnb(); };
     up.s_tmsi = [this] { return mm_->s_tmsi(); };

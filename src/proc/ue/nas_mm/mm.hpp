@@ -175,6 +175,10 @@ public:
     /// with no signalling pending, a mobility registration follows (§5.5.1.3.2 f)
     /// naming the sessions whose user plane was up (bit n for PSI n).
     void on_connection_failure(std::uint16_t up_psis);
+    /// The lower layers failed to establish the RRC connection, before
+    /// on_released: the initial NAS message was never sent, so the uplink NAS
+    /// COUNT it took is given back (§4.4.3.1).
+    void on_establishment_failed();
     /// The UICC removed (N12 follow-up): a registered UE de-registers (§5.5.2.2.1,
     /// nothing written to the card), then 5GMM-DEREGISTERED.NO-SUPI; the forbidden
     /// lists, the rejected NSSAI and the §5.3.20 counters go with the UICC.
@@ -358,6 +362,7 @@ private:
     nas::Message dereg_;             // the DEREGISTRATION REQUEST, for T3521 retransmissions
     bool dereg_switch_off_ = false;
     std::optional<std::uint32_t> kgnb_count_;   // the uplink NAS COUNT K_gNB takes
+    std::optional<std::uint32_t> initial_count_;   // the COUNT the initial message took, until the connection is up
     int t3521_expiries_ = 0;
 
     // N12

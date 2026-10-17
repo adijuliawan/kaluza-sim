@@ -197,7 +197,7 @@ The lab follows kaluza-core's re-layout. Design: https://claude.ai/artifact/WzcF
       - **KF-002 closed:** c000/c000 in ICS and nia1/nea1 at AS.
       - **The 10-stream NG-C:** the P1 rows in split mode, no FAIL; every INIT and INIT ACK 10/10.
       - **F-81:** 100 UEs in 7.65 s; their switch-off releases within 533 ms (LW5b: 5.2 s).
-      - Two sim defects, open: the CU-CP's restart after a `kill -9` fails once on its namespace left behind; and an idle UE with no CU-CP retries Service Request about 5 times a second, each taking a NAS COUNT, so its first SR after the restart fails integrity at the AMF.
+      - Sim defects, fixed after the window: the CU-CP's restart after a `kill -9` failed once on its namespace left behind (KS-PLAT-D24, ksim-netd's teardown; checked on the VM in the next window); an idle UE with no CU-CP retried Service Request about 5 times a second (KS-NAS-D6), each taking a NAS COUNT (KS-NAS-D7), so its first SR after the restart failed integrity at the AMF.
       - Captures: NG-C of .30 at `-s 62`, and its INIT/INIT ACK chunks alone at `-s 66` (the stream counts, no DATA), in a root-owned `/tmp/lw5d-cap`, removed after the copy.
     - After each window: every session released, every UE switched off, no `ksim-` or OCUDU process or namespace left.
 - **The dev-PC guard.** The real AMF listens on the dev PC itself (172.30.30.1:38412), so `ksim` refuses any peer in 172.30.0.0/16 unless it runs with `--lab` on `kaluza-uesim`, and the scripted core binds 127.0.0.x only ([ADR 0009](adr/0009-p1-runtime-shape.md), point 11). vmnet8 (192.168.134.0/24, host-only) is allowed for the Open5GS control.

@@ -453,6 +453,7 @@ Result<Bytes> Mm::protect_initial(const nas::Message& m) {
         cfg_.tap(true, *plain);
     }
     kgnb_count_ = count;   // K_gNB from this COUNT unless a SECURITY MODE COMMAND follows
+    initial_count_ = count;
     return ctx_->protect(*plain, Sht::integrity);
 }
 
@@ -1454,7 +1455,18 @@ void Mm::on_connection_failure(std::uint16_t up_psis) {
     recovery_up_ = up_psis;
 }
 
+void Mm::on_establishment_failed() {
+    // §4.4.3.1: the COUNT goes up after each protected message sent, "except for
+    // the initial NAS messages if the lower layers indicated the failure to
+    // establish the RRC connection". Without it an SR retried into a cell with no
+    // CU-CP ran the COUNT past the AMF's estimate (LW5d, KS-NAS-D7).
+    if (const auto c = std::exchange(initial_count_, std::nullopt); c && ctx_ && ctx_->ul_count() == ((*c + 1) & 0xFFFFFF)) {
+        ctx_->restore_counts(*c, ctx_->dl_count());
+    }
+}
+
 void Mm::on_released() {
+    initial_count_.reset();
     const bool recovery = std::exchange(recovery_pending_, false);
     const std::uint16_t recovery_up = std::exchange(recovery_up_, std::uint16_t{0});
     connected_ = false;
@@ -1476,8 +1488,14 @@ void Mm::on_released() {
         entering_deregistered();
         set_state(usim_present_ ? MmState::deregistered_normal_service : MmState::deregistered_no_supi,
                   "released before the de-registration accept");
-    } else if (state_ == MmState::service_request_initiated) {
-        stop(MmTimer::t3517);   // §5.6.1.7 a: the lower layers failed
+    }
+    // §5.6.1.7 l: a lower-layer failure or release aborts the service request; the
+    // UE enters 5GMM-REGISTERED and does not start another at once. What was
+    // waiting for it stays queued for the next trigger (an upper layer's request,
+    // or a 5GSM timer's retransmission), not one SR per failed setup (LW5d, KS-NAS-D6).
+    const bool sr_aborted = state_ == MmState::service_request_initiated;
+    if (sr_aborted) {
+        stop(MmTimer::t3517);
         events_.emit("nas.sr.abort", cfg_.id, {{"why", "released"}});
         set_state(MmState::registered_normal_service, "service request aborted");
     }
@@ -1497,7 +1515,7 @@ void Mm::on_released() {
             reg_uplink_ = static_cast<std::uint16_t>(recovery_up | sr_uplink_);
             sr_uplink_ = 0;
             start_registration(RegType::mobility);
-        } else if (!pending_sm_.empty() || sr_uplink_ != 0) {
+        } else if (!sr_aborted && (!pending_sm_.empty() || sr_uplink_ != 0)) {
             (void)service_request(sr_uplink_ != 0 ? ie::ServiceType::data : ie::ServiceType::signalling, sr_uplink_);
         }
     } else if (reregister_pending_ && is_deregistered(state_) && usim_valid_) {
@@ -1602,6 +1620,7 @@ Result<void> Mm::service_request(std::uint8_t type, std::uint16_t uplink) {
     if (cfg_.sm_hooks.active) {
         put(m, "PDU session status", ie::PsiBitmap{cfg_.sm_hooks.active()}.encode());
     }
+    const std::uint32_t count = ctx_->ul_count();
     auto wire = protect_initial(m);
     if (!wire) {
         return wire.error();
@@ -1609,7 +1628,8 @@ Result<void> Mm::service_request(std::uint8_t type, std::uint16_t uplink) {
     sr_type_ = type;
     sr_uplink_ = uplink;
     events_.emit("nas.sr.request", cfg_.id,
-                 {{"type", str(type)}, {"uplink", str(uplink)}, {"s_tmsi", tmsi ? str(static_cast<std::int64_t>(*tmsi)) : ""}});
+                 {{"type", str(type)}, {"uplink", str(uplink)}, {"s_tmsi", tmsi ? str(static_cast<std::int64_t>(*tmsi)) : ""},
+                  {"count", str(static_cast<std::int64_t>(count))}});
     set_state(MmState::service_request_initiated, "service request");
     send_wire(std::move(*wire));
     start(MmTimer::t3517, cfg_.timers.t3517);

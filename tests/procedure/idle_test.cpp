@@ -556,6 +556,31 @@ TEST(Idle, Ts24501_5_6_1_7_T3517RunsOutWithNoAnswerAndTheUeStaysRegistered) {
     EXPECT_EQ(n.ue->mm_state(), proc::ue::MmState::registered_normal_service);
 }
 
+TEST(Idle, Ts24501_5_6_1_7_l_And_4_4_3_1_AServiceRequestWithNoRrcConnectionIsNotRetriedAtOnceAndTakesNoCount) {
+    // LW5d (KS-NAS-D6, D7): a ps-release from CM-IDLE into a cell that cannot set
+    // a connection up. The one SR aborts and is not started again on its own;
+    // T3582's retransmission asks again, with the COUNT the failed ones gave back.
+    Net n;
+    n.register_ue();
+    n.establish();
+    to_idle(n);
+    n.air_down = true;
+    ASSERT_TRUE(n.ue->ps_release(1));
+    n.loop.run_until([] { return false; }, n.loop.now() + 10'000);
+    const auto srs = n.named("nas.sr.request");
+    ASSERT_EQ(srs.size(), 1u);
+    EXPECT_FALSE(n.named("rrc.setup.failure").empty());
+    EXPECT_EQ(field(*n.last("nas.sr.abort"), "why"), "released");
+    EXPECT_EQ(n.ue->mm_state(), proc::ue::MmState::registered_normal_service);
+    const std::string count = field(srs[0], "count");
+    n.air_down = false;
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("nas.sr.accept").empty() && n.ue->sessions().empty(); },
+                                 n.loop.now() + 20'000)) << n.failures();
+    EXPECT_EQ(n.named("nas.sr.request").size(), 2u);
+    EXPECT_EQ(field(*n.last("nas.sr.request"), "count"), count);
+    EXPECT_EQ(n.failures(), "");
+}
+
 // ---- the mutants of the N12 rows -----------------------------------------------------------
 
 TEST(Idle, Mutant_paging_ignore_LeavesTheDownlinkUnanswered) {

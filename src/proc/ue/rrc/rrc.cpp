@@ -265,6 +265,9 @@ void UeRrc::setup_failed(const char* reason) {
     // §5.3.3.7: reset the MAC and tell the upper layers the setup failed.
     events_.emit("rrc.setup.failure", cfg_.id, {{"reason", reason}});
     go_idle();
+    if (upper_.establishment_failed) {
+        upper_.establishment_failed();
+    }
     if (upper_.released) {
         upper_.released();
     }

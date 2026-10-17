@@ -73,6 +73,9 @@ struct RrcConfig {
 struct RrcUpper {
     std::function<void(Bytes)> nas;                              // a downlink NAS PDU
     std::function<void()> released;                              // the connection is gone (release or failure)
+    /// The RRC connection was never set up (TS 38.331 5.3.3.7, T300, RRCReject),
+    /// just before `released`: the initial NAS message never left (TS 24.501 4.4.3.1).
+    std::function<void()> establishment_failed;
     std::function<Result<SecretBytes>()> kgnb;                   // TS 33.501 6.8.1.2
     std::function<std::optional<std::uint64_t>()> s_tmsi;        // the 5G-S-TMSI, if the UE has a 5G-GUTI
     std::function<void()> paged;                                 // a paging record for this UE

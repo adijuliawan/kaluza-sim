@@ -242,6 +242,24 @@ Result<void> LinuxOps::teardown(const std::string& netns) {
     const std::string dir = std::string("/etc/netns/") + netns;
     ::unlink((dir + "/resolv.conf").c_str());
     ::rmdir(dir.c_str());
+    // The namespace outlives its name while anything still holds it, and the
+    // kernel frees it later. Its ipvlan and its mid leg go now, so their address
+    // and the host end's name are free for the next setup at once: a role killed
+    // with -9 is set up again over the namespace it left (LW5d, KS-PLAT-D24).
+    if (auto ns = netns::open(netns)) {
+        (void)netns::run_in(ns->get(), [&]() -> Result<void> {
+            auto rt = nl::Rtnl::open();
+            if (!rt) {
+                return rt.error();
+            }
+            for (const char* link : {kLink, kMidLink}) {
+                if (const unsigned idx = ::if_nametoindex(link); idx != 0) {
+                    (void)rt->request(nl::del_link(rt->next_seq(), static_cast<int>(idx)));
+                }
+            }
+            return {};
+        });
+    }
     return netns::del(netns);
 }
 
