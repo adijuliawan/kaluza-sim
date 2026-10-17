@@ -44,7 +44,7 @@ TEST(F1apMsg, InputsOutOfRangeAreRefused) {
     EXPECT_FALSE(encode(UlRrcMessageTransfer{1, 1, 1, {}}));
     EXPECT_FALSE(encode(UeContextReleaseCommand{1, 1, Cause{}, Bytes{0x00}, std::nullopt}));   // a container without its SRB
     EXPECT_FALSE(encode(Paging{1024, 1, {samples::kCgi}, std::nullopt}));
-    EXPECT_FALSE(encode(UeContextSetupResponse{1, 1, {}, {}, {}}));
+    EXPECT_FALSE(encode(UeContextSetupResponse{1, 1, {}, {}, {}, std::nullopt}));
     UeContextModificationRequest m;
     m.cu_ue = 1;
     m.du_ue = 1;

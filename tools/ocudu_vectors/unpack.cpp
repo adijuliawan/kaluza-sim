@@ -15,6 +15,9 @@
 
 #include "ocudu/asn1/asn1_utils.h"
 #include "ocudu/asn1/rrc_nr/cell_group_config.h"
+#include "ocudu/asn1/rrc_nr/dl_dcch_msg.h"
+#include "ocudu/asn1/rrc_nr/dl_dcch_msg_ies.h"
+#include "ocudu/asn1/rrc_nr/rrc_nr.h"
 #include "ocudu/asn1/rrc_nr/sys_info.h"
 
 #include <cstdio>
@@ -79,6 +82,99 @@ void cell_group(const std::string& hex) {
                   r.rach_cfg_ded.ul().cfra_present));
 }
 
+std::string hex_of(const asn1::dyn_octstring& o) {
+  static const char* d = "0123456789abcdef";
+  std::string out;
+  for (uint8_t c : o) {
+    out += d[c >> 4];
+    out += d[c & 0xf];
+  }
+  return out;
+}
+
+/// An RRCReconfiguration's fields OCUDU's CU-CP and UE paths read; its masterCellGroup
+/// goes through cell_group() as well, on its own line.
+bool recfg(const char* type, const asn1::rrc_nr::rrc_recfg_s& r, const std::string& hex, bool repack) {
+  if (r.crit_exts.type().value != asn1::rrc_nr::rrc_recfg_s::crit_exts_c_::types::rrc_recfg) {
+    std::printf("%s\tUNPACK=OK\tREPACK=%s\tcrit_exts=future\n", type, repack ? "SAME" : "DIFF");
+    return true;
+  }
+  const auto& ies = r.crit_exts.rrc_recfg();
+  const bool v1530 = ies.non_crit_ext_present;
+  const auto& ext  = ies.non_crit_ext;
+  std::printf("%s\tUNPACK=OK\tREPACK=%s\tradio_bearers=%d master_cell_group=%d master_key_upd=%d ncc=%u "
+              "key_set_change=%d\n",
+              type, repack ? "SAME" : "DIFF", int(ies.radio_bearer_cfg_present),
+              int(v1530 && !ext.master_cell_group.empty()), int(v1530 && ext.master_key_upd_present),
+              unsigned(v1530 && ext.master_key_upd_present ? ext.master_key_upd.next_hop_chaining_count : 0),
+              int(v1530 && ext.master_key_upd_present && ext.master_key_upd.key_set_change_ind));
+  if (v1530 && !ext.master_cell_group.empty()) {
+    cell_group(hex_of(ext.master_cell_group));
+  }
+  (void)hex;
+  return true;
+}
+
+void dl_dcch(const std::string& hex) {
+  asn1::rrc_nr::dl_dcch_msg_s m;
+  byte_buffer                 in = from_hex(hex);
+  asn1::cbit_ref              bref(in);
+  if (m.unpack(bref) != asn1::OCUDUASN_SUCCESS || m.msg.type().value != asn1::rrc_nr::dl_dcch_msg_type_c::types::c1) {
+    std::printf("RRCReconfiguration\tUNPACK=FAIL\tREPACK=-\t-\n");
+    return;
+  }
+  if (m.msg.c1().type().value != asn1::rrc_nr::dl_dcch_msg_type_c::c1_c_::types::rrc_recfg) {
+    std::printf("DL-DCCH\tUNPACK=OK\tREPACK=%s\tnot an RRCReconfiguration\n", repack_same(m, hex) ? "SAME" : "DIFF");
+    return;
+  }
+  recfg("RRCReconfiguration", m.msg.c1().rrc_recfg(), hex, repack_same(m, hex));
+}
+
+void ho_prep(const std::string& hex) {
+  asn1::rrc_nr::ho_prep_info_s h;
+  byte_buffer                  in = from_hex(hex);
+  asn1::cbit_ref               bref(in);
+  if (h.unpack(bref) != asn1::OCUDUASN_SUCCESS ||
+      h.crit_exts.type().value != asn1::rrc_nr::ho_prep_info_s::crit_exts_c_::types::c1) {
+    std::printf("HandoverPreparationInformation\tUNPACK=FAIL\tREPACK=-\t-\n");
+    return;
+  }
+  const auto& ies = h.crit_exts.c1().ho_prep_info();
+  std::printf("HandoverPreparationInformation\tUNPACK=OK\tREPACK=%s\tue_caps=%u source_cfg=%d as_context=%d\n",
+              repack_same(h, hex) ? "SAME" : "DIFF", unsigned(ies.ue_cap_rat_list.size()), int(ies.source_cfg_present),
+              int(ies.as_context_present));
+  if (ies.source_cfg_present) {
+    asn1::rrc_nr::rrc_recfg_s r;
+    asn1::cbit_ref            b2(ies.source_cfg.rrc_recfg);
+    if (r.unpack(b2) != asn1::OCUDUASN_SUCCESS) {
+      std::printf("AS-Config.rrcReconfiguration\tUNPACK=FAIL\tREPACK=-\t-\n");
+    } else {
+      recfg("AS-Config.rrcReconfiguration", r, hex_of(ies.source_cfg.rrc_recfg), true);
+    }
+  }
+}
+
+void ho_cmd(const std::string& hex) {
+  asn1::rrc_nr::ho_cmd_s h;
+  byte_buffer            in = from_hex(hex);
+  asn1::cbit_ref         bref(in);
+  if (h.unpack(bref) != asn1::OCUDUASN_SUCCESS ||
+      h.crit_exts.type().value != asn1::rrc_nr::ho_cmd_s::crit_exts_c_::types::c1) {
+    std::printf("HandoverCommand\tUNPACK=FAIL\tREPACK=-\t-\n");
+    return;
+  }
+  const auto& msg = h.crit_exts.c1().ho_cmd().ho_cmd_msg;
+  std::printf("HandoverCommand\tUNPACK=OK\tREPACK=%s\tmessage_octets=%u\n", repack_same(h, hex) ? "SAME" : "DIFF",
+              unsigned(msg.size()));
+  asn1::rrc_nr::rrc_recfg_s r;
+  asn1::cbit_ref            b2(msg);
+  if (r.unpack(b2) != asn1::OCUDUASN_SUCCESS) {
+    std::printf("HandoverCommand.rrcReconfiguration\tUNPACK=FAIL\tREPACK=-\t-\n");
+  } else {
+    recfg("HandoverCommand.rrcReconfiguration", r, hex_of(msg), true);
+  }
+}
+
 void sib1(const std::string& hex) {
   asn1::rrc_nr::sib1_s s;
   byte_buffer          in = from_hex(hex);
@@ -106,6 +202,12 @@ int main() {
       cell_group(hex);
     } else if (type == "SIB1") {
       sib1(hex);
+    } else if (type == "RRCReconfiguration" || type == "DL-DCCH") {
+      dl_dcch(hex);
+    } else if (type == "HandoverPreparationInformation") {
+      ho_prep(hex);
+    } else if (type == "HandoverCommand") {
+      ho_cmd(hex);
     } else {
       std::printf("%s\tUNPACK=UNKNOWN\tREPACK=-\t-\n", type.c_str());
     }

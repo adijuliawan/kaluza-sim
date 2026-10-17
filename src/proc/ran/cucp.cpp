@@ -321,7 +321,7 @@ void CuCp::handle(const f1ap::InitialUlRrcMessageTransfer& m) {
     if (req->s_tmsi_part1) {
         ue.s_tmsi_part1 = req->identity;
     }
-    rrc::CellGroup cg{0, {rrc::RlcBearer{1, true, 1, true}}, {}};
+    rrc::CellGroup cg{0, {rrc::RlcBearer{1, true, 1, true}}, {}, std::nullopt};
     if (m.du_to_cu) {
         if (auto c = rrc::decode_cell_group(*m.du_to_cu)) {
             cg = std::move(*c);
@@ -769,6 +769,11 @@ void CuCp::on_dcch(std::uint32_t cu_ue, Bytes sdu) {
                        finish_ics(*ue, {}, {});
                        start_job(*ue);
                    },
+                   [&](const rrc::ReestablishmentComplete&) {
+                       // P3 R5 brings re-establishment; until then the CU-CP never sends
+                       // RRCReestablishment, so a complete is unexpected (TS 38.331 §5.7.3).
+                       events_.emit("ran.rrc.error", cfg_.id, {{"what", "an RRCReestablishmentComplete with none started"}});
+                   },
                },
                *d);
 }
@@ -854,6 +859,14 @@ e1ap::GtpTunnel e1_tunnel(const ngap::GtpTunnel& t) { return {t.addr, t.teid}; }
 ngap::GtpTunnel ng_tunnel(const e1ap::GtpTunnel& t) { return {t.addr, t.teid}; }
 f1ap::GtpTunnel f1_tunnel(const e1ap::GtpTunnel& t) { return {t.addr, t.teid}; }
 e1ap::GtpTunnel e1_from_f1(const f1ap::GtpTunnel& t) { return {t.addr, t.teid}; }
+
+/// A DRB whose F1-U DL end the CU-UP is told (the DU's), nothing else changed.
+e1ap::DrbToModify drb_to_modify(std::uint8_t id, const e1ap::GtpTunnel& f1u_dl) {
+    e1ap::DrbToModify d;
+    d.drb_id = id;
+    d.f1u_dl = f1u_dl;
+    return d;
+}
 bool is_in(const std::vector<std::uint8_t>& v, std::uint8_t x) { return std::find(v.begin(), v.end(), x) != v.end(); }
 
 } // namespace
@@ -1536,7 +1549,7 @@ void CuCp::handle(const f1ap::UeContextModificationResponse& m) {
                 for (const auto& x : m.drbs) {
                     if (x.drb_id == d.id) {
                         d.du = x;
-                        sm.drbs.push_back(e1ap::DrbToModify{d.id, e1_from_f1(x.dl), std::nullopt});
+                        sm.drbs.push_back(drb_to_modify(d.id, e1_from_f1(x.dl)));
                     }
                 }
             }
@@ -1559,7 +1572,7 @@ void CuCp::handle(const f1ap::UeContextModificationResponse& m) {
             for (const auto& d : m.drbs) {
                 if (d.drb_id == drb.id) {
                     drb.du = d;
-                    sm.drbs.push_back(e1ap::DrbToModify{d.drb_id, e1_from_f1(d.dl), std::nullopt});
+                    sm.drbs.push_back(drb_to_modify(d.drb_id, e1_from_f1(d.dl)));
                 }
             }
         }
@@ -1738,7 +1751,10 @@ void CuCp::start_modify(Ue& ue) {
                 x.flows = std::move(fl);
                 sm.drbs_setup.push_back(std::move(x));
             } else if (c.remapped.count(d.id) != 0) {
-                sm.drbs.push_back(e1ap::DrbToModify{d.id, std::nullopt, std::move(fl)});
+                e1ap::DrbToModify m;
+                m.drb_id = d.id;
+                m.flows = std::move(fl);
+                sm.drbs.push_back(std::move(m));
             }
         }
         sm.drbs_remove = c.removed;

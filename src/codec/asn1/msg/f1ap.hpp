@@ -154,6 +154,9 @@ struct UeContextSetupRequest {
     std::vector<std::uint8_t> srbs;       // SRBs to be set up
     std::vector<DrbToSetup> drbs;
     std::optional<Bytes> rrc;             // an RRC container (a PDCP PDU of SRB1)
+    // P3 R1 (TS 38.473 §8.3.1.2, §9.3.1.25): a handover's target DU gets the source's
+    // HandoverPreparationInformation in CU to DU RRC Information.
+    std::optional<Bytes> ho_preparation;
     friend bool operator==(const UeContextSetupRequest&, const UeContextSetupRequest&) = default;
 };
 struct UeContextSetupResponse {
@@ -162,6 +165,7 @@ struct UeContextSetupResponse {
     Bytes cell_group;                     // CellGroupConfig
     std::vector<std::pair<std::uint8_t, std::uint8_t>> srbs;   // (SRB ID, LCID) set up
     std::vector<DrbSetup> drbs;
+    std::optional<std::uint16_t> c_rnti;  // P3 R1: the C-RNTI a handover's target DU reserved
     friend bool operator==(const UeContextSetupResponse&, const UeContextSetupResponse&) = default;
 };
 struct UeContextSetupFailure {
@@ -180,6 +184,11 @@ struct UeContextModificationRequest {
     // P2 Q10: DRBs-ToBeModified (TS 38.473 9.2.2.7), a DRB's QoS flows changed; the UL
     // end stays the CU-UP's, the SN lengths as set up.
     std::vector<DrbToSetup> modify_drbs;
+    // P3 R1 (TS 38.473 §8.3.4.2): the source DU stops (or restarts) its transmission
+    // to a UE leaving it; the target DU learns the UE completed its reconfiguration.
+    enum class Transmission : std::uint8_t { stop, restart };
+    std::optional<Transmission> transmission;
+    bool reconfiguration_complete = false;
     friend bool operator==(const UeContextModificationRequest&, const UeContextModificationRequest&) = default;
 };
 struct UeContextModificationResponse {
@@ -256,13 +265,29 @@ struct UeContextModificationFailure {
     Cause cause;
     friend bool operator==(const UeContextModificationFailure&, const UeContextModificationFailure&) = default;
 };
+// P3 R1 (TS 38.473 §8.3.5): the DU asks to change a UE's context (a new CellGroupConfig,
+// for a key refresh or a release the DU needs), and the CU confirms with an RRC container.
+struct UeContextModificationRequired {
+    std::uint32_t cu_ue = 0;
+    std::uint32_t du_ue = 0;
+    std::optional<Bytes> cell_group;      // DU to CU RRC Information
+    Cause cause;
+    friend bool operator==(const UeContextModificationRequired&, const UeContextModificationRequired&) = default;
+};
+struct UeContextModificationConfirm {
+    std::uint32_t cu_ue = 0;
+    std::uint32_t du_ue = 0;
+    std::optional<Bytes> rrc;
+    friend bool operator==(const UeContextModificationConfirm&, const UeContextModificationConfirm&) = default;
+};
 
 using Pdu = std::variant<F1SetupRequest, F1SetupResponse, F1SetupFailure, InitialUlRrcMessageTransfer,
                          DlRrcMessageTransfer, UlRrcMessageTransfer, UeContextSetupRequest, UeContextSetupResponse,
                          UeContextSetupFailure, UeContextModificationRequest, UeContextModificationResponse,
                          UeContextReleaseRequest, UeContextReleaseCommand, UeContextReleaseComplete, Paging,
                          ErrorIndication, GnbCuConfigurationUpdate, GnbCuConfigurationUpdateAcknowledge,
-                         GnbCuConfigurationUpdateFailure, UeContextModificationFailure>;
+                         GnbCuConfigurationUpdateFailure, UeContextModificationFailure, UeContextModificationRequired,
+                         UeContextModificationConfirm>;
 
 namespace detail {
 template <class T>

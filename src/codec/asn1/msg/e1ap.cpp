@@ -29,7 +29,9 @@ constexpr int kErrorIndication = 1;
 constexpr int kE1Setup = 3;
 constexpr int kBearerContextSetup = 8;
 constexpr int kBearerContextModification = 9;
+constexpr int kBearerContextModificationRequired = 10;
 constexpr int kBearerContextRelease = 11;
+constexpr int kBearerContextReleaseRequest = 12;
 constexpr int kBearerContextInactivityNotification = 13;
 
 // Protocol IE identifiers.
@@ -47,13 +49,17 @@ constexpr int kSystemBcSetupRequest = 15;
 constexpr int kSystemBcSetupResponse = 16;
 constexpr int kSystemBcModificationRequest = 18;
 constexpr int kSystemBcModificationResponse = 19;
+constexpr int kSystemBcModificationConfirm = 20;
+constexpr int kSystemBcModificationRequired = 21;
 constexpr int kActivityNotificationLevel = 23;
 constexpr int kActivityInformation = 24;
 constexpr int kToSetupList = 42;
 constexpr int kToModifyList = 43;
 constexpr int kToRemoveList = 44;
+constexpr int kRequiredToModifyList = 45;
 constexpr int kSetupList = 46;
 constexpr int kModifiedList = 48;
+constexpr int kConfirmModifiedList = 50;
 constexpr int kSetupModList = 54;
 constexpr int kToSetupModList = 56;
 constexpr int kTransactionId = 57;
@@ -118,6 +124,38 @@ GtpTunnel read_tunnel(const json& j) {
              static_cast<std::uint8_t>(a)},
             static_cast<std::uint32_t>(read_number(g.at("gTP-TEID")))};
 }
+
+json count_json(const PdcpCount& c) { return {{"pDCP-SN", c.sn}, {"hFN", c.hfn}}; }
+PdcpCount read_count(const json& j) {
+    return {j.at("pDCP-SN").get<std::uint32_t>(), j.at("hFN").get<std::uint32_t>()};
+}
+json sn_status_json(const SnStatus& s) {
+    return {{"pdcpStatusTransfer-UL", {{"countValue", count_json(s.ul)}}}, {"pdcpStatusTransfer-DL", count_json(s.dl)}};
+}
+SnStatus read_sn_status(const json& j) {
+    return {read_count(j.at("pdcpStatusTransfer-UL").at("countValue")), read_count(j.at("pdcpStatusTransfer-DL"))};
+}
+json forwarding_json(const Forwarding& f) {
+    json out = json::object();
+    if (f.ul) {
+        out["uL-Data-Forwarding"] = tunnel(*f.ul);
+    }
+    if (f.dl) {
+        out["dL-Data-Forwarding"] = tunnel(*f.dl);
+    }
+    return out;
+}
+Forwarding read_forwarding(const json& j) {
+    Forwarding f;
+    if (j.contains("uL-Data-Forwarding")) {
+        f.ul = read_tunnel(j.at("uL-Data-Forwarding"));
+    }
+    if (j.contains("dL-Data-Forwarding")) {
+        f.dl = read_tunnel(j.at("dL-Data-Forwarding"));
+    }
+    return f;
+}
+bool count_ok(const PdcpCount& c) { return c.sn <= 262143; }
 
 json cause(const Cause& c) { return {{c.group, c.value}}; }
 Cause read_cause(const json& j) {
@@ -446,6 +484,15 @@ Result<Bytes> build(const BearerContextModificationRequest& m) {
             if (s.dl_ambr) {
                 item["pDU-Session-Resource-DL-AMBR"] = *s.dl_ambr;
             }
+            if (s.ng_ul) {
+                item["nG-UL-UP-TNL-Information"] = tunnel(*s.ng_ul);
+            }
+            if (s.forwarding_request) {
+                item["pDU-Session-Data-Forwarding-Information-Request"] = {{"data-Forwarding-Request", "both"}};
+            }
+            if (s.forwarding) {
+                item["pDU-Session-Data-Forwarding-Information"] = forwarding_json(*s.forwarding);
+            }
             if (!s.drbs_setup.empty()) {
                 json add = json::array();
                 for (const auto& d : s.drbs_setup) {
@@ -457,6 +504,26 @@ Result<Bytes> build(const BearerContextModificationRequest& m) {
                 json drbs = json::array();
                 for (const auto& d : s.drbs) {
                     json x = {{"dRB-ID", d.drb_id}};
+                    if (d.pdcp_reestablish) {
+                        if (d.pdcp_sn_bits != 12 && d.pdcp_sn_bits != 18) {
+                            return bad("E1AP: a PDCP SN length is 12 or 18");
+                        }
+                        const char* sn = d.pdcp_sn_bits == 12 ? "s-12" : "s-18";
+                        x["pDCP-Configuration"] = {{"pDCP-SN-Size-UL", sn}, {"pDCP-SN-Size-DL", sn}, {"rLC-Mode", "rlc-am"},
+                                                   {"pDCP-Reestablishment", "true"}};
+                    }
+                    if (d.forwarding) {
+                        x["dRB-Data-Forwarding-Information"] = forwarding_json(*d.forwarding);
+                    }
+                    if (d.sn_status_request) {
+                        x["pDCP-SN-Status-Request"] = "requested";
+                    }
+                    if (d.sn_status) {
+                        if (!count_ok(d.sn_status->ul) || !count_ok(d.sn_status->dl)) {
+                            return bad("E1AP: a PDCP SN above 262143");
+                        }
+                        x["pdcp-SN-Status-Information"] = sn_status_json(*d.sn_status);
+                    }
                     if (d.f1u_dl) {
                         x["dL-UP-Parameters"] = json::array({{{"uP-TNL-Information", tunnel(*d.f1u_dl)}, {"cell-Group-ID", 0}}});
                     }
@@ -514,9 +581,18 @@ Result<Bytes> build(const BearerContextModificationResponse& m) {
         for (const auto& s : m.modified) {
             json drbs = json::array();
             for (std::uint8_t d : s.drbs) {
-                drbs.push_back({{"dRB-ID", d}});
+                json x = {{"dRB-ID", d}};
+                for (const auto& [id, st] : s.sn_status) {
+                    if (id == d) {
+                        x["pDCP-SN-Status-Information"] = sn_status_json(st);
+                    }
+                }
+                drbs.push_back(x);
             }
             json item = {{"pDU-Session-ID", s.psi}};
+            if (const auto& f = s.forwarding) {
+                item["pDU-Session-Data-Forwarding-Information-Response"] = forwarding_json(*f);
+            }
             if (!s.drbs_setup.empty()) {
                 json add = json::array();
                 for (const auto& d : s.drbs_setup) {
@@ -537,6 +613,41 @@ Result<Bytes> build(const BearerContextModificationResponse& m) {
                          {{"nG-RAN-BearerContextModificationResponse", ng}}));
     }
     return per(pdu("successfulOutcome", kBearerContextModification, "reject", "BearerContextModificationResponse", ies));
+}
+
+Result<Bytes> build(const BearerContextModificationRequired& m) {
+    json l = json::array();
+    for (const auto& [psi, t] : m.ng_dl) {
+        l.push_back({{"pDU-Session-ID", psi}, {"nG-DL-UP-TNL-Information", tunnel(t)}});
+    }
+    json ng = json::array();
+    if (!l.empty()) {
+        ng.push_back(ie(kRequiredToModifyList, "reject", "PDU-Session-Resource-Required-To-Modify-List", l));
+    }
+    json ies = ue_ids(m.cu_cp_ue, m.cu_up_ue);
+    ies.push_back(ie(kSystemBcModificationRequired, "reject", "System-BearerContextModificationRequired",
+                     {{"nG-RAN-BearerContextModificationRequired", ng}}));
+    return per(pdu("initiatingMessage", kBearerContextModificationRequired, "reject", "BearerContextModificationRequired", ies));
+}
+
+Result<Bytes> build(const BearerContextModificationConfirm& m) {
+    json ies = ue_ids(m.cu_cp_ue, m.cu_up_ue);
+    if (!m.psis.empty()) {
+        json l = json::array();
+        for (std::uint8_t psi : m.psis) {
+            l.push_back({{"pDU-Session-ID", psi}});
+        }
+        ies.push_back(ie(kSystemBcModificationConfirm, "ignore", "System-BearerContextModificationConfirm",
+                         {{"nG-RAN-BearerContextModificationConfirm",
+                           json::array({ie(kConfirmModifiedList, "ignore", "PDU-Session-Resource-Confirm-Modified-List", l)})}}));
+    }
+    return per(pdu("successfulOutcome", kBearerContextModificationRequired, "reject", "BearerContextModificationConfirm", ies));
+}
+
+Result<Bytes> build(const BearerContextReleaseRequest& m) {
+    json ies = ue_ids(m.cu_cp_ue, m.cu_up_ue);
+    ies.push_back(ie(kCause, "ignore", "Cause", cause(m.cause)));
+    return per(pdu("initiatingMessage", kBearerContextReleaseRequest, "reject", "BearerContextReleaseRequest", ies));
 }
 
 Result<Bytes> build(const BearerContextModificationFailure& m) {
@@ -713,6 +824,13 @@ Result<Pdu> read(const std::string& kind, int code, const Ies& ies) {
                         if (s.contains("pDU-Session-Resource-DL-AMBR")) {
                             x.dl_ambr = s.at("pDU-Session-Resource-DL-AMBR").get<std::uint64_t>();
                         }
+                        if (s.contains("nG-UL-UP-TNL-Information")) {
+                            x.ng_ul = read_tunnel(s.at("nG-UL-UP-TNL-Information"));
+                        }
+                        x.forwarding_request = s.contains("pDU-Session-Data-Forwarding-Information-Request");
+                        if (s.contains("pDU-Session-Data-Forwarding-Information")) {
+                            x.forwarding = read_forwarding(s.at("pDU-Session-Data-Forwarding-Information"));
+                        }
                         if (s.contains("dRB-To-Setup-List-NG-RAN")) {
                             for (const auto& d : s.at("dRB-To-Setup-List-NG-RAN")) {
                                 x.drbs_setup.push_back(read_drb_to_setup(d, "qos-flow-Information-To-Be-Setup"));
@@ -722,6 +840,18 @@ Result<Pdu> read(const std::string& kind, int code, const Ies& ies) {
                             for (const auto& d : s.at("dRB-To-Modify-List-NG-RAN")) {
                                 DrbToModify y;
                                 y.drb_id = d.at("dRB-ID").get<std::uint8_t>();
+                                if (d.contains("pDCP-Configuration")) {
+                                    const json& pc = d.at("pDCP-Configuration");
+                                    y.pdcp_reestablish = pc.contains("pDCP-Reestablishment");
+                                    y.pdcp_sn_bits = pc.at("pDCP-SN-Size-DL").get<std::string>() == "s-12" ? 12 : 18;
+                                }
+                                if (d.contains("dRB-Data-Forwarding-Information")) {
+                                    y.forwarding = read_forwarding(d.at("dRB-Data-Forwarding-Information"));
+                                }
+                                y.sn_status_request = d.contains("pDCP-SN-Status-Request");
+                                if (d.contains("pdcp-SN-Status-Information")) {
+                                    y.sn_status = read_sn_status(d.at("pdcp-SN-Status-Information"));
+                                }
                                 if (d.contains("dL-UP-Parameters")) {
                                     y.f1u_dl = read_tunnel(d.at("dL-UP-Parameters").at(0).at("uP-TNL-Information"));
                                 }
@@ -771,9 +901,16 @@ Result<Pdu> read(const std::string& kind, int code, const Ies& ies) {
                                 x.drbs_setup.push_back(read_drb_setup(d));
                             }
                         }
+                        if (s.contains("pDU-Session-Data-Forwarding-Information-Response")) {
+                            x.forwarding = read_forwarding(s.at("pDU-Session-Data-Forwarding-Information-Response"));
+                        }
                         if (s.contains("dRB-Modified-List-NG-RAN")) {
                             for (const auto& d : s.at("dRB-Modified-List-NG-RAN")) {
-                                x.drbs.push_back(d.at("dRB-ID").get<std::uint8_t>());
+                                const auto id = d.at("dRB-ID").get<std::uint8_t>();
+                                x.drbs.push_back(id);
+                                if (d.contains("pDCP-SN-Status-Information")) {
+                                    x.sn_status.emplace_back(id, read_sn_status(d.at("pDCP-SN-Status-Information")));
+                                }
                             }
                         }
                         m.modified.push_back(std::move(x));
@@ -783,6 +920,37 @@ Result<Pdu> read(const std::string& kind, int code, const Ies& ies) {
             return Pdu{std::move(m)};
         }
         return Pdu{BearerContextModificationFailure{cp_id(ies), up_id(ies), read_cause(need(ies, kCause))}};
+    case kBearerContextModificationRequired:
+        if (kind == "initiatingMessage") {
+            BearerContextModificationRequired m;
+            m.cu_cp_ue = cp_id(ies);
+            m.cu_up_ue = up_id(ies);
+            const Ies ng = ng_ran(need(ies, kSystemBcModificationRequired), "nG-RAN-BearerContextModificationRequired");
+            if (const json* l = maybe(ng, kRequiredToModifyList)) {
+                for (const auto& s : *l) {
+                    if (s.contains("nG-DL-UP-TNL-Information")) {
+                        m.ng_dl.emplace_back(s.at("pDU-Session-ID").get<std::uint8_t>(), read_tunnel(s.at("nG-DL-UP-TNL-Information")));
+                    }
+                }
+            }
+            return Pdu{std::move(m)};
+        }
+        {
+            BearerContextModificationConfirm m;
+            m.cu_cp_ue = cp_id(ies);
+            m.cu_up_ue = up_id(ies);
+            if (const json* sys = maybe(ies, kSystemBcModificationConfirm)) {
+                const Ies ng = ng_ran(*sys, "nG-RAN-BearerContextModificationConfirm");
+                if (const json* l = maybe(ng, kConfirmModifiedList)) {
+                    for (const auto& s : *l) {
+                        m.psis.push_back(s.at("pDU-Session-ID").get<std::uint8_t>());
+                    }
+                }
+            }
+            return Pdu{std::move(m)};
+        }
+    case kBearerContextReleaseRequest:
+        return Pdu{BearerContextReleaseRequest{cp_id(ies), up_id(ies), read_cause(need(ies, kCause))}};
     case kBearerContextRelease:
         if (kind == "initiatingMessage") {
             return Pdu{BearerContextReleaseCommand{cp_id(ies), up_id(ies), read_cause(need(ies, kCause))}};

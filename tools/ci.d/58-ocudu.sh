@@ -14,7 +14,9 @@
 #   3. tools/pcap_check.py on our captures (the peer's reported apart) and the canary over
 #      each run, the peer's files included;
 #   4. with the mutants preset built: no_ddds fails ksim-p2.ocudu-ddds;
-#   5. no OCUDU process of ours is left.
+#   5. no OCUDU process of ours is left;
+#   6. (P3 R1) OCUDU's own decoder reads every RRCReconfiguration, HandoverPreparationInformation
+#      and HandoverCommand our builders make, and packs each the same (tools/ocudu_vectors/check_rrc.sh).
 # Full mode only. SKIP without the peer build, the binaries, tshark or the oracle venv,
 # and while a gnb or odu process (a B220 cell) runs on the host: the dev PC's rule.
 # The summary goes to build/ocudu/last/summary.txt for tools/p2_exit.py.
@@ -70,6 +72,8 @@ checks() {   # $1 = label: the oracles and the canary over that run
 }
 
 rc=0
+"$ROOT/tools/ocudu_vectors/check_rrc.sh" > "$OUT/rrc-unpack.out" 2>&1 || rc=1
+tail -n 1 "$OUT/rrc-unpack.out" | tee -a "$OUT/summary.txt"
 echo "-- 1. C3: our DU and UEs, OCUDU's CU-CP and CU-UP, the stub"
 gate c3 ocudu-c3-stub.yaml "$V/ksim-p2-ocudu.sh $V/ksim-p1-reg.sh $V/ksim-p1-session.sh $V/ksim-p1-dataplane.sh \
     $V/ksim-p1-idle.sh $V/ksim-p1-sms.sh $V/ksim-p1-restart.sh $V/ksim-p2-split.sh" || rc=1

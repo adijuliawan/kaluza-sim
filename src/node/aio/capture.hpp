@@ -16,7 +16,8 @@
 // with its Security Keys and NHs zeroed (ngap::redact_keys), and every E1AP PDU
 // with its UP keys zeroed (e1ap::redact_keys), before it is written; one that
 // does not decode is left out and counted. F1AP, GTP-U and the Uu messages of
-// P1 carry no key (the user plane on F1-U is ciphered PDCP).
+// P1 carry no key (the user plane on F1-U is ciphered PDCP). From P3 R1 xnap.pcapng
+// holds Xn-C, every PDU with its K_NG-RAN* zeroed (xnap::redact_keys).
 
 #pragma once
 
@@ -37,11 +38,12 @@ struct CaptureStats {
     std::uint64_t ngap = 0;
     std::uint64_t f1ap = 0;
     std::uint64_t e1ap = 0;
+    std::uint64_t xnap = 0;
     std::uint64_t gtpu = 0;
     std::uint64_t uu = 0;
     std::uint64_t sim = 0;
     std::uint64_t keys_zeroed = 0;
-    std::uint64_t left_out = 0;   // NGAP and E1AP PDUs that did not decode, so could not be redacted
+    std::uint64_t left_out = 0;   // NGAP, E1AP and XnAP PDUs that did not decode, so could not be redacted
 };
 
 /// P2 Q8 (ADR 0011): how much of the user plane (gtpu.pcapng) a run keeps. full: every
@@ -54,7 +56,7 @@ enum class UserPlaneCapture : std::uint8_t { full, headers, off };
 class Capture {
 public:
     static constexpr std::size_t kHeaderOctets = 128;
-    /// Creates the six files in `dir` (mode 0600).
+    /// Creates the seven files in `dir` (mode 0600).
     static Result<std::unique_ptr<Capture>> open(const std::string& dir, UserPlaneCapture up = UserPlaneCapture::full);
     ~Capture();
     Capture(const Capture&) = delete;
@@ -63,6 +65,7 @@ public:
     void ngap(bool tx, ByteView pdu);
     void f1ap(bool cu_tx, ByteView pdu);
     void e1ap(bool cp_tx, ByteView pdu);
+    void xnap(bool tx, ByteView pdu);
     void gtpu(const Endpoint& from, const Endpoint& to, ByteView pdu);
     void rrc(std::string_view channel, ByteView pdu, const std::string& supi);
     void nas(bool uplink, ByteView plain, const std::string& supi);
@@ -89,6 +92,7 @@ private:
     File ngap_;
     File f1ap_;
     File e1ap_;
+    File xnap_;
     File gtpu_;
     File uu_;
     File sim_;

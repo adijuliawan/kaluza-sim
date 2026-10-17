@@ -115,12 +115,38 @@ struct SessionSetup {
     std::vector<DrbSetup> drbs;
     friend bool operator==(const SessionSetup&, const SessionSetup&) = default;
 };
+/// PDCP-Count (TS 37.483 §9.3.1.35): a COUNT as its SN and HFN.
+struct PdcpCount {
+    std::uint32_t sn = 0;           // 0..262143
+    std::uint32_t hfn = 0;
+    friend bool operator==(const PdcpCount&, const PdcpCount&) = default;
+};
+/// PDCP SN Status Information (TS 37.483 §9.3.1.36, TS 38.323 §5.1.2): what a handover's
+/// target starts from: the UL receiver's first missing COUNT and the DL COUNT to assign next.
+struct SnStatus {
+    PdcpCount ul;
+    PdcpCount dl;
+    friend bool operator==(const SnStatus&, const SnStatus&) = default;
+};
+/// Data Forwarding Information (TS 37.483 §9.3.2.6): the forwarding tunnels' ends.
+struct Forwarding {
+    std::optional<GtpTunnel> ul;
+    std::optional<GtpTunnel> dl;
+    friend bool operator==(const Forwarding&, const Forwarding&) = default;
+};
 struct DrbToModify {
     std::uint8_t drb_id = 1;
     std::optional<GtpTunnel> f1u_dl;   // the DU's F1-U end
     // P2 Q10: flow-Mapping-Information, the QoS flows the DRB carries from now on
     // (TS 37.483 9.3.3.x: the CU-UP updates its mapping).
     std::optional<std::vector<QosFlow>> flows;
+    // P3 R1 (TS 37.483 §8.3.2.2): a handover's PDCP handling (the builder writes them in
+    // ASN.1 order). The re-establishment needs the PDCP configuration it applies to.
+    bool pdcp_reestablish = false;
+    std::uint8_t pdcp_sn_bits = 18;
+    std::optional<Forwarding> forwarding;
+    bool sn_status_request = false;
+    std::optional<SnStatus> sn_status;
     friend bool operator==(const DrbToModify&, const DrbToModify&) = default;
 };
 struct SessionToModify {
@@ -131,12 +157,20 @@ struct SessionToModify {
     std::optional<std::uint64_t> dl_ambr;
     std::vector<DrbToSetup> drbs_setup;
     std::vector<std::uint8_t> drbs_remove;
+    // P3 R1: a path switch's new UPF end (NG UL UP TNL Information), and the session's
+    // forwarding request or the target's forwarding ends.
+    std::optional<GtpTunnel> ng_ul;
+    bool forwarding_request = false;
+    std::optional<Forwarding> forwarding;
     friend bool operator==(const SessionToModify&, const SessionToModify&) = default;
 };
 struct SessionModified {
     std::uint8_t psi = 1;
     std::vector<std::uint8_t> drbs;
     std::vector<DrbSetup> drbs_setup;   // P2 Q10: the DRBs added, with the CU-UP's F1-U UL ends
+    // P3 R1: the session's forwarding ends, and the SN status of modified DRBs (by DRB ID).
+    std::optional<Forwarding> forwarding;
+    std::vector<std::pair<std::uint8_t, SnStatus>> sn_status;
     friend bool operator==(const SessionModified&, const SessionModified&) = default;
 };
 
@@ -232,10 +266,32 @@ struct BearerContextInactivityNotification {
     friend bool operator==(const BearerContextInactivityNotification&, const BearerContextInactivityNotification&) = default;
 };
 
+// P3 R1 (TS 37.483 §8.3.3, §8.3.5): the CU-UP's own requests. Required carries the
+// sessions whose N3 DL end the CU-UP changes; Confirm names those the CU-CP took.
+struct BearerContextModificationRequired {
+    std::uint32_t cu_cp_ue = 0;
+    std::uint32_t cu_up_ue = 0;
+    std::vector<std::pair<std::uint8_t, GtpTunnel>> ng_dl;
+    friend bool operator==(const BearerContextModificationRequired&, const BearerContextModificationRequired&) = default;
+};
+struct BearerContextModificationConfirm {
+    std::uint32_t cu_cp_ue = 0;
+    std::uint32_t cu_up_ue = 0;
+    std::vector<std::uint8_t> psis;
+    friend bool operator==(const BearerContextModificationConfirm&, const BearerContextModificationConfirm&) = default;
+};
+struct BearerContextReleaseRequest {
+    std::uint32_t cu_cp_ue = 0;
+    std::uint32_t cu_up_ue = 0;
+    Cause cause;
+    friend bool operator==(const BearerContextReleaseRequest&, const BearerContextReleaseRequest&) = default;
+};
+
 using Pdu = std::variant<E1SetupRequest, E1SetupResponse, E1SetupFailure, BearerContextSetupRequest,
                          BearerContextSetupResponse, BearerContextSetupFailure, BearerContextModificationRequest,
                          BearerContextModificationResponse, BearerContextModificationFailure, BearerContextReleaseCommand,
-                         BearerContextReleaseComplete, ErrorIndication, BearerContextInactivityNotification>;
+                         BearerContextReleaseComplete, ErrorIndication, BearerContextInactivityNotification,
+                         BearerContextModificationRequired, BearerContextModificationConfirm, BearerContextReleaseRequest>;
 
 namespace detail {
 template <class T>

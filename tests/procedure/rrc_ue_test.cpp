@@ -189,7 +189,7 @@ struct Gnb {
         rrc::CellGroup cg;
         cg.bearers.push_back(rrc::RlcBearer{2, true, 2, true});
         cg.bearers.push_back(rrc::RlcBearer{4, false, 1, true});
-        dcch(*srb1, rrc::encode(rrc::Reconfiguration{2, rb, cg, std::move(nas)}));
+        dcch(*srb1, rrc::encode(rrc::Reconfiguration{2, rb, cg, std::move(nas), std::nullopt}));
     }
 };
 
@@ -418,7 +418,7 @@ TEST(UeRrc, Clause5_3_5_3_BearersBeforeAsSecurityTakeTheUeIdle) {
     r.connect();
     rrc::RadioBearers rb;
     rb.srbs.push_back(rrc::SrbAdd{2, false});
-    r.gnb.dcch(*r.gnb.srb1, rrc::encode(rrc::Reconfiguration{0, rb, std::nullopt, {}}));
+    r.gnb.dcch(*r.gnb.srb1, rrc::encode(rrc::Reconfiguration{0, rb, std::nullopt, {}, std::nullopt}));
     ASSERT_TRUE(r.run_until([&] { return r.released == 1; }));
     EXPECT_EQ(r.ue->state(), RrcState::idle);
 }

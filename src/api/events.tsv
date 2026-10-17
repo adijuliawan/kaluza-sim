@@ -25,6 +25,7 @@ nas.sec.discard	24.501 4.4.4.2	a downlink 5GMM message not processed; message, v
 nas.dereg.sent	24.501 5.5.2.2.1	a DEREGISTRATION REQUEST sent; switch_off, identity, transmission (1, then T3521's retransmissions)
 nas.dereg.accept	24.501 5.5.2.2.2	a DEREGISTRATION ACCEPT taken: the UE is deregistered
 nas.dereg.abort	24.501 5.5.2.2.6	a UE-initiated de-registration ended without an accept; reason=T3521|released
+rrc.unexpected	38.331 5.3.7	a DL-DCCH message the UE did not ask for in its state (P3 R1: RRCReestablishment until R5); message
 rrc.camped	38.331 5.2.2	the UE camps on a cell (fixed camping, ledger A-12): MIB not barred, SIB1 lists the selected PLMN; cell (KAIR handle), tac, nci, plmn
 rrc.cell_barred	38.331 5.2.2.5	the camped cell's MIB says barred
 rrc.paging	38.331 5.3.2.3	a Paging record matched this UE's 5G-S-TMSI; state

@@ -27,6 +27,27 @@ inline CellGroup cell_group() {
     return c;
 }
 
+/// P3 R1: a handover's target cell group, its SRB1 bearer and reconfigurationWithSync with CFRA.
+inline CellGroup handover_cell_group() {
+    CellGroup c;
+    c.bearers.push_back(RlcBearer{1, true, 1, true});
+    ReconfigWithSync r;
+    r.cell.pci = 102;
+    r.new_ue_id = 17921;
+    r.t304_ms = 1000;
+    r.cfra = Cfra{0, 63};
+    c.sync = r;
+    return c;
+}
+
+inline Reconfiguration handover_reconfiguration() {
+    Reconfiguration r;
+    r.tid = 1;
+    r.cell_group = handover_cell_group();
+    r.key_update = KeyUpdate{false, 2};
+    return r;
+}
+
 inline RadioBearers bearers() {
     RadioBearers b;
     b.srbs.push_back(SrbAdd{2, false});
@@ -59,7 +80,7 @@ inline std::vector<Sample> all() {
     s.push_back({"DL-CCCH", "RRCReject", encode(Reject{5})});
     s.push_back({"DL-DCCH", "SecurityModeCommand", encode(SecurityModeCommand{1, 2, 2})});
     s.push_back({"DL-DCCH", "RRCReconfiguration",
-                 encode(Reconfiguration{2, bearers(), cell_group(), {*from_hex("7e00680112000f2e0101c1ffff91a1280100")}})});
+                 encode(Reconfiguration{2, bearers(), cell_group(), {*from_hex("7e00680112000f2e0101c1ffff91a1280100")}, std::nullopt})});
     {
         // P2 Q10: a QoS flow on a new DRB, another moved off the default DRB, which keeps its PDCP.
         RadioBearers q;
@@ -75,14 +96,14 @@ inline std::vector<Sample> all() {
         remap.setup = false;
         q.drbs = {fresh, remap};
         q.drb_release = {5};
-        s.push_back({"DL-DCCH", "RRCReconfiguration.qos-remap", encode(Reconfiguration{3, q, std::nullopt, {}})});
+        s.push_back({"DL-DCCH", "RRCReconfiguration.qos-remap", encode(Reconfiguration{3, q, std::nullopt, {}, std::nullopt})});
     }
     s.push_back({"DL-DCCH", "RRCRelease", encode(Release{3})});
     s.push_back({"DL-DCCH", "UECapabilityEnquiry", encode(CapabilityEnquiry{0})});
     s.push_back({"DL-DCCH", "DLInformationTransfer", encode(DlInformationTransfer{1, *from_hex("7e005b01")})});
     s.push_back({"UL-DCCH", "RRCSetupComplete",
-                 encode(SetupComplete{0, 1, *from_hex("7e004179000d0100f110000000000000000001"), std::nullopt})});
-    s.push_back({"UL-DCCH", "RRCSetupComplete.part2", encode(SetupComplete{0, 1, *from_hex("7e004179000d0100f110000000000000000001"), 0x0CA})});
+                 encode(SetupComplete{0, 1, *from_hex("7e004179000d0100f110000000000000000001"), std::nullopt, std::nullopt, {}})});
+    s.push_back({"UL-DCCH", "RRCSetupComplete.part2", encode(SetupComplete{0, 1, *from_hex("7e004179000d0100f110000000000000000001"), 0x0CA, std::nullopt, {}})});
     s.push_back({"UL-DCCH", "SecurityModeComplete", encode(SecurityModeComplete{1})});
     s.push_back({"UL-DCCH", "SecurityModeFailure", encode(SecurityModeFailure{1})});
     s.push_back({"UL-DCCH", "RRCReconfigurationComplete", encode(ReconfigurationComplete{2})});
@@ -92,6 +113,25 @@ inline std::vector<Sample> all() {
     s.push_back({"UL-DCCH", "ULInformationTransfer", encode(UlInformationTransfer{*from_hex("7e0043")})});
     s.push_back({"CellGroupConfig", "CellGroupConfig", encode(cell_group())});
     s.push_back({"UE-NR-Capability", "UE-NR-Capability", generic_nr_capability()});
+    // P3 R1: mobility.
+    s.push_back({"DL-DCCH", "RRCReconfiguration.handover", encode(handover_reconfiguration())});
+    s.push_back({"UL-CCCH", "RRCReestablishmentRequest",
+                 encode(ReestablishmentRequest{0x4601, 101, 0xA5C3, ReestablishmentCause::handover_failure})});
+    s.push_back({"DL-DCCH", "RRCReestablishment", encode(Reestablishment{2, 3})});
+    s.push_back({"UL-DCCH", "RRCReestablishmentComplete", encode(ReestablishmentComplete{2})});
+    {
+        SetupComplete sc{0, 1, *from_hex("7e004179000d0100f110000000000000000001"), 0x0CA, 0x020040, {}};
+        sc.nssai = {Snssai{1, std::nullopt}, Snssai{1, 0x000001}};
+        s.push_back({"UL-DCCH", "RRCSetupComplete.amf-nssai", encode(sc)});
+    }
+    if (auto nr = generic_nr_capability()) {
+        HandoverPreparation h;
+        h.nr_capability = *nr;
+        h.source = Reconfiguration{0, bearers(), cell_group(), {}, std::nullopt};
+        h.reestablishment = std::pair<std::uint16_t, std::uint16_t>{101, 0x1234};
+        s.push_back({"HandoverPreparationInformation", "HandoverPreparationInformation", encode(h)});
+    }
+    s.push_back({"HandoverCommand", "HandoverCommand", encode_handover_command(handover_reconfiguration())});
     return s;
 }
 

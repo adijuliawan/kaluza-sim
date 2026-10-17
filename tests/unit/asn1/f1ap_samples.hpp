@@ -55,29 +55,29 @@ inline std::vector<Sample> all() {
     s.push_back({"DLRRCMessageTransfer.srb1",
                  DlRrcMessageTransfer{7, 1, 1, pdcp(*rrc::encode(rrc::SecurityModeCommand{1, 2, 2}))}});
     s.push_back({"ULRRCMessageTransfer",
-                 UlRrcMessageTransfer{7, 1, 1, pdcp(*rrc::encode(rrc::SetupComplete{0, 1, *from_hex("7e004179000d0100f110000000000000000001"), std::nullopt}))}});
-    s.push_back({"UEContextSetupRequest", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {}, std::nullopt}});
-    s.push_back({"UEContextSetupResponse", UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {}}});
+                 UlRrcMessageTransfer{7, 1, 1, pdcp(*rrc::encode(rrc::SetupComplete{0, 1, *from_hex("7e004179000d0100f110000000000000000001"), std::nullopt, std::nullopt, {}}))}});
+    s.push_back({"UEContextSetupRequest", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {}, std::nullopt, std::nullopt}});
+    s.push_back({"UEContextSetupResponse", UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {}, std::nullopt}});
     // P1 N10: DRBs, the CU-UP's F1-U end up, the DU's down.
     const DrbToSetup drb{1, Snssai{1, 0x000001}, {Flow{1, 9, 8, false, true, std::nullopt, false}}, GtpTunnel{{127, 0, 0, 4}, 0x20000001}, 18, 12};
-    s.push_back({"UEContextSetupRequest.drbs", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {drb}, std::nullopt}});
+    s.push_back({"UEContextSetupRequest.drbs", UeContextSetupRequest{7, 1, kCgi, 0, std::nullopt, {2}, {drb}, std::nullopt, std::nullopt}});
     s.push_back({"UEContextSetupResponse.drbs",
-                 UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {DrbSetup{1, 4, GtpTunnel{{127, 0, 0, 3}, 0x30000001}}}}});
+                 UeContextSetupResponse{7, 1, cell_group, {{2, 2}}, {DrbSetup{1, 4, GtpTunnel{{127, 0, 0, 3}, 0x30000001}}}, std::nullopt}});
     s.push_back({"UEContextSetupFailure", UeContextSetupFailure{7, 1, Cause{"radioNetwork", "unspecified"}}});
-    s.push_back({"UEContextModificationRequest", UeContextModificationRequest{7, 1, {2}, {}, {}, std::nullopt, {}}});
+    s.push_back({"UEContextModificationRequest", UeContextModificationRequest{7, 1, {2}, {}, {}, std::nullopt, {}, std::nullopt, false}});
     s.push_back({"UEContextModificationResponse", UeContextModificationResponse{7, 1, cell_group, {}, {}}});
     DrbToSetup drb2 = drb;
     drb2.drb_id = 2;
     drb2.flows = {Flow{1, 5, 1, false, false, std::nullopt, false}, Flow{2, 9, 8, false, true, std::nullopt, false},
                   Flow{3, 1, 2, true, false, Gbr{256000, 128000, 128000, 64000}, true}};   // P2 Q11: GBR, reflective
-    s.push_back({"UEContextModificationRequest.drbs", UeContextModificationRequest{7, 1, {}, {drb2}, {1}, std::nullopt, {}}});
+    s.push_back({"UEContextModificationRequest.drbs", UeContextModificationRequest{7, 1, {}, {drb2}, {1}, std::nullopt, {}, std::nullopt, false}});
     s.push_back({"UEContextModificationResponse.drbs",
                  UeContextModificationResponse{7, 1, cell_group, {DrbSetup{2, std::nullopt, GtpTunnel{{127, 0, 0, 3}, 0x30000002}}}, {}}});
     // P2 Q10: a DRB whose QoS flows change (DRBs-ToBeModified), and the DU's DRBs-Modified.
     DrbToSetup remap = drb;
     remap.flows = {Flow{1, 9, 8, false, true, std::nullopt, false}, Flow{4, 9, 8, false, true, std::nullopt, false}};
     remap.ul_pdcp_sn_bits = std::nullopt;   // a modified DRB keeps its SN lengths: none sent
-    s.push_back({"UEContextModificationRequest.modify", UeContextModificationRequest{7, 1, {}, {}, {}, std::nullopt, {remap}}});
+    s.push_back({"UEContextModificationRequest.modify", UeContextModificationRequest{7, 1, {}, {}, {}, std::nullopt, {remap}, std::nullopt, false}});
     s.push_back({"UEContextModificationResponse.modified",
                  UeContextModificationResponse{7, 1, std::nullopt, {}, {DrbSetup{1, std::nullopt, GtpTunnel{{127, 0, 0, 3}, 0x30000001}}}}});
     s.push_back({"UEContextReleaseRequest", UeContextReleaseRequest{7, 1, Cause{"radioNetwork", "rl-failure-others"}}});
@@ -93,6 +93,24 @@ inline std::vector<Sample> all() {
     s.push_back({"GNBCUConfigurationUpdateFailure", GnbCuConfigurationUpdateFailure{3, Cause{"misc", "unspecified"}, "v10s"}});
     s.push_back({"UEContextModificationFailure",
                  UeContextModificationFailure{7, 1, Cause{"transport", "transport-resource-unavailable"}}});
+    // P3 R1: an intra-CU handover's F1AP (TS 38.473 §8.3.1, §8.3.4, §8.3.5).
+    {
+        UeContextSetupRequest ho{9, std::nullopt, kCgi, 0, std::nullopt, {1, 2}, {}, std::nullopt, std::nullopt};
+        rrc::HandoverPreparation prep;
+        prep.nr_capability = *rrc::generic_nr_capability();
+        prep.source = rrc::Reconfiguration{0, rrc::samples::bearers(), rrc::samples::cell_group(), {}, std::nullopt};
+        ho.ho_preparation = *rrc::encode(prep);
+        s.push_back({"UEContextSetupRequest.handover", ho});
+        s.push_back({"UEContextSetupResponse.handover",
+                     UeContextSetupResponse{9, 2, *rrc::encode(rrc::samples::handover_cell_group()), {{1, 1}, {2, 2}}, {}, 17921}});
+        UeContextModificationRequest stop{7, 1, {}, {}, {}, std::nullopt, {}, UeContextModificationRequest::Transmission::stop, false};
+        s.push_back({"UEContextModificationRequest.stop", stop});
+        UeContextModificationRequest done{9, 2, {}, {}, {}, std::nullopt, {}, std::nullopt, true};
+        s.push_back({"UEContextModificationRequest.complete", done});
+        s.push_back({"UEContextModificationRequired",
+                     UeContextModificationRequired{7, 1, *rrc::encode(rrc::samples::cell_group()), Cause{"radioNetwork", "unspecified"}}});
+        s.push_back({"UEContextModificationConfirm", UeContextModificationConfirm{7, 1, pdcp(*rrc::encode(rrc::samples::handover_reconfiguration()))}});
+    }
     return s;
 }
 

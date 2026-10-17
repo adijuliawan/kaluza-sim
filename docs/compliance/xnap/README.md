@@ -46,7 +46,9 @@ None yet.
 
 ## Typed rows
 
-None yet.
+| Row | Date | What | Evidence |
+|---|---|---|---|
+| KS-XNAP-B1 | 2026-10-17 | P3 R1, the typed XnAP set as built (TS 38.423 j40 §8.4; KS-XNAP-001's codec): Xn Setup Request (Global NG-RAN Node ID of a gNB, 22..32 bits; TAI Support List with PLMNs and slices; AMF Region Information; Served Cells NR, TDD), Response and Failure (Cause, Time to wait); NG-RAN node Configuration Update from a gNB (served NR cells to add and to delete), Acknowledge (the responder's served cells) and Failure; a full Reset Request and Response; Error Indication (the old and new UE XnAP IDs, Cause). xnap::redact_keys zeroes every key-NG-RAN-Star for captures, and every run has xnap.pcapng. Nine builder samples pass tshark and pycrate | src/codec/asn1/msg/xnap.hpp; tests/unit/asn1/xnap_msg_test.cpp; tests/unit/asn1/xnap_samples.hpp; src/node/aio/capture.hpp; P3 R1 |
 
 ## Not built yet
 

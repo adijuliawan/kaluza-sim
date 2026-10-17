@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "codec/asn1/msg/e1ap.hpp"
+#include "codec/asn1/msg/xnap.hpp"
 #include "codec/asn1/msg/ngap.hpp"
 
 namespace ksim::node {
@@ -48,7 +49,7 @@ Result<std::unique_ptr<Capture>> Capture::open(const std::string& dir, UserPlane
     std::unique_ptr<Capture> c(new Capture());   // NOLINT(cppcoreguidelines-owning-memory): private constructor
     c->up_ = up;
     for (auto [file, name] : {std::pair{&c->ngap_, "ngap"}, std::pair{&c->f1ap_, "f1ap"}, std::pair{&c->e1ap_, "e1ap"},
-                              std::pair{&c->uu_, "uu"}}) {
+                              std::pair{&c->xnap_, "xnap"}, std::pair{&c->uu_, "uu"}}) {
         auto r = open_file(*file, dir + "/" + name + ".pcapng", name);
         if (!r) {
             return r.error();
@@ -89,6 +90,18 @@ void Capture::f1ap(bool cu_tx, ByteView pdu) {
     const std::lock_guard lock(mu_);
     ++stats_.f1ap;
     write(f1ap_, "f1ap", pdu, cu_tx ? "cu->du" : "du->cu");
+}
+
+void Capture::xnap(bool tx, ByteView pdu) {
+    auto r = xnap::redact_keys(pdu);
+    const std::lock_guard lock(mu_);
+    if (!r) {
+        ++stats_.left_out;
+        return;
+    }
+    stats_.keys_zeroed += r->keys;
+    ++stats_.xnap;
+    write(xnap_, "xnap", r->pdu, tx ? "tx" : "rx");
 }
 
 void Capture::e1ap(bool cp_tx, ByteView pdu) {
@@ -168,7 +181,7 @@ CaptureStats Capture::stats() const {
 
 void Capture::close() {
     const std::lock_guard lock(mu_);
-    for (File* f : {&ngap_, &f1ap_, &e1ap_, &gtpu_, &uu_, &sim_}) {
+    for (File* f : {&ngap_, &f1ap_, &e1ap_, &xnap_, &gtpu_, &uu_, &sim_}) {
         f->w.reset();
         if (f->f != nullptr) {
             std::fclose(f->f);

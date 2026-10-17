@@ -32,6 +32,7 @@ constexpr int kGnbCuConfigurationUpdate = 4;
 constexpr int kUeContextSetup = 5;
 constexpr int kUeContextRelease = 6;
 constexpr int kUeContextModification = 7;
+constexpr int kUeContextModificationRequired = 8;
 constexpr int kUeContextReleaseRequest = 10;
 constexpr int kInitialUlRrcMessageTransfer = 11;
 constexpr int kDlRrcMessageTransfer = 12;
@@ -62,6 +63,9 @@ constexpr int kSrbsToBeSetupList = 74;
 constexpr int kSrbsToBeSetupModItem = 75;
 constexpr int kSrbsToBeSetupModList = 76;
 constexpr int kTimeToWait = 77;
+constexpr int kTransmissionActionIndicator = 79;
+constexpr int kRrcReconfigurationCompleteIndicator = 87;
+constexpr int kHandoverPreparationInformation = 119;
 constexpr int kTransactionId = 78;
 constexpr int kCuName = 82;
 constexpr int kCRnti = 95;
@@ -404,6 +408,10 @@ Result<Bytes> build(const UeContextSetupRequest& m) {
     if (m.ue_capability) {
         cu_to_du["uE-CapabilityRAT-ContainerList"] = hex(*m.ue_capability);
     }
+    if (m.ho_preparation) {
+        cu_to_du["iE-Extensions"] = json::array({{{"id", kHandoverPreparationInformation}, {"criticality", "ignore"},
+                                                  {"extensionValue", {{"HandoverPreparationInformation", hex(*m.ho_preparation)}}}}});
+    }
     ies.push_back(ie(kCuToDuRrcInformation, "reject", "CUtoDURRCInformation", cu_to_du));
     if (!m.srbs.empty()) {
         ies.push_back(ie(kSrbsToBeSetupList, "reject", "SRBs-ToBeSetup-List",
@@ -427,6 +435,9 @@ Result<Bytes> build(const UeContextSetupResponse& m) {
     }
     json ies = ue_ids(m.cu_ue, m.du_ue);
     ies.push_back(ie(kDuToCuRrcInformation, "reject", "DUtoCURRCInformation", {{"cellGroupConfig", hex(m.cell_group)}}));
+    if (m.c_rnti) {
+        ies.push_back(ie(kCRnti, "ignore", "C-RNTI", *m.c_rnti));
+    }
     if (!m.srbs.empty()) {
         json l = json::array();
         for (const auto& [srb, lcid] : m.srbs) {
@@ -454,6 +465,13 @@ Result<Bytes> build(const UeContextModificationRequest& m) {
         return bad("F1AP: an SRB ID outside 0..3, or a PDCP SN length not 12 or 18");
     }
     json ies = ue_ids(m.cu_ue, m.du_ue);
+    if (m.transmission) {
+        ies.push_back(ie(kTransmissionActionIndicator, "ignore", "TransmissionActionIndicator",
+                         m.transmission == UeContextModificationRequest::Transmission::stop ? "stop" : "restart"));
+    }
+    if (m.reconfiguration_complete) {
+        ies.push_back(ie(kRrcReconfigurationCompleteIndicator, "ignore", "RRCReconfigurationCompleteIndicator", "true"));
+    }
     if (m.rrc) {
         ies.push_back(ie(kRrcContainer, "reject", "RRCContainer", hex(*m.rrc)));
     }
@@ -601,6 +619,23 @@ Result<Bytes> build(const UeContextModificationFailure& m) {
     json ies = ue_ids(m.cu_ue, m.du_ue);
     ies.push_back(ie(kCause, "ignore", "Cause", cause(m.cause)));
     return per(unsuccessful(kUeContextModification, "reject", "UEContextModificationFailure", ies));
+}
+
+Result<Bytes> build(const UeContextModificationRequired& m) {
+    json ies = ue_ids(m.cu_ue, m.du_ue);
+    if (m.cell_group) {
+        ies.push_back(ie(kDuToCuRrcInformation, "reject", "DUtoCURRCInformation", {{"cellGroupConfig", hex(*m.cell_group)}}));
+    }
+    ies.push_back(ie(kCause, "ignore", "Cause", cause(m.cause)));
+    return per(initiating(kUeContextModificationRequired, "reject", "UEContextModificationRequired", ies));
+}
+
+Result<Bytes> build(const UeContextModificationConfirm& m) {
+    json ies = ue_ids(m.cu_ue, m.du_ue);
+    if (m.rrc) {
+        ies.push_back(ie(kRrcContainer, "ignore", "RRCContainer", hex(*m.rrc)));
+    }
+    return per(successful(kUeContextModificationRequired, "reject", "UEContextModificationConfirm", ies));
 }
 
 // ---- readers -----------------------------------------------------------------------------
@@ -792,6 +827,13 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             if (info.contains("uE-CapabilityRAT-ContainerList")) {
                 m.ue_capability = read_octets(info.at("uE-CapabilityRAT-ContainerList"));
             }
+            if (info.contains("iE-Extensions")) {
+                for (const auto& e : info.at("iE-Extensions")) {
+                    if (e.at("id").get<int>() == kHandoverPreparationInformation) {
+                        m.ho_preparation = read_octets(e.at("extensionValue").at("HandoverPreparationInformation"));
+                    }
+                }
+            }
             if (const json* l = maybe(ies, kSrbsToBeSetupList)) {
                 m.srbs = read_srbs(*l);
             }
@@ -808,6 +850,9 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             m.cu_ue = cu_id(ies);
             m.du_ue = du_id(ies);
             m.cell_group = read_octets(need(ies, kDuToCuRrcInformation).at("cellGroupConfig"));
+            if (const json* r = maybe(ies, kCRnti)) {
+                m.c_rnti = r->get<std::uint16_t>();
+            }
             if (const json* l = maybe(ies, kSrbsSetupList)) {
                 for (const json* i : items(*l)) {
                     m.srbs.emplace_back(i->at("sRBID").get<std::uint8_t>(), i->at("lCID").get<std::uint8_t>());
@@ -832,6 +877,13 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             UeContextModificationRequest m;
             m.cu_ue = cu_id(ies);
             m.du_ue = du_id(ies);
+            if (const json* t = maybe(ies, kTransmissionActionIndicator)) {
+                m.transmission = t->get<std::string>() == "stop" ? UeContextModificationRequest::Transmission::stop
+                                                                 : UeContextModificationRequest::Transmission::restart;
+            }
+            if (const json* c = maybe(ies, kRrcReconfigurationCompleteIndicator)) {
+                m.reconfiguration_complete = c->get<std::string>() == "true";
+            }
             if (const json* r = maybe(ies, kRrcContainer)) {
                 m.rrc = read_octets(*r);
             }
@@ -867,6 +919,27 @@ Result<Pdu> read(Header::Kind kind, int code, const Ies& ies) {
             return Pdu{std::move(m)};
         }
         return Pdu{UeContextModificationFailure{cu_id(ies), du_id(ies), read_cause(need(ies, kCause))}};
+    case kUeContextModificationRequired:
+        if (kind == K::initiating) {
+            UeContextModificationRequired m;
+            m.cu_ue = cu_id(ies);
+            m.du_ue = du_id(ies);
+            if (const json* d = maybe(ies, kDuToCuRrcInformation)) {
+                m.cell_group = read_octets(d->at("cellGroupConfig"));
+            }
+            m.cause = read_cause(need(ies, kCause));
+            return Pdu{std::move(m)};
+        }
+        if (kind == K::successful) {
+            UeContextModificationConfirm m;
+            m.cu_ue = cu_id(ies);
+            m.du_ue = du_id(ies);
+            if (const json* r = maybe(ies, kRrcContainer)) {
+                m.rrc = read_octets(*r);
+            }
+            return Pdu{std::move(m)};
+        }
+        throw jer::NotP1("UE CONTEXT MODIFICATION REFUSE");
     case kGnbCuConfigurationUpdate:
         if (kind == K::initiating) {
             GnbCuConfigurationUpdate m;

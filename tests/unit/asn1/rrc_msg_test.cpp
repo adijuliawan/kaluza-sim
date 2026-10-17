@@ -29,7 +29,7 @@ TEST(RrcMsg, CipheringDisabledRoundTrips) {
     b.drbs.push_back(DrbAdd{});
     b.drbs[0].pdcp.t_reordering_ms = 100;
     b.drbs[0].pdcp.ciphering_disabled = true;
-    const Reconfiguration rc{1, b, std::nullopt, {}};
+    const Reconfiguration rc{1, b, std::nullopt, {}, std::nullopt};
     auto wire = encode(rc);
     ASSERT_TRUE(wire) << wire.error().what;
     auto d = decode_dl_dcch(*wire);
@@ -57,7 +57,7 @@ TEST(RrcMsg, QosFlowRemappingRoundTrips) {
     remap.qfis_release = {2};
     remap.setup = false;
     b.drbs = {fresh, remap};
-    const Reconfiguration rc{1, b, std::nullopt, {}};
+    const Reconfiguration rc{1, b, std::nullopt, {}, std::nullopt};
     auto wire = encode(rc);
     ASSERT_TRUE(wire) << wire.error().what;
     auto j = to_jer("DL-DCCH", *wire);
@@ -110,7 +110,7 @@ TEST(RrcMsg, CcchMessagesRoundTrip) {
 }
 
 TEST(RrcMsg, DcchMessagesRoundTrip) {
-    const Reconfiguration rc{2, samples::bearers(), samples::cell_group(), {*from_hex("7e0068"), *from_hex("7e0043")}};
+    const Reconfiguration rc{2, samples::bearers(), samples::cell_group(), {*from_hex("7e0068"), *from_hex("7e0043")}, std::nullopt};
     auto d = decode_dl_dcch(*encode(rc));
     ASSERT_TRUE(d);
     EXPECT_EQ(std::get<Reconfiguration>(*d), rc);
@@ -121,7 +121,7 @@ TEST(RrcMsg, DcchMessagesRoundTrip) {
               (Bytes{0x7e, 0x00}));
     EXPECT_TRUE(std::holds_alternative<CapabilityEnquiry>(*decode_dl_dcch(*encode(CapabilityEnquiry{0}))));
 
-    const SetupComplete sc{0, 1, {0x7e, 0x00, 0x41}, 0x0CA};
+    const SetupComplete sc{0, 1, {0x7e, 0x00, 0x41}, 0x0CA, std::nullopt, {}};
     EXPECT_EQ(std::get<SetupComplete>(*decode_ul_dcch(*encode(sc))), sc);
     EXPECT_EQ(std::get<SecurityModeComplete>(*decode_ul_dcch(*encode(SecurityModeComplete{1}))).tid, 1);
     EXPECT_TRUE(std::holds_alternative<SecurityModeFailure>(*decode_ul_dcch(*encode(SecurityModeFailure{1}))));
@@ -152,11 +152,11 @@ TEST(RrcMsg, InputsOutOfRangeAreRefusedBeforeEncoding) {
     EXPECT_FALSE(encode(SecurityModeCommand{0, 4, 2}));
     EXPECT_FALSE(encode(DlInformationTransfer{0, {}}));
     EXPECT_FALSE(encode(Paging{{std::uint64_t{1} << 48}}));
-    EXPECT_FALSE(encode(CellGroup{0, {RlcBearer{33, true, 1, true}}, {}}));
+    EXPECT_FALSE(encode(CellGroup{0, {RlcBearer{33, true, 1, true}}, {}, std::nullopt}));
     RadioBearers b;
     b.drbs.push_back(DrbAdd{});
     b.drbs[0].pdcp.t_reordering_ms = 7;
-    EXPECT_FALSE(encode(Reconfiguration{0, b, std::nullopt, {}}));
+    EXPECT_FALSE(encode(Reconfiguration{0, b, std::nullopt, {}, std::nullopt}));
 }
 
 // P2 Q4 (KS-F1AP-D2): the served cell's MeasurementTimingConfiguration names its SSB.
@@ -180,6 +180,59 @@ TEST(RrcMsg, MeasurementTimingConfigurationCarriesTheCellsSsb) {
     bad = s;
     bad.pci = 1008;
     EXPECT_FALSE(measurement_timing_configuration(bad));
+}
+
+// P3 R1: a handover's RRC (TS 38.331 §5.3.5.5.2, §5.3.5.7, §5.3.7; §11.2.2): every new
+// message reads back as built, and the inter-node containers carry the reconfiguration.
+TEST(RrcMsg, MobilityMessagesRoundTrip) {
+    const Reconfiguration ho = samples::handover_reconfiguration();
+    auto d = decode_dl_dcch(*encode(ho));
+    ASSERT_TRUE(d);
+    EXPECT_EQ(std::get<Reconfiguration>(*d), ho);
+    ASSERT_TRUE(std::get<Reconfiguration>(*d).cell_group->sync);
+    EXPECT_EQ(std::get<Reconfiguration>(*d).cell_group->sync->t304_ms, 1000);
+    EXPECT_EQ(*decode_reconfiguration_ie(*reconfiguration_ie(ho)), ho);
+    EXPECT_EQ(*decode_handover_command(*encode_handover_command(ho)), ho);
+
+    const ReestablishmentRequest rq{0x4601, 101, 0xA5C3, ReestablishmentCause::handover_failure};
+    auto u = decode_ul_ccch_any(*encode(rq));
+    ASSERT_TRUE(u);
+    EXPECT_EQ(std::get<ReestablishmentRequest>(*u), rq);
+    EXPECT_FALSE(decode_ul_ccch(*encode(rq)));   // not an RRCSetupRequest
+    const SetupRequest sr{true, 0x40000001ULL, EstablishmentCause::mt_access};
+    EXPECT_EQ(std::get<SetupRequest>(*decode_ul_ccch_any(*encode(sr))), sr);
+    EXPECT_EQ(std::get<Reestablishment>(*decode_dl_dcch(*encode(Reestablishment{2, 3}))), (Reestablishment{2, 3}));
+    EXPECT_TRUE(std::holds_alternative<ReestablishmentComplete>(*decode_ul_dcch(*encode(ReestablishmentComplete{2}))));
+
+    SetupComplete sc{0, 1, {0x7e, 0x00, 0x41}, std::nullopt, 0x020040, {Snssai{1, std::nullopt}, Snssai{2, 0xABCDEF}}};
+    EXPECT_EQ(std::get<SetupComplete>(*decode_ul_dcch(*encode(sc))), sc);
+
+    auto cap = generic_nr_capability();
+    ASSERT_TRUE(cap);
+    HandoverPreparation h{*cap, Reconfiguration{0, samples::bearers(), samples::cell_group(), {}, std::nullopt},
+                          std::pair<std::uint16_t, std::uint16_t>{101, 0x1234}};
+    auto hb = encode(h);
+    ASSERT_TRUE(hb) << hb.error().what;
+    EXPECT_EQ(*decode_handover_preparation(*hb), h);
+}
+
+TEST(RrcMsg, MobilityInputsOutOfRangeAreRefused) {
+    CellGroup c = samples::handover_cell_group();
+    c.sync->t304_ms = 300;   // not a T304 value
+    EXPECT_FALSE(encode(c));
+    c = samples::handover_cell_group();
+    c.sync->cell.pci = 1008;
+    EXPECT_FALSE(encode(c));
+    c = samples::handover_cell_group();
+    c.sync->cfra->preamble = 64;
+    EXPECT_FALSE(encode(c));
+    Reconfiguration r = samples::handover_reconfiguration();
+    r.key_update->ncc = 8;
+    EXPECT_FALSE(encode(r));
+    EXPECT_FALSE(encode(Reestablishment{0, 8}));
+    EXPECT_FALSE(encode(ReestablishmentRequest{1, 1008, 0, ReestablishmentCause::other_failure}));
+    SetupComplete sc{0, 1, {0x7e}, std::nullopt, 0x1000000, {}};
+    EXPECT_FALSE(encode(sc));
 }
 
 TEST(RrcMsg, GarbageAndTheWrongChannelAreErrorsNotCrashes) {

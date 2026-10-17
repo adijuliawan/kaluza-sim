@@ -33,7 +33,11 @@ void Upf::check(bool ok, const char* clause, const char* what, std::string detai
 }
 
 std::uint32_t Upf::open(ip::Addr ue, std::uint8_t qfi) {
-    const std::uint32_t teid = gtpu_.bind([this](const entity::gtpu::UserData& d, const ksim::Endpoint&) { on_ul(d.teid, d); });
+    const std::uint32_t teid = gtpu_.bind([this](const entity::gtpu::UserData& d, const ksim::Endpoint&) {
+        if (!d.end_marker) {   // a gNB's End Marker (UL forwarding's) is P3 R8's
+            on_ul(d.teid, d);
+        }
+    });
     tunnels_[teid] = Tunnel{ue, qfi, std::nullopt, {}, {}, {}};
     by_ue_[ue] = teid;
     return teid;

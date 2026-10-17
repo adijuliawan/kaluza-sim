@@ -14,7 +14,10 @@ extern "C" {
 #include "RRC_CellGroupConfig.h"
 #include "RRC_DL-CCCH-Message.h"
 #include "RRC_DL-DCCH-Message.h"
+#include "RRC_HandoverCommand.h"
+#include "RRC_HandoverPreparationInformation.h"
 #include "RRC_PCCH-Message.h"
+#include "RRC_RRCReconfiguration.h"
 #include "RRC_MIB.h"
 #include "RRC_MeasurementTimingConfiguration.h"
 #include "RRC_SIB1.h"
@@ -90,6 +93,7 @@ constexpr std::initializer_list<int> kT310{0, 50, 100, 200, 500, 1000, 2000};
 constexpr std::initializer_list<int> kN310{1, 2, 3, 4, 6, 8, 10, 20};
 constexpr std::initializer_list<int> kT311{1000, 3000, 5000, 10000, 15000, 20000, 30000};
 constexpr std::initializer_list<int> kN311{1, 2, 3, 4, 5, 6, 8, 10};
+constexpr std::initializer_list<int> kT304{50, 100, 150, 200, 500, 1000, 2000, 10000};
 constexpr std::initializer_list<int> kTReordering{0,   1,   2,   4,   5,   8,   10,   15,   20,   30,   40,   50,
                                                    60,  80,  100, 120, 140, 160, 180,  200,  220,  240,  260,  280,
                                                    300, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 2750, 3000};
@@ -253,6 +257,98 @@ json rlc_config(bool am) {
               {"dl-UM-RLC", {{"sn-FieldLength", "size12"}, {"t-Reassembly", "ms35"}}}}}};
 }
 
+/// locationAndBandwidth for a BWP of `prbs` PRBs from PRB 0 (TS 38.214 §5.1.2.2.2, N = 275).
+std::uint32_t riv(std::uint16_t prbs) {
+    const std::uint32_t l = prbs;
+    return l - 1 <= 275 / 2 ? 275 * (l - 1) : 275 * (275 - l + 1) + (275 - 1);
+}
+
+Result<json> sync_json(const ReconfigWithSync& r) {
+    const ServingCellCommon& c = r.cell;
+    if (c.pci > 1007 || c.ssb_arfcn > 3279165 || c.point_a > 3279165 || c.band < 1 || c.band > 1024 ||
+        (c.scs_khz != 15 && c.scs_khz != 30) || c.carrier_prbs < 1 || c.carrier_prbs > 275 || c.ss_pbch_power < -60 ||
+        c.ss_pbch_power > 50) {
+        return bad("RRC: a serving cell common field out of range");
+    }
+    const auto t304 = enum_of("ms", r.t304_ms, kT304);
+    if (!t304) {
+        return bad("RRC: a T304 value TS 38.331 does not list");
+    }
+    if (r.cfra && (r.cfra->ssb > 63 || r.cfra->preamble > 63)) {
+        return bad("RRC: a CFRA SSB or preamble outside 0..63");
+    }
+    const std::string scs = "kHz" + std::to_string(c.scs_khz);
+    const json carrier = json::array({{{"offsetToCarrier", 0}, {"subcarrierSpacing", scs}, {"carrierBandwidth", c.carrier_prbs}}});
+    const json bwp = {{"genericParameters", {{"locationAndBandwidth", riv(c.carrier_prbs)}, {"subcarrierSpacing", scs}}}};
+    json common = {
+        {"physCellId", c.pci},
+        {"downlinkConfigCommon",
+         {{"frequencyInfoDL",
+           {{"absoluteFrequencySSB", c.ssb_arfcn},
+            {"frequencyBandList", json::array({c.band})},
+            {"absoluteFrequencyPointA", c.point_a},
+            {"scs-SpecificCarrierList", carrier}}},
+          {"initialDownlinkBWP", bwp}}},
+        {"uplinkConfigCommon", {{"frequencyInfoUL", {{"scs-SpecificCarrierList", carrier}}}, {"initialUplinkBWP", bwp}, {"dummy", "infinity"}}},
+        {"ssb-PositionsInBurst", {{"mediumBitmap", bits(0x80, 8)}}},
+        {"ssb-periodicityServingCell", "ms20"},
+        {"dmrs-TypeA-Position", "pos2"},
+        {"ssbSubcarrierSpacing", scs},
+        {"tdd-UL-DL-ConfigurationCommon",
+         {{"referenceSubcarrierSpacing", scs},
+          {"pattern1", {{"dl-UL-TransmissionPeriodicity", "ms5"}, {"nrofDownlinkSlots", 7}, {"nrofDownlinkSymbols", 6},
+                        {"nrofUplinkSlots", 2}, {"nrofUplinkSymbols", 4}}}}},
+        {"ss-PBCH-BlockPower", c.ss_pbch_power}};
+    json out = {{"spCellConfigCommon", std::move(common)}, {"newUE-Identity", r.new_ue_id}, {"t304", *t304}};
+    if (r.cfra) {
+        const json generic = {{"prach-ConfigurationIndex", 159}, {"msg1-FDM", "one"}, {"msg1-FrequencyStart", 0},
+                              {"zeroCorrelationZoneConfig", 15}, {"preambleReceivedTargetPower", -110},
+                              {"preambleTransMax", "n7"}, {"powerRampingStep", "dB4"}, {"ra-ResponseWindow", "sl20"}};
+        out["rach-ConfigDedicated"] = {
+            {"uplink",
+             {{"cfra",
+               {{"occasions", {{"rach-ConfigGeneric", generic}, {"ssb-perRACH-Occasion", "one"}}},
+                {"resources", {{"ssb", {{"ssb-ResourceList", json::array({{{"ssb", r.cfra->ssb}, {"ra-PreambleIndex", r.cfra->preamble}}})},
+                                        {"ra-ssb-OccasionMaskIndex", 0}}}}}}}}}};
+    }
+    return out;
+}
+
+ReconfigWithSync read_sync(const json& j) {
+    ReconfigWithSync r;
+    r.new_ue_id = j.at("newUE-Identity").get<std::uint16_t>();
+    r.t304_ms = static_cast<std::uint16_t>(enum_value(j.at("t304")));
+    if (j.contains("spCellConfigCommon")) {
+        const json& c = j.at("spCellConfigCommon");
+        if (c.contains("physCellId")) {
+            r.cell.pci = c.at("physCellId").get<std::uint16_t>();
+        }
+        if (c.contains("downlinkConfigCommon") && c.at("downlinkConfigCommon").contains("frequencyInfoDL")) {
+            const json& f = c.at("downlinkConfigCommon").at("frequencyInfoDL");
+            if (f.contains("absoluteFrequencySSB")) {
+                r.cell.ssb_arfcn = f.at("absoluteFrequencySSB").get<std::uint32_t>();
+            }
+            r.cell.band = f.at("frequencyBandList").at(0).get<std::uint16_t>();
+            r.cell.point_a = f.at("absoluteFrequencyPointA").get<std::uint32_t>();
+            const json& sc = f.at("scs-SpecificCarrierList").at(0);
+            r.cell.scs_khz = static_cast<std::uint16_t>(enum_value(sc.at("subcarrierSpacing")));
+            r.cell.carrier_prbs = sc.at("carrierBandwidth").get<std::uint16_t>();
+        }
+        r.cell.ss_pbch_power = c.at("ss-PBCH-BlockPower").get<std::int8_t>();
+    }
+    if (j.contains("rach-ConfigDedicated")) {
+        auto [k, v] = arm(j.at("rach-ConfigDedicated"));
+        if (k == "uplink" && v->contains("cfra")) {
+            auto [rk, rv] = arm(v->at("cfra").at("resources"));
+            if (rk == "ssb") {
+                const json& e = rv->at("ssb-ResourceList").at(0);
+                r.cfra = Cfra{e.at("ssb").get<std::uint8_t>(), e.at("ra-PreambleIndex").get<std::uint8_t>()};
+            }
+        }
+    }
+    return r;
+}
+
 Result<json> cell_group_json(const CellGroup& c) {
     if (c.id > 3) {
         return bad("RRC: a cell group identity outside 0..3");
@@ -272,6 +368,13 @@ Result<json> cell_group_json(const CellGroup& c) {
     }
     if (!c.release_lcids.empty()) {
         out["rlc-BearerToReleaseList"] = c.release_lcids;
+    }
+    if (c.sync) {
+        auto rws = sync_json(*c.sync);
+        if (!rws) {
+            return rws.error();
+        }
+        out["spCellConfig"] = {{"reconfigurationWithSync", std::move(*rws)}};
     }
     return out;
 }
@@ -297,6 +400,9 @@ CellGroup read_cell_group(const json& j) {
     if (j.contains("rlc-BearerToReleaseList")) {
         c.release_lcids = j.at("rlc-BearerToReleaseList").get<std::vector<std::uint8_t>>();
     }
+    if (j.contains("spCellConfig") && j.at("spCellConfig").contains("reconfigurationWithSync")) {
+        c.sync = read_sync(j.at("spCellConfig").at("reconfigurationWithSync"));
+    }
     return c;
 }
 
@@ -304,6 +410,13 @@ CellGroup read_cell_group(const json& j) {
 constexpr std::array<const char*, 10> kCauses{"emergency",     "highPriorityAccess", "mt-Access",   "mo-Signalling",
                                               "mo-Data",       "mo-VoiceCall",       "mo-VideoCall", "mo-SMS",
                                               "mps-PriorityAccess", "mcs-PriorityAccess"};
+
+constexpr std::array<const char*, 3> kReestCauses{"reconfigurationFailure", "handoverFailure", "otherFailure"};
+
+/// RRCReconfiguration's value (rrc-TransactionIdentifier and criticalExtensions), as the
+/// DL-DCCH message and the inter-node containers carry it.
+Result<json> reconfiguration_value(const Reconfiguration& m);
+Result<Reconfiguration> read_reconfiguration(const json& v);
 
 } // namespace
 
@@ -546,6 +659,54 @@ Result<Bytes> encode(const SetupRequest& r) {
     return to_uper(asn_DEF_RRC_UL_CCCH_Message, c1("rrcSetupRequest", {{"rrcSetupRequest", ies}}));
 }
 
+Result<Bytes> encode(const ReestablishmentRequest& r) {
+    if (r.pci > 1007) {
+        return bad("RRC: a physical cell identity outside 0..1007");
+    }
+    const json ies = {{"ue-Identity", {{"c-RNTI", r.c_rnti}, {"physCellId", r.pci}, {"shortMAC-I", bits(r.short_mac_i, 16)}}},
+                      {"reestablishmentCause", kReestCauses.at(static_cast<std::size_t>(r.cause))},
+                      {"spare", bits(0, 1)}};
+    return to_uper(asn_DEF_RRC_UL_CCCH_Message,
+                   c1("rrcReestablishmentRequest", {{"rrcReestablishmentRequest", ies}}));
+}
+
+Result<UlCcch> decode_ul_ccch_any(ByteView in) {
+    auto j = from_uper(asn_DEF_RRC_UL_CCCH_Message, in);
+    if (!j) {
+        return j.error();
+    }
+    auto k = guarded([&]() -> Result<std::string> { return arm(j->at("message").at("c1")).first; });
+    if (!k) {
+        return k.error();
+    }
+    if (*k == "rrcSetupRequest") {
+        auto s = decode_ul_ccch(in);
+        if (!s) {
+            return s.error();
+        }
+        return UlCcch{*s};
+    }
+    return guarded([&]() -> Result<UlCcch> {
+        auto [ak, v] = arm(j->at("message").at("c1"));
+        if (ak != "rrcReestablishmentRequest") {
+            return Error{Errc::unsupported, 0, "RRC: a UL-CCCH message the sim does not read"};
+        }
+        const json& ies = v->at("rrcReestablishmentRequest");
+        const json& id = ies.at("ue-Identity");
+        ReestablishmentRequest r;
+        r.c_rnti = id.at("c-RNTI").get<std::uint16_t>();
+        r.pci = id.at("physCellId").get<std::uint16_t>();
+        r.short_mac_i = static_cast<std::uint16_t>(read_bits(id.at("shortMAC-I"), 16));
+        const std::string cause = ies.at("reestablishmentCause").get<std::string>();
+        const auto it = std::find(kReestCauses.begin(), kReestCauses.end(), cause);
+        if (it == kReestCauses.end()) {
+            return Error{Errc::unsupported, 0, "RRC: a spare re-establishment cause"};
+        }
+        r.cause = static_cast<ReestablishmentCause>(it - kReestCauses.begin());
+        return UlCcch{r};
+    });
+}
+
 Result<SetupRequest> decode_ul_ccch(ByteView in) {
     auto j = from_uper(asn_DEF_RRC_UL_CCCH_Message, in);
     if (!j) {
@@ -641,9 +802,11 @@ Result<Bytes> encode(const SecurityModeCommand& m) {
                       transaction(m.tid, "securityModeCommand", {{"securityConfigSMC", {{"securityAlgorithmConfig", alg}}}})));
 }
 
-Result<Bytes> encode(const Reconfiguration& m) {
-    if (bad_tid(m.tid) || m.nas.size() > 29) {
-        return bad("RRC: a transaction identifier out of range, or more than maxDRB NAS messages");
+namespace {
+
+Result<json> reconfiguration_value(const Reconfiguration& m) {
+    if (bad_tid(m.tid) || m.nas.size() > 29 || (m.key_update && m.key_update->ncc > 7)) {
+        return bad("RRC: a transaction identifier or NCC out of range, or more than maxDRB NAS messages");
     }
     json ies = json::object();
     if (m.bearers) {
@@ -653,7 +816,7 @@ Result<Bytes> encode(const Reconfiguration& m) {
         }
         ies["radioBearerConfig"] = *rb;
     }
-    if (m.cell_group || !m.nas.empty()) {
+    if (m.cell_group || !m.nas.empty() || m.key_update) {
         json ext = json::object();
         if (m.cell_group) {
             auto cg = encode(*m.cell_group);
@@ -669,9 +832,71 @@ Result<Bytes> encode(const Reconfiguration& m) {
             }
             ext["dedicatedNAS-MessageList"] = l;
         }
+        if (m.key_update) {
+            ext["masterKeyUpdate"] = {{"keySetChangeIndicator", m.key_update->key_set_change},
+                                      {"nextHopChainingCount", m.key_update->ncc}};
+        }
         ies["nonCriticalExtension"] = ext;
     }
-    return to_uper(asn_DEF_RRC_DL_DCCH_Message, c1("rrcReconfiguration", transaction(m.tid, "rrcReconfiguration", ies)));
+    return transaction(m.tid, "rrcReconfiguration", ies);
+}
+
+Result<Reconfiguration> read_reconfiguration(const json& v) {
+    Reconfiguration r;
+    r.tid = v.at("rrc-TransactionIdentifier").get<std::uint8_t>();
+    auto [ck, ies] = arm(v.at("criticalExtensions"));
+    if (ck != "rrcReconfiguration") {
+        return Error{Errc::unsupported, 0, "RRC: an RRCReconfiguration's future critical extension"};
+    }
+    if (ies->contains("radioBearerConfig")) {
+        r.bearers = read_bearers(ies->at("radioBearerConfig"));
+    }
+    if (ies->contains("nonCriticalExtension")) {
+        const json& ext = ies->at("nonCriticalExtension");
+        if (ext.contains("masterCellGroup")) {
+            auto cg = decode_cell_group(read_octets(ext.at("masterCellGroup")));
+            if (!cg) {
+                return cg.error();
+            }
+            r.cell_group = std::move(*cg);
+        }
+        if (ext.contains("dedicatedNAS-MessageList")) {
+            for (const auto& n : ext.at("dedicatedNAS-MessageList")) {
+                r.nas.push_back(read_octets(n));
+            }
+        }
+        if (ext.contains("masterKeyUpdate")) {
+            const json& k = ext.at("masterKeyUpdate");
+            r.key_update = KeyUpdate{k.at("keySetChangeIndicator").get<bool>(), k.at("nextHopChainingCount").get<std::uint8_t>()};
+        }
+    }
+    return r;
+}
+
+} // namespace
+
+Result<Bytes> encode(const Reconfiguration& m) {
+    auto v = reconfiguration_value(m);
+    if (!v) {
+        return v.error();
+    }
+    return to_uper(asn_DEF_RRC_DL_DCCH_Message, c1("rrcReconfiguration", std::move(*v)));
+}
+
+Result<Bytes> reconfiguration_ie(const Reconfiguration& m) {
+    auto v = reconfiguration_value(m);
+    if (!v) {
+        return v.error();
+    }
+    return to_uper(asn_DEF_RRC_RRCReconfiguration, *v);
+}
+
+Result<Reconfiguration> decode_reconfiguration_ie(ByteView in) {
+    auto j = from_uper(asn_DEF_RRC_RRCReconfiguration, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<Reconfiguration> { return read_reconfiguration(*j); });
 }
 
 Result<Bytes> encode(const Release& m) {
@@ -689,6 +914,14 @@ Result<Bytes> encode(const CapabilityEnquiry& m) {
                    c1("ueCapabilityEnquiry",
                       transaction(m.tid, "ueCapabilityEnquiry",
                                   {{"ue-CapabilityRAT-RequestList", json::array({{{"rat-Type", "nr"}}})}})));
+}
+
+Result<Bytes> encode(const Reestablishment& m) {
+    if (bad_tid(m.tid) || m.ncc > 7) {
+        return bad("RRC: a transaction identifier or NCC out of range");
+    }
+    return to_uper(asn_DEF_RRC_DL_DCCH_Message,
+                   c1("rrcReestablishment", transaction(m.tid, "rrcReestablishment", {{"nextHopChainingCount", m.ncc}})));
 }
 
 Result<Bytes> encode(const DlInformationTransfer& m) {
@@ -720,27 +953,14 @@ Result<DlDcch> decode_dl_dcch(ByteView in) {
             return DlDcch{s};
         }
         if (k == "rrcReconfiguration" && ck == k) {
-            Reconfiguration r;
-            r.tid = tid;
-            if (ies->contains("radioBearerConfig")) {
-                r.bearers = read_bearers(ies->at("radioBearerConfig"));
+            auto r = read_reconfiguration(*v);
+            if (!r) {
+                return r.error();
             }
-            if (ies->contains("nonCriticalExtension")) {
-                const json& ext = ies->at("nonCriticalExtension");
-                if (ext.contains("masterCellGroup")) {
-                    auto cg = decode_cell_group(read_octets(ext.at("masterCellGroup")));
-                    if (!cg) {
-                        return cg.error();
-                    }
-                    r.cell_group = std::move(*cg);
-                }
-                if (ext.contains("dedicatedNAS-MessageList")) {
-                    for (const auto& n : ext.at("dedicatedNAS-MessageList")) {
-                        r.nas.push_back(read_octets(n));
-                    }
-                }
-            }
-            return DlDcch{std::move(r)};
+            return DlDcch{std::move(*r)};
+        }
+        if (k == "rrcReestablishment" && ck == k) {
+            return DlDcch{Reestablishment{tid, ies->at("nextHopChainingCount").get<std::uint8_t>()}};
         }
         if (k == "rrcRelease" && ck == k) {
             return DlDcch{Release{tid}};
@@ -767,7 +987,26 @@ Result<Bytes> encode(const SetupComplete& m) {
         (m.s_tmsi_part2 && *m.s_tmsi_part2 >> 9 != 0)) {
         return bad("RRC: an RRCSetupComplete field out of range");
     }
-    json ies = {{"selectedPLMN-Identity", m.selected_plmn}, {"dedicatedNAS-Message", hex(m.nas)}};
+    if (m.nssai.size() > 8 || (m.registered_amf && *m.registered_amf >> 24 != 0) ||
+        std::any_of(m.nssai.begin(), m.nssai.end(), [](const Snssai& n) { return n.sd && *n.sd >> 24 != 0; })) {
+        return bad("RRC: an RRCSetupComplete AMF identifier or S-NSSAI out of range");
+    }
+    json ies = {{"selectedPLMN-Identity", m.selected_plmn}};
+    if (m.registered_amf) {
+        ies["registeredAMF"] = {{"amf-Identifier", bits(*m.registered_amf, 24)}};
+    }
+    if (!m.nssai.empty()) {
+        json l = json::array();
+        for (const Snssai& n : m.nssai) {
+            if (n.sd) {
+                l.push_back({{"sst-SD", bits((static_cast<std::uint64_t>(n.sst) << 24) | *n.sd, 32)}});
+            } else {
+                l.push_back({{"sst", bits(n.sst, 8)}});
+            }
+        }
+        ies["s-NSSAI-List"] = l;
+    }
+    ies["dedicatedNAS-Message"] = hex(m.nas);
     if (m.s_tmsi_part2) {
         ies["ng-5G-S-TMSI-Value"] = {{"ng-5G-S-TMSI-Part2", bits(*m.s_tmsi_part2, 9)}};
     }
@@ -808,6 +1047,14 @@ Result<Bytes> encode(const CapabilityInformation& m) {
                       transaction(m.tid, "ueCapabilityInformation", {{"ue-CapabilityRAT-ContainerList", list}})));
 }
 
+Result<Bytes> encode(const ReestablishmentComplete& m) {
+    if (bad_tid(m.tid)) {
+        return bad("RRC: a transaction identifier outside 0..3");
+    }
+    return to_uper(asn_DEF_RRC_UL_DCCH_Message,
+                   c1("rrcReestablishmentComplete", transaction(m.tid, "rrcReestablishmentComplete", json::object())));
+}
+
 Result<Bytes> encode(const UlInformationTransfer& m) {
     if (m.nas.empty()) {
         return bad("RRC: no NAS message");
@@ -838,6 +1085,20 @@ Result<UlDcch> decode_ul_dcch(ByteView in) {
             s.tid = tid;
             s.selected_plmn = ies->at("selectedPLMN-Identity").get<std::uint8_t>();
             s.nas = read_octets(ies->at("dedicatedNAS-Message"));
+            if (ies->contains("registeredAMF")) {
+                s.registered_amf = static_cast<std::uint32_t>(read_bits(ies->at("registeredAMF").at("amf-Identifier"), 24));
+            }
+            if (ies->contains("s-NSSAI-List")) {
+                for (const auto& e : ies->at("s-NSSAI-List")) {
+                    auto [nk, nv] = arm(e);
+                    if (nk == "sst") {
+                        s.nssai.push_back(Snssai{static_cast<std::uint8_t>(read_bits(*nv, 8)), std::nullopt});
+                    } else {
+                        const std::uint64_t x = read_bits(*nv, 32);
+                        s.nssai.push_back(Snssai{static_cast<std::uint8_t>(x >> 24), static_cast<std::uint32_t>(x & 0xFFFFFF)});
+                    }
+                }
+            }
             if (ies->contains("ng-5G-S-TMSI-Value")) {
                 auto [tk, tv] = arm(ies->at("ng-5G-S-TMSI-Value"));
                 if (tk == "ng-5G-S-TMSI-Part2") {
@@ -855,6 +1116,9 @@ Result<UlDcch> decode_ul_dcch(ByteView in) {
         if (k == "rrcReconfigurationComplete" && ck == k) {
             return UlDcch{ReconfigurationComplete{tid}};
         }
+        if (k == "rrcReestablishmentComplete" && ck == k) {
+            return UlDcch{ReestablishmentComplete{tid}};
+        }
         if (k == "ueCapabilityInformation" && ck == k) {
             CapabilityInformation c;
             c.tid = tid;
@@ -869,6 +1133,93 @@ Result<UlDcch> decode_ul_dcch(ByteView in) {
         }
         return Error{Errc::unsupported, 0, "RRC: a UL-DCCH message P1 does not read"};
     });
+}
+
+// ---- inter-node containers -------------------------------------------------------------------------
+
+Result<Bytes> encode(const HandoverPreparation& m) {
+    if (m.nr_capability.empty() || (m.reestablishment && m.reestablishment->first > 1007)) {
+        return bad("RRC: a HandoverPreparationInformation with no capability or a PCI out of range");
+    }
+    json ies = {{"ue-CapabilityRAT-List",
+                 json::array({{{"rat-Type", "nr"}, {"ue-CapabilityRAT-Container", hex(m.nr_capability)}}})}};
+    if (m.source) {
+        auto rc = reconfiguration_ie(*m.source);
+        if (!rc) {
+            return rc.error();
+        }
+        ies["sourceConfig"] = {{"rrcReconfiguration", hex(*rc)}};
+    }
+    if (m.reestablishment) {
+        ies["as-Context"] = {{"reestablishmentInfo", {{"sourcePhysCellId", m.reestablishment->first},
+                                                      {"targetCellShortMAC-I", bits(m.reestablishment->second, 16)}}}};
+    }
+    return to_uper(asn_DEF_RRC_HandoverPreparationInformation,
+                   {{"criticalExtensions", {{"c1", {{"handoverPreparationInformation", ies}}}}}});
+}
+
+Result<HandoverPreparation> decode_handover_preparation(ByteView in) {
+    auto j = from_uper(asn_DEF_RRC_HandoverPreparationInformation, in);
+    if (!j) {
+        return j.error();
+    }
+    return guarded([&]() -> Result<HandoverPreparation> {
+        auto [ck, c1v] = arm(j->at("criticalExtensions"));
+        if (ck != "c1") {
+            return Error{Errc::unsupported, 0, "RRC: a HandoverPreparationInformation's future critical extension"};
+        }
+        auto [k, ies] = arm(*c1v);
+        if (k != "handoverPreparationInformation") {
+            return Error{Errc::unsupported, 0, "RRC: a spare HandoverPreparationInformation arm"};
+        }
+        HandoverPreparation h;
+        for (const auto& e : ies->at("ue-CapabilityRAT-List")) {
+            if (e.at("rat-Type").get<std::string>() == "nr") {
+                h.nr_capability = read_octets(e.at("ue-CapabilityRAT-Container"));
+            }
+        }
+        if (ies->contains("sourceConfig")) {
+            auto r = decode_reconfiguration_ie(read_octets(ies->at("sourceConfig").at("rrcReconfiguration")));
+            if (!r) {
+                return r.error();
+            }
+            h.source = std::move(*r);
+        }
+        if (ies->contains("as-Context") && ies->at("as-Context").contains("reestablishmentInfo")) {
+            const json& ri = ies->at("as-Context").at("reestablishmentInfo");
+            h.reestablishment = {ri.at("sourcePhysCellId").get<std::uint16_t>(),
+                                 static_cast<std::uint16_t>(read_bits(ri.at("targetCellShortMAC-I"), 16))};
+        }
+        return h;
+    });
+}
+
+Result<Bytes> encode_handover_command(const Reconfiguration& m) {
+    auto rc = reconfiguration_ie(m);
+    if (!rc) {
+        return rc.error();
+    }
+    return to_uper(asn_DEF_RRC_HandoverCommand,
+                   {{"criticalExtensions", {{"c1", {{"handoverCommand", {{"handoverCommandMessage", hex(*rc)}}}}}}}});
+}
+
+Result<Reconfiguration> decode_handover_command(ByteView in) {
+    auto j = from_uper(asn_DEF_RRC_HandoverCommand, in);
+    if (!j) {
+        return j.error();
+    }
+    auto msg = guarded([&]() -> Result<Bytes> {
+        auto [ck, c1v] = arm(j->at("criticalExtensions"));
+        auto [k, ies] = arm(*c1v);
+        if (ck != "c1" || k != "handoverCommand") {
+            return Error{Errc::unsupported, 0, "RRC: a HandoverCommand arm the sim does not read"};
+        }
+        return read_octets(ies->at("handoverCommandMessage"));
+    });
+    if (!msg) {
+        return msg.error();
+    }
+    return decode_reconfiguration_ie(*msg);
 }
 
 // ---- capabilities and JER -----------------------------------------------------------------------
@@ -964,6 +1315,12 @@ Result<std::string> to_jer(std::string_view channel, ByteView in) {
         td = &asn_DEF_RRC_CellGroupConfig;
     } else if (channel == "UE-NR-Capability") {
         td = &asn_DEF_RRC_UE_NR_Capability;
+    } else if (channel == "RRCReconfiguration") {
+        td = &asn_DEF_RRC_RRCReconfiguration;
+    } else if (channel == "HandoverPreparationInformation") {
+        td = &asn_DEF_RRC_HandoverPreparationInformation;
+    } else if (channel == "HandoverCommand") {
+        td = &asn_DEF_RRC_HandoverCommand;
     } else {
         return bad("RRC: an unknown channel");
     }

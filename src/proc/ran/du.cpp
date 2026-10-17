@@ -449,7 +449,7 @@ std::vector<f1ap::DrbSetup> Du::drbs_change(Ue& ue, const std::vector<f1ap::DrbT
         const std::uint32_t du_ue = ue.du_ue;
         const std::uint8_t drb_id = drb.id;
         drb.dl_teid = f1u_->bind([this, alive = alive_, du_ue, drb_id](const entity::gtpu::UserData& u, const ksim::Endpoint&) {
-            if (*alive) {
+            if (*alive && !u.end_marker) {   // F1-U carries none (TS 38.425); a stray one is dropped
                 on_dl_user(du_ue, drb_id, u);
             }
         });
@@ -667,7 +667,7 @@ void Du::handle(const f1ap::UeContextSetupRequest& m) {
     for (std::uint8_t s : added) {
         setup.emplace_back(s, s);
     }
-    send_f1(f1ap::UeContextSetupResponse{m.cu_ue, ue->du_ue, std::move(*cg), setup, std::move(drbs)}, true);
+    send_f1(f1ap::UeContextSetupResponse{m.cu_ue, ue->du_ue, std::move(*cg), setup, std::move(drbs), std::nullopt}, true);
     if (m.rrc) {
         dl_sdu(*ue, 1, *m.rrc);
     }

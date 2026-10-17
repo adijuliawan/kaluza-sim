@@ -68,5 +68,9 @@ target_link_libraries(unit_f1ap_msg PRIVATE ksim::codec_f1ap ksim::codec_rrc ksi
 target_compile_definitions(unit_f1ap_msg PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 gtest_discover_tests(unit_f1ap_msg DISCOVERY_MODE PRE_TEST)
 
+add_executable(unit_xnap_msg xnap_msg_test.cpp)
+target_link_libraries(unit_xnap_msg PRIVATE ksim::codec_xnap ksim::codec_rrc ksim::warnings GTest::gtest_main)
+gtest_discover_tests(unit_xnap_msg DISCOVERY_MODE PRE_TEST)
+
 add_executable(msg_builders_dump msg_builders_dump.cpp)
-target_link_libraries(msg_builders_dump PRIVATE ksim::codec_rrc ksim::codec_ngap ksim::codec_f1ap ksim::codec_e1ap ksim::warnings)
+target_link_libraries(msg_builders_dump PRIVATE ksim::codec_rrc ksim::codec_ngap ksim::codec_f1ap ksim::codec_e1ap ksim::codec_xnap ksim::warnings)

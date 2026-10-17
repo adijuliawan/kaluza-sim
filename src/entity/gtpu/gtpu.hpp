@@ -7,7 +7,10 @@
 // gNB, each with the QFI) and for F1-U (NR-U DL USER DATA with its sequence
 // number from the CU-UP; plain G-PDUs from the DU). It answers Echo Request
 // (7.2.2), sends Error Indication for a G-PDU to a TEID it does not know
-// (7.3.1) and reports one it receives. Passive (R4): the datagram port and the
+// (7.3.1) and reports one it receives. From P3 R1 it delivers an End Marker
+// (7.3.2) to the tunnel it names, as a UserData with end_marker set and no
+// payload, and carries a forwarded packet's PDCP SN in the Long PDCP PDU Number
+// extension header (5.2.2.2.2; KS-GTPU-G1). Passive (R4): the datagram port and the
 // timer service are injected.
 
 #pragma once
@@ -45,6 +48,11 @@ struct UserData {
     bool report_polling = false;          // the DL USER DATA's Report Polling flag (P2 Q4)
     std::optional<DeliveryStatus> ddds;   // an NR-U DL DATA DELIVERY STATUS frame (P2 Q4)
     bool rqi = false;                     // the DL PDU SESSION INFORMATION's RQI (TS 38.415 5.5.3.4; P2 Q11)
+    // P3 R1: an End Marker (TS 29.281 7.3.2: the last packet on the old path), and the
+    // PDCP SN of a packet forwarded at handover (Long PDCP PDU Number, 18 bits; a
+    // received PDCP PDU Number, 16 bits, is read into it too).
+    bool end_marker = false;
+    std::optional<std::uint32_t> pdcp_sn;
 
     /// A G-PDU with no frame (an NR-U UL T-PDU), with a PDU SESSION INFORMATION
     /// frame, or with a DL USER DATA frame.
@@ -65,6 +73,12 @@ struct UserData {
         d.ul_qfi = qfi;
         return d;
     }
+    static UserData end_mark(std::uint32_t teid) {
+        UserData d;
+        d.teid = teid;
+        d.end_marker = true;
+        return d;
+    }
     static UserData nru(std::uint32_t teid, std::uint32_t sn, Bytes payload) {
         UserData d = plain(teid, std::move(payload));
         d.nru_sn = sn;
@@ -73,6 +87,7 @@ struct UserData {
 };
 
 Result<Bytes> encode(const UserData& d);
+/// A G-PDU, or an End Marker (end_marker set).
 Result<UserData> decode_gpdu(ByteView in);
 
 struct Stats {
@@ -83,6 +98,7 @@ struct Stats {
     std::uint64_t echo_requests = 0;
     std::uint64_t echo_responses = 0;
     std::uint64_t malformed = 0;
+    std::uint64_t end_markers = 0;         // P3 R1: received for a bound tunnel
 };
 
 class Endpoint {

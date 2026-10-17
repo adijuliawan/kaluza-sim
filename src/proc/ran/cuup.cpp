@@ -144,7 +144,8 @@ Result<e1ap::SessionSetup> CuUp::setup_session(Context& c, const e1ap::SessionTo
     sess.integrity = s.security.integrity == "required" && c.nia.has_value() && !KSIM_MUTANT("up_integrity_ignored");
     sess.ciphering = s.security.confidentiality != "not-needed" || KSIM_MUTANT("confidentiality_forced");
     sess.ng_dl_teid = n3_.bind([this, alive = alive_, up_id, psi](const entity::gtpu::UserData& d, const ksim::Endpoint&) {
-        if (*alive) {
+        // An End Marker on N3 is the path switch's (TS 29.281 7.3.2); handled from P3 R8.
+        if (*alive && !d.end_marker) {
             on_n3(up_id, psi, d);
         }
     });
@@ -276,7 +277,7 @@ Result<e1ap::DrbSetup> CuUp::add_drb(Context& c, Session& sess, const e1ap::DrbT
         drb.pdcp->set_integrity(sess.integrity, sess.integrity);
         drb.pdcp->set_ciphering(sess.ciphering, sess.ciphering);
         drb.f1u_ul_teid = f1u_.bind([this, alive = alive_, up_id, psi, drb_id](const entity::gtpu::UserData& u, const ksim::Endpoint&) {
-            if (*alive) {
+            if (*alive && !u.end_marker) {
                 on_f1u(up_id, psi, drb_id, u);
             }
         });
@@ -447,7 +448,8 @@ void CuUp::handle(const e1ap::BearerContextModificationRequest& m) {
             continue;
         }
         Session& sess = it->second;
-        e1ap::SessionModified done{s.psi, {}, {}};
+        e1ap::SessionModified done;
+        done.psi = s.psi;
         if (s.dl_ambr) {
             sess.dl_ambr = s.dl_ambr;
         }

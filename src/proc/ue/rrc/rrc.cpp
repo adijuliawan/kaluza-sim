@@ -480,6 +480,11 @@ void UeRrc::on_dcch(std::uint8_t srb, Bytes sdu) {
                            upper_.nas(m.nas);
                        }
                    },
+                   [this](const rrc::Reestablishment&) {
+                       // Re-establishment comes with P3 R5; until then an RRCReestablishment
+                       // the UE did not ask for is ignored (TS 38.331 §5.3.7 starts at the UE).
+                       events_.emit("rrc.unexpected", cfg_.id, {{"message", "RRCReestablishment"}});
+                   },
                },
                *d);
 }

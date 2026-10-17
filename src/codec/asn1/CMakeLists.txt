@@ -85,3 +85,10 @@ add_library(ksim::codec_f1ap ALIAS ksim_codec_f1ap)
 target_include_directories(ksim_codec_f1ap PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_codec_f1ap PUBLIC ksim::platform PRIVATE ksim_codec_jer ksim::asn1_f1ap ksim::warnings)
 ksim_layer(ksim_codec_f1ap codec)
+
+# Typed XnAP builders and readers (P3 R1), the same route.
+add_library(ksim_codec_xnap STATIC msg/xnap.cpp)
+add_library(ksim::codec_xnap ALIAS ksim_codec_xnap)
+target_include_directories(ksim_codec_xnap PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(ksim_codec_xnap PUBLIC ksim::platform PRIVATE ksim_codec_jer ksim::asn1_xnap ksim::warnings)
+ksim_layer(ksim_codec_xnap codec)

@@ -124,6 +124,36 @@ TEST(Gtpu, TunnelsDeliverByTeidAndAnUnknownTeidGetsAnErrorIndication) {
     EXPECT_EQ(p.b.stats().unknown_teid, 2u);
 }
 
+// P3 R1 (TS 29.281 7.3.2, 5.2.2.2.2): an End Marker reaches the tunnel it names with no
+// T-PDU, one for an unknown TEID is dropped without an Error Indication, and a forwarded
+// packet carries its 18-bit PDCP SN beside its frame.
+TEST(Gtpu, Ts29281_7_3_2_AnEndMarkerReachesItsTunnelAndThePdcpSnRidesAlong) {
+    Pair p;
+    std::vector<UserData> got;
+    const std::uint32_t teid = p.b.bind([&](const UserData& d, const ksim::Endpoint&) { got.push_back(d); });
+    UserData fwd = UserData::dl_psc(teid, 5, Bytes{0x45, 0x00});
+    fwd.pdcp_sn = 0x2ABCD;
+    ASSERT_TRUE(p.a.send(p.b.local(), fwd));
+    ASSERT_TRUE(p.a.send(p.b.local(), UserData::end_mark(teid)));
+    ASSERT_TRUE(p.a.send(p.b.local(), UserData::end_mark(teid + 7)));   // nobody there
+    p.loop.run_for(10);
+    ASSERT_EQ(got.size(), 2u);
+    EXPECT_EQ(got[0].pdcp_sn, 0x2ABCDu);
+    EXPECT_EQ(got[0].dl_qfi, 5);
+    EXPECT_FALSE(got[0].end_marker);
+    EXPECT_TRUE(got[1].end_marker);
+    EXPECT_TRUE(got[1].payload.empty());
+    EXPECT_EQ(p.b.stats().end_markers, 1u);
+    EXPECT_EQ(p.b.stats().unknown_teid, 0u);
+    EXPECT_EQ(p.a.stats().error_indications, 0u);
+    UserData bad = UserData::end_mark(teid);
+    bad.payload = Bytes{1};
+    EXPECT_FALSE(encode(bad));
+    UserData big = UserData::plain(teid, Bytes{1});
+    big.pdcp_sn = 1U << 18;
+    EXPECT_FALSE(encode(big));
+}
+
 TEST(Gtpu, EchoIsAnswered) {
     Pair p;
     int answers = 0;

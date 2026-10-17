@@ -22,7 +22,7 @@ add_library(ksim_proc STATIC
 add_library(ksim::proc ALIAS ksim_proc)
 target_include_directories(ksim_proc PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_proc
-    PUBLIC ksim::platform ksim::codec_nas ksim::codec_rrc ksim::codec_ngap ksim::codec_f1ap ksim::codec_e1ap ksim::codec_up ksim::codec_air ksim::entity
+    PUBLIC ksim::platform ksim::codec_nas ksim::codec_rrc ksim::codec_ngap ksim::codec_f1ap ksim::codec_e1ap ksim::codec_xnap ksim::codec_up ksim::codec_air ksim::entity
            ksim::crypto ksim::uicc
     PRIVATE ksim::warnings)
 ksim_layer(ksim_proc proc)

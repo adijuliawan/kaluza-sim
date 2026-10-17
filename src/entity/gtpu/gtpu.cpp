@@ -56,8 +56,11 @@ Result<Bytes> ddds_frame(const DeliveryStatus& s) {
 } // namespace
 
 Result<Bytes> encode(const UserData& d) {
+    if ((d.pdcp_sn && *d.pdcp_sn >= (1U << 18)) || (d.end_marker && !d.payload.empty())) {
+        return make_error(Errc::invalid_argument, 0, "GTP-U: a PDCP SN over 18 bits, or an End Marker with a T-PDU");
+    }
     codec::Pdu p;
-    p.type = static_cast<std::uint8_t>(codec::MsgType::g_pdu);
+    p.type = static_cast<std::uint8_t>(d.end_marker ? codec::MsgType::end_marker : codec::MsgType::g_pdu);
     p.teid = d.teid;
     p.payload = d.payload;
     std::optional<Result<Bytes>> ext;
@@ -83,6 +86,14 @@ Result<Bytes> encode(const UserData& d) {
         p.octet1 = 0x34;   // version 1, PT 1, E
         p.ext.push_back(codec::ExtHeader{ext_type, std::move(**ext)});
     }
+    if (d.pdcp_sn) {
+        // TS 29.281 5.2.2.2.2: six spare bits and the 18-bit PDCP PDU number, then three spare octets.
+        const std::uint32_t sn = *d.pdcp_sn;
+        p.octet1 = 0x34;
+        p.ext.push_back(codec::ExtHeader{codec::ext_long_pdcp_pdu_number,
+                                         Bytes{static_cast<std::uint8_t>((sn >> 16) & 0x03), static_cast<std::uint8_t>(sn >> 8),
+                                               static_cast<std::uint8_t>(sn), 0, 0, 0}});
+    }
     return codec::encode(p);
 }
 
@@ -91,14 +102,20 @@ Result<UserData> decode_gpdu(ByteView in) {
     if (!p) {
         return p.error();
     }
-    if (p->type != static_cast<std::uint8_t>(codec::MsgType::g_pdu)) {
-        return make_error(Errc::invalid_argument, 1, "GTP-U: not a G-PDU");
+    const bool end_marker = p->type == static_cast<std::uint8_t>(codec::MsgType::end_marker);
+    if (p->type != static_cast<std::uint8_t>(codec::MsgType::g_pdu) && !end_marker) {
+        return make_error(Errc::invalid_argument, 1, "GTP-U: not a G-PDU or an End Marker");
     }
     UserData d;
     d.teid = p->teid;
+    d.end_marker = end_marker;
     d.payload = std::move(p->payload);
     for (const auto& e : p->ext) {
-        if (e.type == codec::ext_pdu_session_container) {
+        if (e.type == codec::ext_long_pdcp_pdu_number && e.content.size() >= 3) {
+            d.pdcp_sn = ((std::uint32_t{e.content[0]} & 0x03) << 16) | (std::uint32_t{e.content[1]} << 8) | e.content[2];
+        } else if (e.type == codec::ext_pdcp_pdu_number && e.content.size() >= 2) {
+            d.pdcp_sn = (std::uint32_t{e.content[0]} << 8) | e.content[1];
+        } else if (e.type == codec::ext_pdu_session_container) {
             auto f = up::decode(up::Protocol::psc, e.content);
             if (!f) {
                 return f.error();
@@ -267,8 +284,24 @@ void Endpoint::on_datagram(ByteView in, const ksim::Endpoint& from) {
         }
         return;
     }
+    case codec::MsgType::end_marker: {
+        // TS 29.281 7.3.2: for the tunnel it names; one for a TEID this endpoint does not
+        // know is dropped (7.3.1 answers G-PDUs only).
+        auto d = decode_gpdu(in);
+        if (!d) {
+            ++stats_.malformed;
+            return;
+        }
+        auto it = tunnels_.find(d->teid);
+        if (it == tunnels_.end()) {
+            return;
+        }
+        ++stats_.end_markers;
+        it->second(*d, from);
+        return;
+    }
     default:
-        return;   // End Marker and the rest: not P1's
+        return;   // the rest: not the sim's
     }
 }
 

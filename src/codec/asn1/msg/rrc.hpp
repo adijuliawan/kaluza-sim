@@ -14,7 +14,13 @@
 // DLInformationTransfer (DL-DCCH), RRCSetupComplete, SecurityModeComplete,
 // SecurityModeFailure, RRCReconfigurationComplete, UECapabilityInformation
 // and ULInformationTransfer (UL-DCCH), CellGroupConfig (the RLC bearers only)
-// and a generic UE-NR-Capability.
+// and a generic UE-NR-Capability. P3 R1 adds mobility: the CellGroupConfig's
+// spCellConfig with reconfigurationWithSync (the target cell's common
+// configuration, the new C-RNTI, T304 and contention-free RA), masterKeyUpdate,
+// RRCReestablishmentRequest (UL-CCCH), RRCReestablishment (DL-DCCH),
+// RRCReestablishmentComplete (UL-DCCH), the registeredAMF and S-NSSAI list of
+// RRCSetupComplete, and the inter-node HandoverPreparationInformation and
+// HandoverCommand (TS 38.331 §11.2.2).
 
 #pragma once
 
@@ -140,10 +146,41 @@ struct RlcBearer {
     friend bool operator==(const RlcBearer&, const RlcBearer&) = default;
 };
 
+/// The target cell's ServingCellConfigCommon as a handover gives it (TS 38.331
+/// §6.3.2): what a UE needs to reach the cell. The ideal radio has no PHY, so the
+/// values only have to be consistent: an n78 carrier of `carrier_prbs` PRBs at
+/// `scs_khz`, its SSB at `ssb_arfcn`, a 5 ms TDD pattern (7 DL slots, 6 DL
+/// symbols, 2 UL slots, 4 UL symbols), one SSB in the burst.
+struct ServingCellCommon {
+    std::uint16_t pci = 0;                 // 0..1007
+    std::uint32_t ssb_arfcn = 632640;      // absoluteFrequencySSB, on the sync raster (as SsbTiming)
+    std::uint32_t point_a = 631656;        // absoluteFrequencyPointA
+    std::uint16_t band = 78;
+    std::uint16_t scs_khz = 30;            // 15 or 30
+    std::uint16_t carrier_prbs = 106;      // 1..275
+    std::int8_t ss_pbch_power = -16;       // dBm, -60..50
+    friend bool operator==(const ServingCellCommon&, const ServingCellCommon&) = default;
+};
+/// Contention-free random access on one SSB (TS 38.331 CFRA; TS 38.321 §5.1).
+struct Cfra {
+    std::uint8_t ssb = 0;                  // 0..63
+    std::uint8_t preamble = 63;            // ra-PreambleIndex 0..63
+    friend bool operator==(const Cfra&, const Cfra&) = default;
+};
+/// ReconfigurationWithSync (TS 38.331 §5.3.5.5.2): a handover's target.
+struct ReconfigWithSync {
+    ServingCellCommon cell;
+    std::uint16_t new_ue_id = 0;           // the target's C-RNTI
+    std::uint16_t t304_ms = 1000;          // 50, 100, 150, 200, 500, 1000, 2000, 10000
+    std::optional<Cfra> cfra;
+    friend bool operator==(const ReconfigWithSync&, const ReconfigWithSync&) = default;
+};
+
 struct CellGroup {
     std::uint8_t id = 0;
     std::vector<RlcBearer> bearers;
     std::vector<std::uint8_t> release_lcids;
+    std::optional<ReconfigWithSync> sync;  // P3 R1: spCellConfig.reconfigurationWithSync
     friend bool operator==(const CellGroup&, const CellGroup&) = default;
 };
 Result<Bytes> encode(const CellGroup& c);
@@ -163,8 +200,22 @@ struct SetupRequest {
     EstablishmentCause cause = EstablishmentCause::mo_signalling;
     friend bool operator==(const SetupRequest&, const SetupRequest&) = default;
 };
+enum class ReestablishmentCause : std::uint8_t { reconfiguration_failure, handover_failure, other_failure };
+/// RRCReestablishmentRequest (TS 38.331 §5.3.7.4): the UE's C-RNTI and PCI in the
+/// source cell and its shortMAC-I (VarShortMAC-Input over the source K_RRCint).
+struct ReestablishmentRequest {
+    std::uint16_t c_rnti = 0;
+    std::uint16_t pci = 0;                 // 0..1007
+    std::uint16_t short_mac_i = 0;         // 16 bits
+    ReestablishmentCause cause = ReestablishmentCause::other_failure;
+    friend bool operator==(const ReestablishmentRequest&, const ReestablishmentRequest&) = default;
+};
+using UlCcch = std::variant<SetupRequest, ReestablishmentRequest>;
 Result<Bytes> encode(const SetupRequest& r);
+Result<Bytes> encode(const ReestablishmentRequest& r);
+/// An RRCSetupRequest; an RRCReestablishmentRequest is an error here (decode_ul_ccch_any reads both).
 Result<SetupRequest> decode_ul_ccch(ByteView in);
+Result<UlCcch> decode_ul_ccch_any(ByteView in);
 
 // ---- DL-CCCH ---------------------------------------------------------------------------
 
@@ -191,11 +242,20 @@ struct SecurityModeCommand {
     std::uint8_t nia = 2;                  // 0..3
     friend bool operator==(const SecurityModeCommand&, const SecurityModeCommand&) = default;
 };
+/// MasterKeyUpdate (TS 38.331 §5.3.5.7): the key change at a handover or an
+/// intra-cell key refresh; keySetChangeIndicator false is K_gNB* from the current
+/// K_gNB or from NH (by the NCC), true a new K_AMF's.
+struct KeyUpdate {
+    bool key_set_change = false;
+    std::uint8_t ncc = 0;                  // 0..7
+    friend bool operator==(const KeyUpdate&, const KeyUpdate&) = default;
+};
 struct Reconfiguration {
     std::uint8_t tid = 0;
     std::optional<RadioBearers> bearers;
     std::optional<CellGroup> cell_group;   // masterCellGroup
     std::vector<Bytes> nas;                // dedicatedNAS-MessageList
+    std::optional<KeyUpdate> key_update;   // P3 R1: masterKeyUpdate
     friend bool operator==(const Reconfiguration&, const Reconfiguration&) = default;
 };
 struct Release {
@@ -211,22 +271,48 @@ struct DlInformationTransfer {
     Bytes nas;
     friend bool operator==(const DlInformationTransfer&, const DlInformationTransfer&) = default;
 };
-using DlDcch = std::variant<SecurityModeCommand, Reconfiguration, Release, CapabilityEnquiry, DlInformationTransfer>;
+/// RRCReestablishment (TS 38.331 §5.3.7.5): the NCC the UE derives K_gNB* with.
+struct Reestablishment {
+    std::uint8_t tid = 0;
+    std::uint8_t ncc = 0;                  // 0..7
+    friend bool operator==(const Reestablishment&, const Reestablishment&) = default;
+};
+using DlDcch = std::variant<SecurityModeCommand, Reconfiguration, Release, CapabilityEnquiry, DlInformationTransfer,
+                            Reestablishment>;
 Result<Bytes> encode(const SecurityModeCommand& m);
 Result<Bytes> encode(const Reconfiguration& m);
 Result<Bytes> encode(const Release& m);
 Result<Bytes> encode(const CapabilityEnquiry& m);
 Result<Bytes> encode(const DlInformationTransfer& m);
+Result<Bytes> encode(const Reestablishment& m);
 Result<DlDcch> decode_dl_dcch(ByteView in);
+/// The RRCReconfiguration alone (not a DL-DCCH-Message), as the inter-node
+/// containers carry it: AS-Config's rrcReconfiguration, HandoverCommand's message.
+Result<Bytes> reconfiguration_ie(const Reconfiguration& m);
+Result<Reconfiguration> decode_reconfiguration_ie(ByteView in);
 
 // ---- UL-DCCH ---------------------------------------------------------------------------
 
+struct Snssai {
+    std::uint8_t sst = 0;
+    std::optional<std::uint32_t> sd;       // 24 bits
+    friend bool operator==(const Snssai&, const Snssai&) = default;
+};
 struct SetupComplete {
     std::uint8_t tid = 0;
     std::uint8_t selected_plmn = 1;        // 1..12
     Bytes nas;
     std::optional<std::uint16_t> s_tmsi_part2;   // 9 bits, with a Part1 request
+    // P3 R1 (TS 38.331 §5.3.3.4): the AMF the UE is registered with (AMF Region ID,
+    // Set ID and Pointer, 24 bits, from its 5G-GUTI) and the NSSAI it asked for, so
+    // the gNB can select the AMF (NNSF).
+    std::optional<std::uint32_t> registered_amf;
+    std::vector<Snssai> nssai;             // up to 8
     friend bool operator==(const SetupComplete&, const SetupComplete&) = default;
+};
+struct ReestablishmentComplete {
+    std::uint8_t tid = 0;
+    friend bool operator==(const ReestablishmentComplete&, const ReestablishmentComplete&) = default;
 };
 struct SecurityModeComplete {
     std::uint8_t tid = 0;
@@ -250,14 +336,32 @@ struct UlInformationTransfer {
     friend bool operator==(const UlInformationTransfer&, const UlInformationTransfer&) = default;
 };
 using UlDcch = std::variant<SetupComplete, SecurityModeComplete, SecurityModeFailure, ReconfigurationComplete,
-                            CapabilityInformation, UlInformationTransfer>;
+                            CapabilityInformation, UlInformationTransfer, ReestablishmentComplete>;
 Result<Bytes> encode(const SetupComplete& m);
 Result<Bytes> encode(const SecurityModeComplete& m);
 Result<Bytes> encode(const SecurityModeFailure& m);
 Result<Bytes> encode(const ReconfigurationComplete& m);
 Result<Bytes> encode(const CapabilityInformation& m);
 Result<Bytes> encode(const UlInformationTransfer& m);
+Result<Bytes> encode(const ReestablishmentComplete& m);
 Result<UlDcch> decode_ul_dcch(ByteView in);
+
+// ---- inter-node containers (TS 38.331 §11.2.2) ------------------------------------------
+
+/// HandoverPreparationInformation: what a source gives a target (in F1AP's
+/// CU-to-DU RRC Information, XnAP's and NGAP's source-to-target containers).
+struct HandoverPreparation {
+    Bytes nr_capability;                   // UE-NR-Capability, as the UE sent it
+    std::optional<Reconfiguration> source; // AS-Config's rrcReconfiguration (the UE's current configuration)
+    // AS-Context's reestablishmentInfo: the source PCI and the target cell's shortMAC-I.
+    std::optional<std::pair<std::uint16_t, std::uint16_t>> reestablishment;
+    friend bool operator==(const HandoverPreparation&, const HandoverPreparation&) = default;
+};
+Result<Bytes> encode(const HandoverPreparation& m);
+Result<HandoverPreparation> decode_handover_preparation(ByteView in);
+/// HandoverCommand: the target's RRCReconfiguration back to the source.
+Result<Bytes> encode_handover_command(const Reconfiguration& m);
+Result<Reconfiguration> decode_handover_command(ByteView in);
 
 // ---- capabilities ------------------------------------------------------------------------
 
@@ -293,7 +397,8 @@ Result<Bytes> nr_capability_of(ByteView radio_access_capability);
 
 /// The message's JER (X.697 JSON) for logs and the oracle: `channel` is
 /// "BCCH-BCH", "BCCH-DL-SCH", "PCCH", "UL-CCCH", "DL-CCCH", "DL-DCCH",
-/// "UL-DCCH", "CellGroupConfig" or "UE-NR-Capability".
+/// "UL-DCCH", "CellGroupConfig", "UE-NR-Capability", and from P3 R1
+/// "RRCReconfiguration", "HandoverPreparationInformation" or "HandoverCommand".
 Result<std::string> to_jer(std::string_view channel, ByteView in);
 
 } // namespace ksim::rrc

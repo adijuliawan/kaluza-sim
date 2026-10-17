@@ -10,6 +10,7 @@
 #include "f1ap_samples.hpp"
 #include "ngap_samples.hpp"
 #include "rrc_samples.hpp"
+#include "xnap_samples.hpp"
 
 int main() {
     int bad = 0;
@@ -47,6 +48,15 @@ int main() {
             continue;
         }
         std::printf("e1ap\t%s\t%s\n", s.name.c_str(), ksim::to_hex(*b).c_str());
+    }
+    for (const auto& s : ksim::xnap::samples::all()) {
+        auto b = ksim::xnap::encode(s.pdu);
+        if (!b) {
+            std::fprintf(stderr, "xnap %s: %s\n", s.name.c_str(), b.error().what);
+            ++bad;
+            continue;
+        }
+        std::printf("xnap\t%s\t%s\n", s.name.c_str(), ksim::to_hex(*b).c_str());
     }
     return bad == 0 ? 0 : 1;
 }
