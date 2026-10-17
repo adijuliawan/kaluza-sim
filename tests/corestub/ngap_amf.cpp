@@ -121,6 +121,15 @@ std::vector<std::uint32_t> NgapAmf::gnb_tacs(std::uint32_t gnb_id) const {
     return {};
 }
 
+std::vector<std::pair<std::uint32_t, std::vector<std::uint32_t>>> NgapAmf::gnb_list() const {
+    std::vector<std::pair<std::uint32_t, std::vector<std::uint32_t>>> out;
+    out.reserve(gnbs_.size());
+    for (const auto& [link, g] : gnbs_) {
+        out.emplace_back(g.gnb_id, g.tacs);
+    }
+    return out;
+}
+
 void NgapAmf::set_sms_subscribed(const std::string& supi, bool on) { sms_sub_[supi] = on; }
 
 void NgapAmf::on_ng_event(LinkId link, LinkEvent e) {

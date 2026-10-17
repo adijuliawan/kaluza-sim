@@ -22,6 +22,10 @@
 //                                            # P2 Q11: gbr_budget_kbps: N (the cell's GFBR budget, default 100000)
 //       cuup: {n3_bind: 127.0.0.2}          # N3 (GTP-U 2152); default: the ng_bind address
 //       dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]
+//                                            # P3 R4 (ADR 0013 point 1, D7): up to 8 DUs, one cell each;
+//                                            # a cell's nci_cell (default the DU's place, 1..) and its
+//                                            # power_dbm in the static radio view (default -80); a DU's
+//                                            # split: {du: 127.0.10.11} (DU 2's default; DU n: .9+n)
 //   ues:
 //     - {group: phones, count: 3, range: "001010000300001", card: {template: ../cards/usim-5g.yaml},
 //        nssai: [1, "1-000001"], imeisv_tac: "86000000",    # SST, or SST-SD in hex
@@ -86,6 +90,22 @@ struct UeGroup {
     std::vector<Slice> nssai{Slice{}};   // the requested NSSAI
     std::string imeisv_tac = "86000000";   // 8 digits; the SNR comes from the IMSI
     std::string persona;                    // N15: a persona file (personas/), empty: the generic UE
+    // P3 R4 (ADR 0013 point 3): the group's levels in the static radio view, by DU id; nullopt: not
+    // heard. A DU left out is heard at its cell's power_dbm. hears: {"2": -60, "1": off}
+    std::map<std::uint64_t, std::optional<std::int16_t>> hears;
+};
+
+/// P3 R4 (ADR 0013 point 1, D7): a DU and its one cell. Its KAIR cell handle is its place in
+/// the gNB's list, 1..; its NCI the gNB ID's bits and then nci_cell.
+struct DuCell {
+    std::uint64_t id = 1;
+    std::uint32_t nci_cell = 1;
+    std::uint16_t pci = 101;
+    std::uint32_t tac = 1;
+    std::uint32_t arfcn = 632628;
+    std::uint32_t ssb_arfcn = 632640;   // P2 Q4: the cell's MeasurementTimingConfiguration
+    std::int16_t power_dbm = -80;       // the static view's level for a UE whose group names none
+    Endpoint split_du;                  // split: its F1-C (port 0) and F1-U address
 };
 
 /// The CU-CP's namespace from ksim-netd (ADR 0009 points 3 and 4): ng_bind is
@@ -132,11 +152,7 @@ struct Topology {
     std::string gnb_name = "ksim-gnb1";
     Endpoint ng_bind;                      // port 0
     Endpoint n3_bind;                      // the CU-UP's N3 address, port 2152
-    std::uint64_t du_id = 1;
-    std::uint16_t pci = 101;
-    std::uint32_t tac = 1;
-    std::uint32_t arfcn = 632628;
-    std::uint32_t ssb_arfcn = 632640;   // P2 Q4: the cell's MeasurementTimingConfiguration
+    std::vector<DuCell> dus{DuCell{}};    // P3 R4: one or more, one cell each
     std::vector<UeGroup> ues;
     std::string sealed_dir;
     std::string kek_file;
@@ -174,9 +190,21 @@ struct Topology {
     std::string peer_cucp;
     std::string peer_cuup;
     // Set at run time, not in the file (P2 Q3): the role this process runs and the
-    // DU's KAIR socket (the supervisor's run directory).
+    // DU's KAIR socket (the supervisor's run directory); P3 R4: a DU process's DU (its place in
+    // dus), and the UE role's KAIR socket of each DU, in dus' order.
     Role role = Role::all;
     std::string kair_socket;
+    std::size_t du_index = 0;
+    std::vector<std::string> kair_sockets;
+    std::int64_t off_air_at_start_ms = 0;   // P3 R4: a restarted DU process's cell off the air this long, as aio's
+    /// P3 R4: the DU's name for the control API: <gnb>-du for the first, <gnb>-du<n> after it.
+    std::string du_name(std::size_t i) const { return gnb_name + "-du" + (i == 0 ? "" : std::to_string(i + 1)); }
+    /// P3 R4: a split DU's namespace with ksim-netd: netd.du_netns for the first, then <it><n>.
+    std::string du_netns(std::size_t i) const { return netd.du_netns + (i == 0 ? "" : std::to_string(i + 1)); }
+    /// P3 R4: its NCI (TS 38.300 §8.2: the gNB ID's bits, then the cell's).
+    std::uint64_t nci(std::size_t i) const {
+        return (std::uint64_t{gnb_id} << (36U - gnb_id_bits)) | dus.at(i).nci_cell;
+    }
 };
 
 /// Reads and checks a topology; the error's text says where and why.

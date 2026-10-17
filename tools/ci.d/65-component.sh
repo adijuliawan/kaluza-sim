@@ -15,7 +15,8 @@
 # build/component/split-last; the split E1 run (P2 Q5) as build/component/e1-last; the 100-UE
 # run's rows (P2 Q7) in build/component/scale-last. From P2 Q14 prep a teardown pass, aio and
 # split, against a stub that releases 2.5 s late: NG_END=shutdown, no release request repeated.
-# From P3 R3 the P3 gates, aio and split: build/component/p3-aio-last and p3-split-last.
+# From P3 R3 the P3 gates, aio and split: build/component/p3-aio-last and p3-split-last; from R4
+# their two-DU runs, p3-aio-2du-last and p3-split-2du-last.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 B="$ROOT/build/dev/apps"
@@ -175,12 +176,15 @@ for topo in aio-stub split-stub; do
 done
 # P3 R3: the phase's own gates (KSIM_PHASE=p3, gates/verification/ksim-p3-*.sh), aio and split,
 # each with the stub's verdicts, its capture check and the canary, kept for tools/p3_exit.py as
-# build/component/p3-aio-last and p3-split-last.
-for topo in aio-stub split-stub; do
-    mode=${topo%%-*}
+# build/component/p3-aio-last and p3-split-last; from R4 the two-DU runs too (the stub serving
+# TACs 1 and 7), as p3-aio-2du-last and p3-split-2du-last. Each gate scores its topology's rows.
+for topo in aio-stub split-stub aio-stub-2du split-stub-2du; do
+    mode=${topo/-stub/}
+    profile=""
+    [[ "$topo" == *-2du ]] && profile="$ROOT/tests/corestub/profiles/two-tacs.yaml"
     echo "-- the P3 gates ($topo)"
     KSIM_RUNS="$T/runs-p3-$mode" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
-        KSIM_SIM_TRACE=1 KSIM_PHASE=p3 KSIM_TOPOLOGY_FILE="$ROOT/topologies/$topo.yaml" \
+        KSIM_SIM_TRACE=1 KSIM_PHASE=p3 KSIM_TOPOLOGY_FILE="$ROOT/topologies/$topo.yaml" STUB_PROFILE="$profile" \
         sh "$ROOT/gates/run.sh" stub > "$T/p3-$mode.out" 2>&1 || rc=1
     cat "$T/p3-$mode.out"
     PRUN="$(sed -n 's/^RUN_DIR=//p' "$T/p3-$mode.out")"

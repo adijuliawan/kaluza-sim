@@ -23,6 +23,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -63,7 +64,9 @@ public:
     Capture& operator=(const Capture&) = delete;
 
     void ngap(bool tx, ByteView pdu);
-    void f1ap(bool cu_tx, ByteView pdu);
+    /// P3 R4: `du` is the DU's place in the gNB's dus; each DU's F1AP has its own interface in
+    /// f1ap.pcapng ("f1ap" for the first, as before; "f1ap du<n>" for DU n).
+    void f1ap(bool cu_tx, ByteView pdu, std::size_t du = 0);
     void e1ap(bool cp_tx, ByteView pdu);
     void xnap(bool tx, ByteView pdu);
     void gtpu(const Endpoint& from, const Endpoint& to, ByteView pdu);
@@ -96,6 +99,7 @@ private:
     File gtpu_;
     File uu_;
     File sim_;
+    std::map<std::size_t, std::uint32_t> f1ap_ifc_;   // P3 R4: the interfaces of the DUs past the first
     CaptureStats stats_;
 };
 

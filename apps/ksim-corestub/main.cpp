@@ -26,6 +26,7 @@
 #include <exception>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <csignal>
 #include <future>
@@ -117,6 +118,18 @@ Reply report(Stub& s) {
         out.set("NG_SETUP", s.amf && s.amf->ng_setup_done() ? "1" : "0");
         out.set("UES", static_cast<std::int64_t>(s.amf ? s.amf->ues() : 0));
         if (s.amf) {
+            // P3 R4: each gNB and the TACs it serves now (NG Setup, RAN CONFIGURATION UPDATE).
+            const auto gnbs = s.amf->gnb_list();
+            out.set("GNBS", static_cast<std::int64_t>(gnbs.size()));
+            for (const auto& [id, tacs] : gnbs) {
+                std::string t;
+                for (std::uint32_t tac : tacs) {
+                    t += (t.empty() ? "" : ",") + std::to_string(tac);
+                }
+                std::array<char, 16> hex{};
+                std::snprintf(hex.data(), hex.size(), "0x%x", id);
+                out.set("GNB." + std::string(hex.data()) + ".TACS", t);
+            }
             const auto f = s.amf->failures();
             all.insert(all.end(), f.begin(), f.end());
             std::map<std::string, std::int64_t> counts;

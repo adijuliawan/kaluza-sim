@@ -117,7 +117,9 @@ struct Overrides {
     std::string kek;
     bool plain_nas = false;
     std::string role;    // P2 Q3: one role of a split run
-    std::string kair;    // P2 Q3: the DU's KAIR socket
+    std::string kair;    // P2 Q3: the DU's KAIR socket; P3 R4: the UE role's, one per DU, comma-separated
+    std::size_t du = 0;  // P3 R4: a DU role's DU, its place in the gNB's dus (0..)
+    int off_air_ms = 0;  // P3 R4: a DU role restarted by its supervisor starts off the air this long
 };
 
 int run(const std::string& topology_file, std::string run_dir, bool lab, int tcp_port, const Overrides& o) {
@@ -142,6 +144,19 @@ int run(const std::string& topology_file, std::string run_dir, bool lab, int tcp
         }
         topo->role = *r;
         topo->kair_socket = o.kair;
+        // P3 R4: the UE role reaches every DU's KAIR socket; a DU role hosts one DU.
+        for (std::size_t at = 0; at <= o.kair.size();) {
+            const std::size_t comma = std::min(o.kair.find(',', at), o.kair.size());
+            topo->kair_sockets.push_back(o.kair.substr(at, comma - at));
+            at = comma + 1;
+        }
+        if (o.du >= topo->dus.size() || (*r == ksim::node::Role::ue && topo->kair_sockets.size() != topo->dus.size()) ||
+            (*r != ksim::node::Role::ue && topo->kair_sockets.size() != 1)) {
+            std::cerr << "ksim: --du names one of the gNB's DUs, and the ue role's --kair one socket per DU\n";
+            return 2;
+        }
+        topo->du_index = o.du;
+        topo->off_air_at_start_ms = o.off_air_ms;
     }
     ksim::node::GuardInput guard;
     guard.addresses = {topo->amf, topo->ng_bind};
@@ -289,7 +304,9 @@ static int run_main(int argc, char** argv) {
 #else
     run_cmd->add_option("--role", o.role, "one role of a split run: cucp, cuup, du or ue (the supervisor starts them)");
 #endif
-    run_cmd->add_option("--kair", o.kair, "a split run's KAIR socket (the DU's)");
+    run_cmd->add_option("--kair", o.kair, "a split run's KAIR socket (the DU's; the ue role's, one per DU, comma-separated)");
+    run_cmd->add_option("--du", o.du, "a split DU role's DU: its place in the gNB's dus, 0.. (P3 R4)");
+    run_cmd->add_option("--off-air-ms", o.off_air_ms, "a restarted DU role's cell off the air this long first (P3 R4)");
     auto* stop_cmd = app.add_subcommand("stop", "stop a run");
     stop_cmd->add_option("--run-dir", run_dir, "the run directory (default the latest)");
     CLI11_PARSE(app, argc, argv);

@@ -891,6 +891,11 @@ std::vector<std::pair<std::string, std::string>> UeDevice::status() const {
     out.emplace_back("UPDATE_STATUS", proc::ue::update_status_name(mm_->update_status()));
     out.emplace_back("USIM", mm_->usim_valid() ? "valid" : "invalid");
     out.emplace_back("CAMPED", rrc_->camped() ? "1" : "0");
+    if (rrc_->camped()) {
+        // P3 R4: the cell it camps on (its KAIR handle) and that cell's TAI (TS 38.304 §5.2.3).
+        out.emplace_back("CELL", std::to_string(rrc_->cell()));
+        out.emplace_back("CELL_TAI", fmt::format("{}{}-{:06x}", config().plmn.mcc, config().plmn.mnc, rrc_->camped_tac()));
+    }
     out.emplace_back("AS_SECURITY", rrc_->as_security() ? "1" : "0");
     if (const auto& g = mm_->guti()) {
         out.emplace_back("GUTI", guti_text(*g));

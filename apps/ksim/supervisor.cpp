@@ -84,10 +84,13 @@ std::uint64_t number(const std::string& v, std::uint64_t fallback) {
 }
 
 struct Child {
-    Child(std::string r, const std::string& run)
-        : role(std::move(r)), dir(run + "/" + role), ctl(dir + "/ctl.sock"), pid(-1), generation(0), expected_exit(false) {}
+    Child(std::string r, std::string n, std::size_t d, const std::string& run)
+        : role(std::move(r)), name(std::move(n)), du(d), dir(run + "/" + name), ctl(dir + "/ctl.sock"), pid(-1), generation(0),
+          expected_exit(false) {}
 
     std::string role;
+    std::string name;      // P3 R4: its directory and label: the role's, or du<n> for DU n past the first
+    std::size_t du = 0;    // P3 R4: a DU role's DU, its place in the gNB's dus
     std::string dir;
     std::string ctl;
     std::atomic<pid_t> pid;
@@ -104,8 +107,15 @@ public:
         // A role the topology gives the interop peer (ADR 0012) is not ours to run.
         peers_ = {{"cucp", t.peer_cucp}, {"cuup", t.peer_cuup}};
         for (const char* r : {"cucp", "cuup", "du", "ue"}) {   // NOLINT(clang-analyzer-optin.cplusplus.UninitializedObject)
-            if (peer_of(r).empty()) {
-                children_.push_back(std::make_unique<Child>(r, run_));
+            if (!peer_of(r).empty()) {
+                continue;
+            }
+            if (std::string(r) == "du") {   // P3 R4: a DU process per DU
+                for (std::size_t d = 0; d < t.dus.size(); ++d) {
+                    children_.push_back(std::make_unique<Child>(r, d == 0 ? "du" : "du" + std::to_string(d + 1), d, run_));
+                }
+            } else {
+                children_.push_back(std::make_unique<Child>(r, r, 0, run_));
             }
         }
     }
@@ -128,6 +138,26 @@ public:
         }
         return nullptr;
     }
+    /// P3 R4: every process of the role (the DUs'), in the topology's order.
+    std::vector<Child*> all_of(const std::string& role) {
+        std::vector<Child*> out;
+        for (auto& c : children_) {
+            if (c->role == role) {
+                out.push_back(c.get());
+            }
+        }
+        return out;
+    }
+    /// P3 R4: the DU process the control API names (Topology::du_name).
+    Child* du_named(const std::string& name) {
+        for (Child* c : all_of("du")) {
+            if (t_.du_name(c->du) == name) {
+                return c;
+            }
+        }
+        return nullptr;
+    }
+    std::string kair_of(std::size_t d) const { return run_ + (d == 0 ? "/kair.sock" : "/kair-" + std::to_string(d + 1) + ".sock"); }
     std::string peer_of(const std::string& role) const {
         const auto it = peers_.find(role);
         return it == peers_.end() ? std::string() : it->second;
@@ -163,7 +193,7 @@ public:
     std::string manifest_roles() const {
         json r = json::object();
         for (const auto& c : children_) {
-            r[c->role] = {{"pid", static_cast<std::int64_t>(c->pid.load())}, {"dir", c->dir}};
+            r[c->name] = {{"pid", static_cast<std::int64_t>(c->pid.load())}, {"dir", c->dir}};
         }
         return r.dump();
     }
@@ -208,10 +238,23 @@ bool Supervisor::spawn(Child& c, std::string& why) {
     std::error_code ec;
     if (std::filesystem::exists(c.dir)) {
         std::filesystem::rename(c.dir, c.dir + "." + std::to_string(c.generation.load()), ec);
-        std::filesystem::rename(run_ + "/" + c.role + ".out", c.dir + "." + std::to_string(c.generation.load()) + ".out", ec);
+        std::filesystem::rename(run_ + "/" + c.name + ".out", c.dir + "." + std::to_string(c.generation.load()) + ".out", ec);
+    }
+    // P3 R4: a DU's KAIR socket and its place; the UE farm's, one socket per DU.
+    std::string kair = kair_of(c.du);
+    if (c.role == "ue") {
+        kair.clear();
+        for (std::size_t d = 0; d < t_.dus.size(); ++d) {
+            kair += (d == 0 ? "" : ",") + kair_of(d);
+        }
     }
     std::vector<std::string> argv{self_exe(), "run", "-c", topology_file_, "--run-dir", c.dir, "--role", c.role,
-                                  "--kair", run_ + "/kair.sock"};
+                                  "--kair", kair, "--du", std::to_string(c.du)};
+    if (c.role == "du" && c.generation.load() > 0) {
+        // P3 R4: a DU started again is off the air a while first, as an all-in-one restart's
+        // cell is (ledger A-12): its UEs see the radio link fail before the new DU's cell is up.
+        argv.insert(argv.end(), {"--off-air-ms", "2000"});
+    }
     if (args_.lab) {
         argv.emplace_back("--lab");
     }
@@ -224,7 +267,7 @@ bool Supervisor::spawn(Child& c, std::string& why) {
     if (!args_.kek.empty()) {
         argv.insert(argv.end(), {"--kek", args_.kek});
     }
-    const std::string out = run_ + "/" + c.role + ".out";
+    const std::string out = run_ + "/" + c.name + ".out";
     const int fd = ::open(out.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
     if (fd < 0) {
         why = "cannot create " + out;
@@ -245,7 +288,7 @@ bool Supervisor::spawn(Child& c, std::string& why) {
     posix_spawn_file_actions_destroy(&fa);
     ::close(fd);
     if (rc != 0) {
-        why = "cannot start the " + c.role + " role";
+        why = "cannot start the " + c.name + " role";
         return false;
     }
     c.pid = pid;
@@ -258,19 +301,19 @@ bool Supervisor::spawn(Child& c, std::string& why) {
         std::stringstream ss;
         ss << in.rdbuf();
         if (ss.str().find("\nCTL=") != std::string::npos || ss.str().rfind("CTL=", 0) == 0) {
-            events_.emit("run.role.start", "run:" + c.role, {{"role", c.role}, {"pid", std::to_string(pid)}});
+            events_.emit("run.role.start", "run:" + c.name, {{"role", c.name}, {"pid", std::to_string(pid)}});
             return true;
         }
         // Before the reaper runs this thread reaps; after, the reaper does and says so in c.pid.
         int status = 0;
         if ((!reaping_.load() && ::waitpid(pid, &status, WNOHANG) == pid) || c.pid.load() <= 0) {
             c.pid = -1;
-            why = "the " + c.role + " role exited at start: " + ss.str();
+            why = "the " + c.name + " role exited at start: " + ss.str();
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-    why = "the " + c.role + " role did not come up";
+    why = "the " + c.name + " role did not come up";
     return false;
 }
 
@@ -307,8 +350,8 @@ void Supervisor::reap() {
                     if (!c->expected_exit.load()) {
                         const std::string how = WIFEXITED(status) ? "exit " + std::to_string(WEXITSTATUS(status))
                                                                   : "signal " + std::to_string(WTERMSIG(status));
-                        events_.emit("run.role.exit", "run:" + c->role, {{"role", c->role}, {"status", how}});
-                        log::warn("ksim", "the {} role ended on its own ({})", c->role, how);
+                        events_.emit("run.role.exit", "run:" + c->name, {{"role", c->name}, {"status", how}});
+                        log::warn("ksim", "the {} role ended on its own ({})", c->name, how);
                     }
                 }
             }
@@ -397,10 +440,10 @@ Reply Supervisor::call(const Child& c, const std::string& method, const std::str
     cli.set_read_timeout(std::min(wait, kMaxWait + std::chrono::seconds(10)));
     auto res = method == "GET" ? cli.Get(path) : cli.Post(path, body.is_null() ? "{}" : body.dump(), "application/json");
     if (!res) {
-        return Reply::fail(Exit::abort, "the " + c.role + " role does not answer");
+        return Reply::fail(Exit::abort, "the " + c.name + " role does not answer");
     }
     auto r = Reply::parse(res->body);
-    return r ? *r : Reply::fail(Exit::internal, "the " + c.role + " role's answer is not a control API reply");
+    return r ? *r : Reply::fail(Exit::internal, "the " + c.name + " role's answer is not a control API reply");
 }
 
 Reply Supervisor::forward(const Child& c, const Request& r) const {
@@ -429,17 +472,19 @@ void Supervisor::restart_gnb() {
     restarting_ = true;
     events_.emit("ran.gnb.restart", "gnb:" + t_.gnb_name, {{"mode", "split"}});
     for (const char* r : {"du", "cuup", "cucp"}) {
-        if (Child* c = child(r)) {
+        for (Child* c : all_of(r)) {   // P3 R4: every DU's process
             stop_child(*c);
         }
     }
     std::string why;
+    bool ok = true;
     for (const char* r : {"cucp", "cuup", "du"}) {
-        Child* c = child(r);
-        if (c != nullptr && !spawn(*c, why)) {
-            log::warn("ksim", "gNB restart: {}", why);
-            events_.emit("run.role.exit", "run:" + std::string(r), {{"role", r}, {"status", "restart failed"}});
-            break;
+        for (Child* c : all_of(r)) {
+            if (ok && !spawn(*c, why)) {
+                log::warn("ksim", "gNB restart: {}", why);
+                events_.emit("run.role.exit", "run:" + c->name, {{"role", c->name}, {"status", "restart failed"}});
+                ok = false;
+            }
         }
     }
     restarting_ = false;
@@ -451,17 +496,18 @@ void Supervisor::restart_gnb() {
 // none, its count has not fallen for 3 s, or 10 s are up. Then F1 goes with no UE left for a
 // CU-CP to ask the AMF about again, and the CU-CP's role ends NG with a graceful SHUTDOWN.
 void Supervisor::drain() {
-    Child* du = child("du");
-    if (du == nullptr || du->pid.load() <= 0) {
-        return;
-    }
-    const std::string path = "/v1/du/" + encode(t_.gnb_name + "-du") + "/ue-list";
     const auto count = [&]() -> long {
-        const Reply r = call(*du, "GET", path, json(), std::chrono::seconds(5));
-        if (r.exit != Exit::ok || !r.kv.contains("UES") || !r.kv.at("UES").is_string()) {
-            return 0;
+        long n = 0;   // P3 R4: over every DU's process
+        for (Child* du : all_of("du")) {
+            if (du->pid.load() <= 0) {
+                continue;
+            }
+            const Reply r = call(*du, "GET", "/v1/du/" + encode(t_.du_name(du->du)) + "/ue-list", json(), std::chrono::seconds(5));
+            if (r.exit == Exit::ok && r.kv.contains("UES") && r.kv.at("UES").is_string()) {
+                n += std::atol(r.kv.at("UES").get<std::string>().c_str());
+            }
         }
-        return std::atol(r.kv.at("UES").get<std::string>().c_str());
+        return n;
     };
     const auto start = std::chrono::steady_clock::now();
     auto last_fall = start;
@@ -494,7 +540,7 @@ void Supervisor::shutdown() {
     }
     drain();
     for (const char* r : {"ue", "du", "cuup", "cucp"}) {
-        if (Child* c = child(r)) {
+        for (Child* c : all_of(r)) {
             stop_child(*c);
         }
     }
@@ -537,8 +583,13 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
     to("GET", "/v1/gnb/:name/amf-list", "cucp");
     to("POST", "/v1/gnb/:name/up-policy", "cucp");   // P2 Q9
     to("POST", "/v1/gnb/:name/gbr-budget", "cucp");   // P2 Q11
-    to("GET", "/v1/du/:name/ue-list", "du");
-    to("POST", "/v1/du/:name/cell", "du");   // P3 R3
+    // P3 R4: a DU's verbs go to the DU process the name says.
+    const auto to_du = [this](const Request& r) {
+        Child* c = du_named(r.params.at("name"));
+        return c != nullptr ? forward(*c, r) : Reply::fail(Exit::unknown, "no such DU");
+    };
+    server.get("/v1/du/:name/ue-list", to_du);
+    server.post("/v1/du/:name/cell", to_du);   // P3 R3
     to("POST", "/v1/debug/stall", "du");   // P2 Q7: the DU's loop has timers that come due
     to("GET", "/v1/cuup/:name/bearers", "cuup");
     // P3 R3: faults go to the role that carries the link (ngap, f1ap, e1ap: the CU-CP; n3, f1u:
@@ -548,14 +599,13 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
     server.get("/v1/faults", [this](const Request&) {
         Reply r;
         std::set<std::string> ids;
-        for (const char* role : {"cucp", "cuup", "du", "ue"}) {
-            const Child* c = child(role);
-            if (c == nullptr || c->pid.load() <= 0) {
+        for (const auto& c : children_) {
+            if (c->pid.load() <= 0) {
                 continue;
             }
             const Reply part = call(*c, "GET", "/v1/faults");
             if (part.exit != Exit::ok) {
-                return Reply::fail(Exit::abort, std::string("the ") + role + " role did not list its faults");
+                return Reply::fail(Exit::abort, "the " + c->name + " role did not list its faults");
             }
             for (const auto& [k, v] : part.kv.items()) {
                 if (k.rfind("FAULT.", 0) == 0) {
@@ -572,7 +622,7 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
         if (!rule) {
             return Reply::fail(Exit::usage, rule.error().what);
         }
-        std::vector<const char*> roles;
+        std::vector<std::string> roles;
         if (rule->link == "ngap") {
             roles = {"cucp"};
         } else if (rule->link == "f1ap" || rule->link == "e1ap") {
@@ -582,22 +632,26 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
             roles = {"cuup"};
         } else if (rule->link == "uu") {
             if (rule->dir != "ul") {
-                roles.push_back("du");
+                roles.emplace_back("du");
             }
             if (rule->dir != "dl") {
-                roles.push_back("ue");
+                roles.emplace_back("ue");
             }
             if (rule->dir == "any" && rule->count != 0) {
                 return Reply::fail(Exit::usage, "faults: in a split run a uu rule on N matches names its direction");
             }
         }
+        std::vector<Child*> targets;   // P3 R4: a DU rule goes to every DU's process
+        for (const std::string& role : roles) {
+            const auto of = all_of(role);
+            if (of.empty()) {
+                return Reply::fail(Exit::capability, "faults: the " + role + " is the peer's");
+            }
+            targets.insert(targets.end(), of.begin(), of.end());
+        }
         const std::uint32_t id = ++fault_ids_;
         Reply out;
-        for (const char* role : roles) {
-            Child* c = child(role);
-            if (c == nullptr) {
-                return Reply::fail(Exit::capability, std::string("faults: the ") + role + " is the peer's");
-            }
+        for (Child* c : targets) {
             json body = json::object();
             body["rule"] = req.arg("rule");
             body["row"] = req.arg("row", "-");
@@ -616,9 +670,8 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
         json body = json::object();
         body["id"] = req.arg("id", "all");
         std::int64_t cleared = 0;
-        for (const char* role : {"cucp", "cuup", "du", "ue"}) {
-            const Child* c = child(role);
-            if (c == nullptr || c->pid.load() <= 0) {
+        for (const auto& c : children_) {
+            if (c->pid.load() <= 0) {
                 continue;
             }
             const Reply part = call(*c, "POST", "/v1/faults/clear", body);
@@ -633,18 +686,23 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
     server.get("/v1/nodes", [this](const Request&) {
         Reply r;
         int n = 0;
-        for (const char* role : {"cucp", "cuup", "du", "ue"}) {
+        const auto node = [&](const std::string& name, const std::string& rs, const Child* c) {
             const std::string k = "NODE." + std::to_string(++n);
-            const std::string rs(role);
-            r.set(k + ".NAME", rs == "ue" ? std::string("ue-farm") : t_.gnb_name + (rs == "cucp" ? "" : "-" + rs));
+            r.set(k + ".NAME", name);
             r.set(k + ".ROLE", rs);
-            if (const Child* c = child(rs)) {
+            if (c != nullptr) {
                 r.set(k + ".PID", static_cast<std::int64_t>(c->pid.load()));
                 r.set(k + ".UP", c->pid.load() > 0 ? "1" : "0");
             } else {
                 r.set(k + ".PEER", peer_of(rs));   // not ours: no PID, no UP
             }
+        };
+        node(t_.gnb_name, "cucp", child("cucp"));
+        node(t_.gnb_name + "-cuup", "cuup", child("cuup"));
+        for (const Child* c : all_of("du")) {   // P3 R4: a node per DU
+            node(t_.du_name(c->du), "du", c);
         }
+        node("ue-farm", "ue", child("ue"));
         r.set("NODES", static_cast<std::int64_t>(n));
         return r;
     });
@@ -659,9 +717,17 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
                 r.kv[key] = from.kv.at(key);
             }
         };
-        for (const char* k : {"NG_UP", "NG_SETUP", "F1_SETUP", "RAN_UES"}) {
+        for (const char* k : {"NG_UP", "NG_SETUP", "F1_SETUP", "RAN_UES", "F1_DUS"}) {
             copy(a, k);
         }
+        std::int64_t cells = 0;   // P3 R4: the cells on air over every DU's process
+        for (Child* d : all_of("du")) {
+            const Reply x = d == &du ? b : call(*d, "GET", "/v1/info");
+            if (x.kv.contains("CELLS_ACTIVE") && x.kv.at("CELLS_ACTIVE").is_string()) {
+                cells += std::stoll(x.kv.at("CELLS_ACTIVE").get<std::string>());
+            }
+        }
+        r.set("CELLS_ACTIVE", cells);
         for (const char* k : {"CELL_ACTIVE", "KAIR_FRAMES", "KAIR_ERRORS"}) {
             copy(b, k);
         }
@@ -797,12 +863,16 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
     // P2 Q3: one role's process alone stops and starts again (rows ksim-p2.f1-reassociation and
     // ksim-p2.f1-loss-release): the others see their association go and come back.
     for (const char* role : {"cucp", "du", "cuup"}) {
-        const std::string name = t_.gnb_name + (std::string(role) == "cucp" ? "" : std::string("-") + role);
-        server.post(std::string("/v1/") + role + "/:name/restart", [this, role, name](const Request& req) {
-            if (req.params.at("name") != name) {
+        server.post(std::string("/v1/") + role + "/:name/restart", [this, role](const Request& req) {
+            // P3 R4: a DU by its name (Topology::du_name); the CU-CP and CU-UP by the gNB's.
+            const std::string name = req.params.at("name");
+            const bool du_role = std::string(role) == "du";
+            Child* target = du_role ? du_named(name) : child(role);
+            const std::string own = t_.gnb_name + (std::string(role) == "cucp" ? "" : std::string("-") + role);
+            if ((du_role && target == nullptr && peer_of(role).empty()) || (!du_role && name != own)) {
                 return Reply::fail(Exit::unknown, "no such node");
             }
-            if (child(role) == nullptr) {
+            if (target == nullptr) {
                 return peer_reply(role);
             }
             if (restarting_.load()) {
@@ -812,14 +882,14 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
             if (restarter_.joinable()) {
                 restarter_.join();
             }
-            restarter_ = std::thread([this, role] {
+            restarter_ = std::thread([this, target] {
                 const std::lock_guard<std::mutex> lock(restart_mu_);
                 restarting_ = true;
-                Child& c = *child(role);
+                Child& c = *target;
                 stop_child(c);
                 std::string why;
                 if (!spawn(c, why)) {
-                    events_.emit("run.role.exit", "run:" + c.role, {{"role", c.role}, {"status", "restart failed"}});
+                    events_.emit("run.role.exit", "run:" + c.name, {{"role", c.name}, {"status", "restart failed"}});
                 }
                 restarting_ = false;
             });
@@ -852,7 +922,7 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
                     }
                     continue;
                 }
-                const std::string role = "role=\"" + c->role + "\"";
+                const std::string role = "role=\"" + c->name + "\"";
                 if (const auto b = line.find('{'); b != std::string::npos) {
                     out += line.substr(0, b + 1) + role + "," + line.substr(b + 1) + "\n";
                 } else if (const auto sp = line.find(' '); sp != std::string::npos) {

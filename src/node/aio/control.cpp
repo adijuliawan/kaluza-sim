@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <csignal>
+#include <ctime>
 #include <regex>
 #include <sstream>
 #include <cctype>
@@ -413,9 +414,11 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
                 r.set("NG_SETUP", aio.cucp().ng_ready() ? "1" : "0");
                 r.set("F1_SETUP", aio.cucp().f1_ready() ? "1" : "0");
                 r.set("RAN_UES", static_cast<std::int64_t>(aio.cucp().ues()));
+                r.set("F1_DUS", static_cast<std::int64_t>(aio.cucp().dus()));   // P3 R4: DUs past F1 Setup
             }
             if (aio.hosts_du()) {
                 r.set("CELL_ACTIVE", aio.du().cell_active() ? "1" : "0");
+                r.set("CELLS_ACTIVE", static_cast<std::int64_t>(aio.cells_active()));   // P3 R4: of its DUs
             }
             if (aio.hosts_ues()) {
                 r.set("UES", static_cast<std::int64_t>(aio.ues().size()));
@@ -448,11 +451,14 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
             r.set("NODE.1.ROLE", role_name(t.role));
             return r;
         }
-        r.set("NODES", "2");
+        r.set("NODES", static_cast<std::int64_t>(1 + t.dus.size()));
         r.set("NODE.1.NAME", t.gnb_name);
         r.set("NODE.1.ROLE", "cucp");
-        r.set("NODE.2.NAME", t.gnb_name + "-du");
-        r.set("NODE.2.ROLE", "du");
+        for (std::size_t d = 0; d < t.dus.size(); ++d) {   // P3 R4: a node per DU
+            const std::string k = "NODE." + std::to_string(d + 2);
+            r.set(k + ".NAME", t.du_name(d));
+            r.set(k + ".ROLE", "du");
+        }
         return r;
     });
     server.get("/v1/ues", [&aio](const Request&) {
@@ -1329,43 +1335,70 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         r.set("EVENT_SEQ", static_cast<std::int64_t>(since));
         return r;
     });
-    // P3 R3 (KS-L2R-005; ksim-ctl du <name> cell on|off): the cell off the air and back.
-    server.post("/v1/du/:name/cell", [&aio, &t](const Request& req) {
-        if (req.params.at("name") != t.gnb_name + "-du" || !aio.hosts_du()) {
-            return Reply::fail(Exit::unknown, "no such DU");
+    // P3 R4: one DU of an all-in-one run stops and starts again (a split run's supervisor
+    // restarts the DU's process).
+    server.post("/v1/du/:name/restart", [&aio](const Request& req) {
+        const std::uint64_t since = aio.events().last_seq();
+        auto s = aio.call<Reply>([&aio, name = req.params.at("name")] {
+            if (auto r = aio.restart_du(name); !r) {
+                return Reply::fail(Exit::unknown, r.error().what);
+            }
+            Reply out;
+            out.set("RESULT", "STARTED");
+            return out;
+        });
+        if (!s) {
+            return unsound();
         }
+        Reply r = *s;
+        r.set("EVENT_SEQ", static_cast<std::int64_t>(since));
+        return r;
+    });
+    // P3 R3 (KS-L2R-005; ksim-ctl du <name> cell on|off): the cell off the air and back.
+    server.post("/v1/du/:name/cell", [&aio](const Request& req) {
         const std::string state = req.arg("state");
         if (state != "on" && state != "off") {
             return Reply::fail(Exit::usage, "du <name> cell on|off");
         }
-        auto s = aio.call<Reply>([&aio, on = state == "on"] {
-            Reply r;
-            if (aio.du().cell_powered() == on) {
+        auto s = aio.call<Reply>([&aio, name = req.params.at("name"), on = state == "on"] {
+            proc::ran::Du* du = aio.hosts_du() ? aio.du_named(name) : nullptr;   // P3 R4: by name
+            if (du == nullptr) {
+                return Reply::fail(Exit::unknown, "no such DU");
+            }
+            if (du->cell_powered() == on) {
                 return Reply::fail(Exit::wrong_state, on ? "the cell is on already" : "the cell is off already");
             }
-            aio.du().cell_power(on);
+            du->cell_power(on);
+            Reply r;
             r.set("CELL", on ? "on" : "off");
-            r.set("CELL_ACTIVE", aio.du().cell_active() ? "1" : "0");
+            r.set("CELL_ACTIVE", du->cell_active() ? "1" : "0");
             return r;
         });
         return s ? *s : unsound();
     });
-    server.get("/v1/du/:name/ue-list", [&aio, &t](const Request& req) {
-        if (req.params.at("name") != t.gnb_name + "-du" || !aio.hosts_du()) {
-            return Reply::fail(Exit::unknown, "no such DU");
-        }
-        auto s = aio.call<Reply>([&aio] {
+    server.get("/v1/du/:name/ue-list", [&aio](const Request& req) {
+        auto s = aio.call<Reply>([&aio, name = req.params.at("name")] {
+            proc::ran::Du* du = aio.hosts_du() ? aio.du_named(name) : nullptr;   // P3 R4: by name
+            if (du == nullptr) {
+                return Reply::fail(Exit::unknown, "no such DU");
+            }
             Reply r;
-            r.set("CELL_ACTIVE", aio.du().cell_active() ? "1" : "0");
-            r.set("CELL_POWERED", aio.du().cell_powered() ? "1" : "0");   // P3 R3: du cell off|on
-            r.set("UES", static_cast<std::int64_t>(aio.du().ues()));
-            r.set("UL_SDUS", static_cast<std::int64_t>(aio.du().stats().ul_sdus));
-            r.set("DL_SDUS", static_cast<std::int64_t>(aio.du().stats().dl_sdus));
-            r.set("WRONG_PPID", static_cast<std::int64_t>(aio.du().stats().wrong_ppid));
-            r.set("DDDS_TX", static_cast<std::int64_t>(aio.du().stats().ddds_tx));
-            r.set("SI_TX", static_cast<std::int64_t>(aio.du().stats().si_tx));
+            r.set("CELL_ACTIVE", du->cell_active() ? "1" : "0");
+            r.set("CELL_POWERED", du->cell_powered() ? "1" : "0");   // P3 R3: du cell off|on
+            r.set("UES", static_cast<std::int64_t>(du->ues()));
+            r.set("UL_SDUS", static_cast<std::int64_t>(du->stats().ul_sdus));
+            r.set("DL_SDUS", static_cast<std::int64_t>(du->stats().dl_sdus));
+            r.set("WRONG_PPID", static_cast<std::int64_t>(du->stats().wrong_ppid));
+            r.set("DDDS_TX", static_cast<std::int64_t>(du->stats().ddds_tx));
+            r.set("SI_TX", static_cast<std::int64_t>(du->stats().si_tx));
+            r.set("ANNOUNCES", static_cast<std::int64_t>(du->stats().announces));   // P3 R2: CELL_ANNOUNCE frames
+            r.set("SFN", static_cast<std::int64_t>(du->sfn()));                     // P3 R4: its SFN now,
+            timespec ts{};                                                             // and when (CLOCK_REALTIME)
+            ::clock_gettime(CLOCK_REALTIME, &ts);
+            r.set("SFN_AT_MS", static_cast<std::int64_t>(ts.tv_sec) * 1000 + ts.tv_nsec / 1'000'000);
+            r.set("CELL_HANDLE", static_cast<std::int64_t>(du->cell_handle()));
             // P2 Q10: each UE's DRBs (by C-RNTI) with their LCIDs and QoS flows.
-            const auto drbs = aio.du().drb_list();
+            const auto drbs = du->drb_list();
             r.set("DRBS", static_cast<std::int64_t>(drbs.size()));
             for (const auto& d : drbs) {
                 const std::string k = fmt::format("UE.0x{:04x}.DRB.{}", d.rnti, d.drb);

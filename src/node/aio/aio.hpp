@@ -29,6 +29,8 @@
 
 #include "node/aio/capture.hpp"
 #include "node/aio/faults.hpp"
+#include "platform/assoc_pool.hpp"
+#include "radio/view.hpp"
 #include "node/aio/metrics.hpp"
 #include "node/aio/run_dir.hpp"
 #include "node/aio/topology.hpp"
@@ -71,8 +73,8 @@ struct AioStats {
 struct FarmLane {
     Shard* shard = nullptr;
     std::unique_ptr<Shard> owned;                  // lanes 1..
-    std::unique_ptr<IChannel> kair;
-    std::optional<TimerId> retry;
+    std::vector<std::unique_ptr<IChannel>> kair;   // P3 R4: one per DU, in the topology's order
+    std::vector<std::optional<TimerId>> retry;
     std::vector<std::size_t> ues;                  // farm index - 1
     std::unique_ptr<net::netd::Client> netd;       // lanes 1.. with UEs in namespaces: a connection each
     std::unique_ptr<NetdUeNet> ue_net;
@@ -125,7 +127,12 @@ public:
     /// "imsi-001010000300001", "001010000300001" or a farm index ("17").
     UeDevice* ue(const std::string& selector);
     proc::ran::CuCp& cucp() { return *cucp_; }
-    proc::ran::Du& du() { return *du_; }
+    /// The first DU this process hosts (P3 R4: all of the gNB's all in one, its own in a DU role).
+    proc::ran::Du& du() { return *dus_.front()->du; }
+    /// P3 R4: the DU the control API names (Topology::du_name), if this process hosts it.
+    proc::ran::Du* du_named(const std::string& name);
+    std::size_t du_count() const noexcept { return dus_.size(); }
+    std::size_t cells_active() const;   // on air: active after F1 Setup, and powered
     // P2 Q3: what this process hosts; in a split run one role each (ADR 0011).
     bool hosts_ues() const noexcept { return topo_.role == Role::all || topo_.role == Role::ue; }
     bool hosts_cucp() const noexcept { return topo_.role == Role::all || topo_.role == Role::cucp; }
@@ -135,6 +142,10 @@ public:
     bool ng_up() const;
     /// The gNB's nodes stop and start again (P1 N12, ksim-ctl gnb restart).
     Result<void> restart_gnb();
+    /// P3 R4 (ksim-ctl du <name> restart, all in one): that DU alone stops and starts again, its
+    /// cell off the air for a while; the CU-CP sees its F1 go and come back, and releases only
+    /// its UEs. A split run's supervisor restarts the DU's process instead.
+    Result<void> restart_du(const std::string& name);
     const std::vector<std::string>& groups() const noexcept { return groups_; }   // by farm index - 1
     AioStats stats() const noexcept { return AioStats{kair_frames_.load(), kair_errors_.load()}; }
 
@@ -157,6 +168,7 @@ private:
     AllInOne(Topology t, std::string run_dir);
     Result<void> build(std::string& why);   // on the shard
     Result<void> build_gnb(std::string& why);
+    void build_du(std::size_t slot);   // P3 R4: a DU of this process, on its slot's links
     struct FarmCard {
         std::string imsi;
         std::string group;
@@ -166,14 +178,15 @@ private:
     Result<void> build_farm(std::vector<FarmCard> cards, const std::map<const UeGroup*, Persona>& personas,
                             std::string& why);
     void kair_accept(std::unique_ptr<IChannel> c);   // P2 Q3: the DU's end of KAIR
-    void kair_connect(std::size_t lane);             // P2 Q3: the farm's end; Q7: one per lane
+    void kair_connect(std::size_t lane, std::size_t du);   // P2 Q3: the farm's end; Q7: one per lane; R4: per DU
     std::unique_ptr<uicc::IApduTransport> external_reader(const UeGroup& g, std::string& why);   // P2 Q1
     Result<void> mid_leg(const std::string& netns, const Endpoint& at, std::string& why);   // P2 Q6
     void connect_gnb();
     void teardown_gnb();
     void teardown();                         // on the shard
-    void du_to_air(const air::Frame& f);
-    void du_air_send(const air::Frame& f);
+    void du_to_air(std::size_t slot, const air::Frame& f);
+    void du_air_send(std::size_t slot, const air::Frame& f);
+    void du_air_rx(std::size_t du, ByteView payload);   // P3 R4: all in one, a UE's frame to DU `du`
     void observe_kair(Metrics::Hop h, const air::Frame& f);
     void ue_to_air(std::size_t i, const air::Frame& f);
     void ue_air_send(std::size_t i, const air::Frame& f);
@@ -200,18 +213,28 @@ private:
     std::unique_ptr<net::SctpClient> ng_;
     std::unique_ptr<TapAssoc> ng_tap_;
     std::unique_ptr<FaultAssoc> ng_fault_;   // P3 R3: above the tap
-    std::unique_ptr<MemAssocPair> f1_;
-    std::unique_ptr<TapAssoc> f1_tap_;
-    std::unique_ptr<TapAssoc> du_f1_tap_;   // P2 Q4: the DU's F1-C, captured when the CU-CP is a peer
-    std::unique_ptr<FaultAssoc> f1_fault_;      // P3 R3: the CU-CP's end, or the DU's when the CU-CP is a peer
+    // P3 R4 (ADR 0013 point 1, D7): the DUs this process hosts, one cell each: all of the gNB's
+    // all in one, the one a split DU process was started for (topo_.du_index). A gNB restart
+    // builds them again; their ends of the air stay (du_air_, the KAIR listener).
+    struct DuSlot {
+        std::size_t index = 0;                        // in topo_.dus: its cell handle is index + 1
+        std::unique_ptr<MemAssocPair> f1;             // all in one
+        std::unique_ptr<net::SctpClient> f1_client;   // split
+        std::unique_ptr<TapAssoc> cu_tap;             // all in one: the CU-CP's end, captured
+        std::unique_ptr<TapAssoc> f1_tap;             // P2 Q4: the DU's F1-C, captured when the CU-CP is a peer
+        std::unique_ptr<FaultAssoc> f1_fault;         // P3 R3: the CU-CP's end, or the DU's with a peer CU-CP
+        std::unique_ptr<IDatagram> f1u;
+        std::unique_ptr<proc::ran::Du> du;
+    };
+    std::vector<std::unique_ptr<DuSlot>> dus_;
+    std::unique_ptr<AssocPool> f1_pool_;   // the CU-CP's F1-C: a link per DU (P3 R2's pool)
+    radio::StaticView view_;               // P3 R4: which cells each UE hears, from the topology
     std::unique_ptr<MemAssocPair> e1_;
     std::unique_ptr<TapAssoc> e1_tap_;
     std::unique_ptr<TapAssoc> cuup_e1_tap_;   // P2 Q5: the CU-UP's E1, captured when the CU-CP is a peer
     std::unique_ptr<FaultAssoc> e1_fault_;      // P3 R3: the CU-CP's end, or the CU-UP's when the CU-CP is a peer
     // P2 Q3, split: the real links of whichever roles this process hosts.
-    std::unique_ptr<AssocSlot> f1_slot_;               // the CU-CP's F1-C
-    std::unique_ptr<net::SctpListener> f1_listen_;
-    std::unique_ptr<net::SctpClient> f1_client_;       // the DU's F1-C
+    std::unique_ptr<net::SctpListener> f1_listen_;     // the CU-CP's F1-C
     std::unique_ptr<AssocSlot> e1_slot_;               // the CU-CP's E1
     std::unique_ptr<net::SctpListener> e1_listen_;
     std::unique_ptr<net::SctpClient> e1_client_;       // the CU-UP's E1
@@ -222,12 +245,10 @@ private:
     std::vector<std::pair<std::string, std::size_t>> roster_;   // supi, lane: fixed once built (any thread)
     std::unique_ptr<MemNet> f1u_net_;
     std::unique_ptr<IDatagram> cuup_f1u_;
-    std::unique_ptr<IDatagram> du_f1u_;
     std::unique_ptr<IDatagram> n3_;
     std::unique_ptr<MemNet> air_;
-    std::unique_ptr<IDatagram> du_air_;
+    std::vector<std::unique_ptr<IDatagram>> du_air_;   // all in one: each DU's end of the air
     std::unique_ptr<proc::ran::CuCp> cucp_;
-    std::unique_ptr<proc::ran::Du> du_;
     std::unique_ptr<proc::ran::CuUp> cuup_;
     std::vector<std::unique_ptr<UeDevice>> ues_;
     std::vector<std::unique_ptr<IDatagram>> ue_air_;
@@ -236,6 +257,7 @@ private:
     MemLinkConfig link_{};
     static constexpr Millis kRestartOffAir = 2'000;
     Millis air_off_until_ = 0;   // the cell is off the air before this (gnb restart)
+    std::map<std::size_t, Millis> du_off_until_;   // P3 R4: a DU's cell off the air before this (du restart)
     std::vector<std::string> groups_;
     std::atomic<std::uint64_t> kair_frames_{0};   // P2 Q7: counted on several shards
     std::atomic<std::uint64_t> kair_errors_{0};

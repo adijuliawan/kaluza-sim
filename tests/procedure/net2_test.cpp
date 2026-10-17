@@ -113,6 +113,25 @@ TEST(Net2, Ts38413_8_7_2_ADuWithANewTacAfterNgSetupMakesTheGnbUpdateItsTas) {
     EXPECT_EQ(n.failures(), "");
 }
 
+TEST(Net2, Ts38413_8_7_1_TwoDusComingTogetherMakeOneNgSetupAndAnUpdateForTheLaterTac) {
+    // P3 R4: NG-C up first, then both DUs' F1 Setups while the NG SETUP is out: one NG SETUP,
+    // and the TAC it missed in the RAN CONFIGURATION UPDATE after its response.
+    Net2 n({}, /*tac_a2=*/7);
+    n.ng_a.connect();
+    n.ng_b.connect();
+    n.b->f1s[0]->connect();
+    n.b->e1.connect();
+    n.a->e1.connect();
+    n.loop.run_until([] { return false; }, n.loop.now() + 1);
+    n.a->f1s[0]->connect();
+    n.a->f1s[1]->connect();
+    ASSERT_TRUE(n.loop.run_until([&] { return !n.named("ran.ng.config_update.ack").empty(); }, n.loop.now() + 2'000));
+    n.loop.run_until([] { return false; }, n.loop.now() + 200);
+    EXPECT_EQ(n.named("ran.ng.setup", "gnb:cucp1").size(), 1u);
+    EXPECT_EQ(n.amf.gnb_tacs(0x1A0), (std::vector<std::uint32_t>{1, 7}));
+    EXPECT_EQ(n.failures(), "");
+}
+
 TEST(Net2, Ts38413_8_5_1_PagingForATaReachesTheCellsOfThatTaOnly) {
     Net2 n({}, /*tac_a2=*/7);
     n.start();
@@ -147,6 +166,30 @@ TEST(Net2, Mutant_f1_loss_releases_all_ReleasesTheOtherDusUesToo) {
     n.a->f1s[1]->a().abort();
     n.loop.run_until([] { return false; }, n.loop.now() + 1'000);
     EXPECT_EQ(n.amf.count("UEContextReleaseRequest"), requests + 2);
+}
+
+TEST(Net2, Mutant_camp_last_sib1_TheUeCampsOnWhicheverCellItReadLast) {
+    if (!kMutationsBuild) {
+        GTEST_SKIP() << "mutant build only";
+    }
+    testing::MutantScope m("camp_last_sib1");
+    Net2 n;
+    n.add_ue(kSupi1, 11, kCellA1);
+    n.start();
+    n.loop.run_until([] { return false; }, n.loop.now() + 2'000);
+    // An idle UE hearing three cells re-camps on each SIB1: dozens of camps, not one.
+    EXPECT_GT(n.named("rrc.camped", "ue:imsi-" + std::string(kSupi1)).size(), 3u);
+}
+
+TEST(Net2, Ts38304_5_2_3_AnIdleUeHearingThreeCellsCampsOnceOnTheStrongest) {
+    Net2 n;
+    n.add_ue(kSupi1, 11, kCellA2);
+    n.start();
+    n.loop.run_until([] { return false; }, n.loop.now() + 2'000);
+    const auto camps = n.named("rrc.camped", "ue:imsi-" + std::string(kSupi1));
+    ASSERT_FALSE(camps.empty());
+    EXPECT_LE(camps.size(), 2u);   // a weaker cell's SIB1 may come first; then the strongest's
+    EXPECT_EQ(field(camps.back(), "cell"), std::to_string(kCellA2));
 }
 
 } // namespace

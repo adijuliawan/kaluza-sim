@@ -244,6 +244,58 @@ TEST(Topology, RefusesWhatP1DoesNotRunOrAMistypedKey) {
     fs::remove_all(dir);
 }
 
+TEST(Topology, P3R4_TheTwoDuTopologiesLoad) {
+    const std::string root = KSIM_SOURCE_DIR;
+    for (const char* f : {"aio-stub-2du.yaml", "split-stub-2du.yaml"}) {
+        std::string why;
+        auto t = load_topology(root + "/topologies/" + f, why);
+        ASSERT_TRUE(t) << f << ": " << why;
+        ASSERT_EQ(t->dus.size(), 2u) << f;
+        EXPECT_EQ(t->dus[1].tac, 7u) << f;
+        EXPECT_EQ(t->ues.size(), 2u) << f;
+        EXPECT_EQ(t->ues[1].hears.at(2), std::optional<std::int16_t>(-60)) << f;
+    }
+}
+
+TEST(Topology, P3R4_AGnbsDusEachWithOneCellAndAGroupsLevelsAreRead) {
+    // ADR 0013 point 1 (D7): a gNB's DUs, one cell each; the static view's levels (point 3).
+    const std::string dir = temp_dir();
+    std::string base = kTopology;
+    base.replace(base.find("    dus: [{id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}]"), 62,
+                 "    dus: [{id: 1, cells: [{pci: 101, tac: 1}]}, {id: 2, cells: [{pci: 102, tac: 7, power_dbm: -70}]}]");
+    base.replace(base.find("card: {template: ../cards/usim-5g.yaml}}"), 40,
+                 "card: {template: ../cards/usim-5g.yaml}, hears: {\"2\": -60, \"1\": off}}");
+    std::string why;
+    auto t = load_topology(write(dir + "/two.yaml", base), why);
+    ASSERT_TRUE(t) << why;
+    ASSERT_EQ(t->dus.size(), 2u);
+    EXPECT_EQ(t->dus[1].tac, 7u);
+    EXPECT_EQ(t->dus[1].power_dbm, -70);
+    EXPECT_EQ(t->dus[0].power_dbm, -80);
+    EXPECT_EQ(t->nci(0), (std::uint64_t{0x1A0} << 14) | 1);
+    EXPECT_EQ(t->nci(1), (std::uint64_t{0x1A0} << 14) | 2);
+    EXPECT_EQ(t->du_name(0), "g1-du");
+    EXPECT_EQ(t->du_name(1), "g1-du2");
+    EXPECT_EQ(t->dus[1].split_du, Endpoint::v4(127, 0, 10, 11, 2152));
+    ASSERT_EQ(t->ues.front().hears.size(), 2u);
+    EXPECT_EQ(t->ues.front().hears.at(2), std::optional<std::int16_t>(-60));
+    EXPECT_EQ(t->ues.front().hears.at(1), std::nullopt);
+    auto refused = [&](const std::string& from, const std::string& to) {
+        std::string text = base;
+        const auto at = text.find(from);
+        EXPECT_NE(at, std::string::npos) << from;
+        text.replace(at, from.size(), to);
+        std::string w;
+        return !load_topology(write(dir + "/bad.yaml", text), w) && !w.empty();
+    };
+    EXPECT_TRUE(refused("{pci: 102, tac: 7", "{pci: 101, tac: 7"));                           // a PCI twice
+    EXPECT_TRUE(refused("{id: 2, cells", "{id: 1, cells"));                                   // an id twice
+    EXPECT_TRUE(refused("cells: [{pci: 101, tac: 1}]", "cells: [{pci: 101}, {pci: 103}]"));   // D7
+    EXPECT_TRUE(refused("power_dbm: -70", "power_dbm: -20"));
+    EXPECT_TRUE(refused("\"2\": -60", "\"3\": -60"));                                     // no DU 3
+    fs::remove_all(dir);
+}
+
 TEST(Guard, RefusesTheLabNetworkOffTheLabHostAndBesideACell) {
     GuardInput in;
     in.host = "amadeus-dev";
@@ -344,6 +396,39 @@ TEST(Capture, ZeroesTheNgapSecurityKeyAndLeavesOutWhatItCannotRedact) {
 // P2 Q8 (ADR 0011): a headers-only capture keeps each GTP-U frame's first 128 octets
 // with its length on the wire; off keeps none. The Enhanced Packet Blocks of the file
 // (type 6): captured length at +20, original length at +24.
+TEST(Capture, EachDusF1apHasItsOwnInterface) {
+    // P3 R4: DU 1's F1AP on f1ap.pcapng's first interface, as in P1/P2; DU 2's on one of its own.
+    const std::string dir = temp_dir();
+    auto c = Capture::open(dir);
+    ASSERT_TRUE(c);
+    (*c)->f1ap(true, *from_hex("0001"));
+    (*c)->f1ap(false, *from_hex("0002"), 1);
+    (*c)->f1ap(true, *from_hex("0003"), 1);
+    (*c)->close();
+    const Bytes f = read(dir + "/f1ap.pcapng");
+    auto le = [&f](std::size_t at) {
+        return std::uint32_t{f[at]} | std::uint32_t{f[at + 1]} << 8 | std::uint32_t{f[at + 2]} << 16 | std::uint32_t{f[at + 3]} << 24;
+    };
+    std::vector<std::uint32_t> epb_ifc;
+    unsigned idbs = 0;
+    for (std::size_t at = 0; at + 12 <= f.size();) {
+        const std::uint32_t type = le(at);
+        const std::uint32_t len = le(at + 4);
+        if (len < 12 || at + len > f.size()) {
+            break;
+        }
+        idbs += type == 1 ? 1 : 0;
+        if (type == 6) {
+            epb_ifc.push_back(le(at + 8));
+        }
+        at += len;
+    }
+    EXPECT_EQ(idbs, 2u);
+    EXPECT_EQ(epb_ifc, (std::vector<std::uint32_t>{0, 1, 1}));
+    const std::string text(f.begin(), f.end());
+    EXPECT_NE(text.find("f1ap du2"), std::string::npos);
+}
+
 TEST(Capture, TheUserPlanePolicyKeepsHeadersOrNothing) {
     auto epbs = [](const Bytes& f) {
         std::vector<std::pair<std::uint32_t, std::uint32_t>> out;

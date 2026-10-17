@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# aio-stub-2du.yaml in split mode (P3 R4): the CU-CP, the CU-UP, a DU process per DU (DU 2's
+# F1-C and F1-U on 127.0.10.11) and the UE farm, which reaches each DU's KAIR socket.
+plmn: "00101"
+seed: 42
+mode: split
+amf: [{addr: 127.0.0.1, port: 39412}]
+gnbs:
+  - id: {value: 0x1A0, bits: 22}
+    name: ksim-gnb1
+    cucp: {ng_bind: 127.0.0.2}
+    cuup: {n3_bind: 127.0.0.4}
+    dus:
+      - {id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}
+      - {id: 2, cells: [{pci: 102, tac: 7, arfcn: 632628}]}
+    split: {f1c: 127.0.10.1, e1: 127.0.20.1, du: 127.0.10.2, cuup: 127.0.10.3, cuup_e1: 127.0.20.2, streams: 16}
+ues:
+  - {group: s22, count: 6, range: "001010000300001", card: {template: ../cards/usim-5g.yaml}, nssai: [1],
+     imeisv_tac: "86000000", persona: ../personas/s22plus.yaml, hears: {"1": -60}}
+  - {group: op9, count: 6, range: "001010000300007", card: {template: ../cards/usim-5g.yaml}, nssai: [1],
+     imeisv_tac: "86000000", persona: ../personas/oneplus9pro.yaml, hears: {"2": -60}}
+secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
+peer: {name: ksim-corestub}

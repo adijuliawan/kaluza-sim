@@ -272,6 +272,14 @@ paths:
         2 s (ledger A-14); RESULT=STARTED, EVENT_SEQ (wait for ran.ng.setup after it)
       parameters: [{name: name, in: path, required: true, schema: {type: string}}]
       responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
+  /v1/du/{name}/restart:
+    post:
+      summary: >-
+        P3 R4, all in one: that DU alone stops and starts again, its cell off the air 2 s
+        (ran.du.restart); RESULT=STARTED, EVENT_SEQ. A split run's supervisor restarts the
+        DU's process instead. Exit 4 for a DU the run does not have
+      parameters: [{name: name, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
   /v1/du/{name}/cell:
     post:
       summary: >-

@@ -64,6 +64,8 @@ public:
     /// P3 R2: the gNBs set up now, and the TACs each serves.
     std::size_t gnbs() const noexcept { return gnbs_.size(); }
     std::vector<std::uint32_t> gnb_tacs(std::uint32_t gnb_id) const;
+    /// P3 R4: each gNB with NG set up, its ID and the TACs it serves now (the report's GNB.*).
+    std::vector<std::pair<std::uint32_t, std::vector<std::uint32_t>>> gnb_list() const;
     std::size_t ues() const noexcept { return ues_.size(); }
     /// The UE Radio Capability the gNB indicated for a UE (N15), if any.
     std::optional<Bytes> radio_capability(std::uint64_t amf_ue);

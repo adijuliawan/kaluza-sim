@@ -217,26 +217,57 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
             }
             t.n3_bind = *n3;
         }
+        // P3 R4 (ADR 0013 point 1, D7): one or more DUs, one cell each.
         const Yaml dus = g.at("dus");
-        if (!dus.is_seq() || dus.size() != 1 || dus.at(0).at("cells").size() != 1) {
-            dus.fail("P1 runs one DU with one cell");
+        if (!dus.is_seq() || dus.size() < 1 || dus.size() > 8) {
+            dus.fail("a gNB has 1 to 8 DUs");
         }
-        dus.at(0).only({"id", "cells"});
-        t.du_id = dus.at(0).get<std::uint64_t>("id", 1);
-        const Yaml cell = dus.at(0).at("cells").at(0);
-        cell.only({"pci", "tac", "arfcn", "ssb_arfcn"});
-        t.pci = cell.get<std::uint16_t>("pci", t.pci);
-        t.tac = cell.get<std::uint32_t>("tac", t.tac);
-        t.arfcn = cell.get<std::uint32_t>("arfcn", t.arfcn);
-        t.ssb_arfcn = cell.get<std::uint32_t>("ssb_arfcn", t.ssb_arfcn);
-        if (t.pci > 1007 || t.tac > 0xFFFFFF) {
-            cell.fail("PCI 0..1007, TAC 24 bits");
+        t.dus.clear();
+        for (std::size_t i = 0; i < dus.size(); ++i) {
+            const Yaml d = dus.at(i);
+            d.only({"id", "cells", "split"});
+            if (d.at("cells").size() != 1) {
+                d.fail("a DU serves one cell (D7: a multi-cell site is several DUs)");
+            }
+            DuCell c;
+            c.id = d.get<std::uint64_t>("id", i + 1);
+            c.nci_cell = static_cast<std::uint32_t>(i + 1);
+            c.split_du = i == 0 ? t.split.du : Endpoint::v4(127, 0, 10, static_cast<std::uint8_t>(9 + i + 1), 2152);
+            const Yaml cell = d.at("cells").at(0);
+            cell.only({"pci", "tac", "arfcn", "ssb_arfcn", "nci_cell", "power_dbm"});
+            c.pci = cell.get<std::uint16_t>("pci", static_cast<std::uint16_t>(101 + i));
+            c.tac = cell.get<std::uint32_t>("tac", c.tac);
+            c.arfcn = cell.get<std::uint32_t>("arfcn", c.arfcn);
+            c.ssb_arfcn = cell.get<std::uint32_t>("ssb_arfcn", c.ssb_arfcn);
+            c.nci_cell = cell.get<std::uint32_t>("nci_cell", c.nci_cell);
+            const int power = cell.get<int>("power_dbm", c.power_dbm);
+            if (c.pci > 1007 || c.tac > 0xFFFFFF || power < -156 || power > -31) {
+                cell.fail("PCI 0..1007, TAC 24 bits, power_dbm -156..-31 (TS 38.133's SS-RSRP range)");
+            }
+            c.power_dbm = static_cast<std::int16_t>(power);
+            if (c.nci_cell == 0 || (std::uint64_t{c.nci_cell} >> (36U - t.gnb_id_bits)) != 0) {
+                cell.fail("nci_cell is 1.. and fits the NCI's bits past the gNB ID's");
+            }
+            if (d.has("split")) {
+                d.at("split").only({"du"});
+                auto a = Endpoint::parse(d.at("split").at("du").as<std::string>(), 2152);
+                if (!a || a->family != Endpoint::Family::v4) {
+                    d.at("split").at("du").fail("a numeric IPv4 address");
+                }
+                c.split_du = *a;
+            }
+            for (const DuCell& o : t.dus) {
+                if (o.id == c.id || o.pci == c.pci || o.nci_cell == c.nci_cell || o.split_du == c.split_du) {
+                    d.fail("each DU has its own id, PCI, nci_cell and split address");
+                }
+            }
+            t.dus.push_back(c);
         }
 
         const Yaml ues = y.at("ues");
         for (std::size_t i = 0; i < ues.size(); ++i) {
             const Yaml u = ues.at(i);
-            u.only({"group", "count", "range", "card", "nssai", "imeisv_tac", "persona"});
+            u.only({"group", "count", "range", "card", "nssai", "imeisv_tac", "persona", "hears"});
             UeGroup grp;
             grp.group = u.get<std::string>("group", "ues");
             grp.count = u.get<unsigned>("count", 1);
@@ -287,6 +318,26 @@ Result<Topology> load_topology(const std::string& file, std::string& why) {
                         sl.sd = static_cast<std::uint32_t>(std::stoul(sd, nullptr, 16));
                     }
                     grp.nssai.push_back(sl);
+                }
+            }
+            if (u.has("hears")) {
+                // P3 R4: the group's levels in the static view, by DU id ("off": not heard).
+                const Yaml h = u.at("hears");
+                for (const std::string& k : h.keys()) {
+                    if (!all_digits(k) || std::none_of(t.dus.begin(), t.dus.end(),
+                                                       [&](const DuCell& c) { return std::to_string(c.id) == k; })) {
+                        h.fail("hears is keyed by the gNB's DU ids");
+                    }
+                    const std::string v = h.at(k).as<std::string>();
+                    if (v == "off") {
+                        grp.hears[std::stoull(k)] = std::nullopt;
+                        continue;
+                    }
+                    const int dbm = h.at(k).as<int>();
+                    if (dbm < -156 || dbm > -31) {
+                        h.at(k).fail("a level is -156..-31 dBm, or off");
+                    }
+                    grp.hears[std::stoull(k)] = static_cast<std::int16_t>(dbm);
                 }
             }
             grp.imeisv_tac = u.get<std::string>("imeisv_tac", grp.imeisv_tac);

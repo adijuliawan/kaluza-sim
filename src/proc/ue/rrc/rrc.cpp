@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "crypto/keys5g.hpp"
+#include "platform/mutation.hpp"
 
 namespace ksim::proc::ue {
 
@@ -229,7 +230,7 @@ void UeRrc::on_sib1(const air::Frame& f) {
     if (camped_ && state_ != RrcState::idle) {
         return;
     }
-    const auto best = select(f.cell_handle);
+    const auto best = KSIM_MUTANT("camp_last_sib1") ? std::optional(f.cell_handle) : select(f.cell_handle);
     if (!best || *best != f.cell_handle) {
         return;   // a stronger suitable cell is heard: its SIB1 makes the UE camp there
     }

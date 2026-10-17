@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# One gNB with two DUs against ksim-corestub on loopback (P3 R4; ADR 0013 point 1, the row
+# set's 1g2d): DU 1's cell on TAC 1, DU 2's on TAC 7 (the stub with
+# tests/corestub/profiles/two-tacs.yaml). Each UE hears both cells; UEs 1-6 hear DU 1's at
+# -60 dBm and camp there, UEs 7-12 DU 2's (the static radio view). The P1 gates run here
+# unchanged, with UEs on both cells.
+plmn: "00101"
+seed: 42
+amf: [{addr: 127.0.0.1, port: 39412}]
+gnbs:
+  - id: {value: 0x1A0, bits: 22}
+    name: ksim-gnb1
+    cucp: {ng_bind: 127.0.0.2}
+    dus:
+      - {id: 1, cells: [{pci: 101, tac: 1, arfcn: 632628}]}
+      - {id: 2, cells: [{pci: 102, tac: 7, arfcn: 632628}]}
+ues:
+  # N15: UEs 1-6 behave as the S22+, 7-12 as the OnePlus 9 Pro (personas/, row KS-SCN-B1).
+  - {group: s22, count: 6, range: "001010000300001", card: {template: ../cards/usim-5g.yaml}, nssai: [1],
+     imeisv_tac: "86000000", persona: ../personas/s22plus.yaml, hears: {"1": -60}}
+  - {group: op9, count: 6, range: "001010000300007", card: {template: ../cards/usim-5g.yaml}, nssai: [1],
+     imeisv_tac: "86000000", persona: ../personas/oneplus9pro.yaml, hears: {"2": -60}}
+secrets: {sealed: ~/.kaluza-sim/cards, kek: ~/.kaluza-sim/secrets/kek.key}
+peer: {name: ksim-corestub}

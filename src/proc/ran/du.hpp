@@ -125,6 +125,8 @@ public:
     const DuStats& stats() const noexcept { return stats_; }
     f1ap::NrCgi cgi() const;
     std::uint32_t cell_handle() const noexcept { return cfg_.cell_handle; }   // P3 R2
+    /// The system frame number now (P3 R2: on the run's CLOCK_REALTIME epoch, ledger A-09).
+    std::uint16_t sfn() const noexcept;
 
 private:
     struct Ue {
@@ -186,7 +188,6 @@ private:
                                             std::vector<std::uint8_t>& released_lcids);
     Ue* by_du(std::uint32_t id);
     air::Frame frame(air::FrameType t, std::uint32_t radio_id) const;
-    std::uint16_t sfn() const noexcept;
 
     Executor& ex_;
     IEventSink& events_;

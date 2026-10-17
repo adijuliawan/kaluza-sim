@@ -122,6 +122,7 @@ public:
     RrcState state() const noexcept { return state_; }
     bool camped() const noexcept { return camped_; }
     std::uint32_t cell() const noexcept { return cell_; }
+    std::uint32_t camped_tac() const noexcept { return tac_; }   // P3 R4: the camped cell's TAC
     bool as_security() const noexcept { return as_security_; }
     std::optional<std::uint16_t> c_rnti() const noexcept { return mac_->c_rnti(); }
     const entity::Pdcp* srb(std::uint8_t id) const;

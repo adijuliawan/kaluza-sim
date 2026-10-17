@@ -19,6 +19,7 @@ pcsc_response_truncated	ksim-p2.pcsc-register	the PC/SC transport drops a respon
 bridge_admin_open	ksim-p2.bridge-refuses-admin	the card bridge lets VERIFY ADM1 and AF20/AF30 writes through without --admin (P2 Q1)
 f1_loss_silent	ksim-p2.f1-loss-release	the CU-CP drops its UEs when F1 is lost and tells the AMF nothing (P2 Q2; tests/procedure Ran.Mutant_f1_loss_silent_*; row ksim-p2.f1-loss-release from Q3)
 f1_loss_releases_all	-	the CU-CP with several DUs releases every UE when one DU's F1 is lost (P3 R2; tests/procedure Net2.Mutant_f1_loss_releases_all_*; row ksim-p3.multi-du.f1-loss from R4)
+camp_last_sib1	-	the UE camps on the cell of the last SIB1 it read, as P1 did, not on the strongest suitable cell it hears (P3 R4; tests/procedure Net2.Mutant_camp_last_sib1_*; row ksim-p3.camp.cell-selection)
 single_ue_stream	ksim-p2.per-ue-stream	the DU sends every UE's F1AP on stream 1 (P2 Q2; tests/procedure Ran.Mutant_single_ue_stream_*; row ksim-p2.per-ue-stream from Q3)
 f1_no_reassociation	ksim-p2.f1-reassociation	the DU sends no F1 SETUP REQUEST on a new F1 association, so after a CU-CP restart its cell stays off (P2 Q3)
 no_ddds	ksim-p2.ocudu-ddds	the DU sends no NR-U DL DATA DELIVERY STATUS, so a CU-UP that waits for a desired buffer size (OCUDU's) sends no DL data (P2 Q4)

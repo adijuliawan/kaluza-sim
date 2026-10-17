@@ -86,10 +86,19 @@ void Capture::ngap(bool tx, ByteView pdu) {
     write(ngap_, "ngap", r->pdu, tx ? "tx" : "rx");
 }
 
-void Capture::f1ap(bool cu_tx, ByteView pdu) {
+void Capture::f1ap(bool cu_tx, ByteView pdu, std::size_t du) {
     const std::lock_guard lock(mu_);
     ++stats_.f1ap;
-    write(f1ap_, "f1ap", pdu, cu_tx ? "cu->du" : "du->cu");
+    if (du == 0 || f1ap_.f == nullptr) {
+        write(f1ap_, "f1ap", pdu, cu_tx ? "cu->du" : "du->cu");
+        return;
+    }
+    auto it = f1ap_ifc_.find(du);
+    if (it == f1ap_ifc_.end()) {
+        it = f1ap_ifc_.emplace(du, f1ap_.w->add_interface(pcap::LinkType::upper_pdu, "f1ap du" + std::to_string(du + 1))).first;
+    }
+    (void)f1ap_.w->write(it->second, wall_ns(), pcap::exported_pdu("f1ap", pdu), cu_tx ? "cu->du" : "du->cu");
+    std::fflush(f1ap_.f);
 }
 
 void Capture::xnap(bool tx, ByteView pdu) {

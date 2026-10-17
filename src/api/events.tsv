@@ -182,3 +182,4 @@ fault.hit	sim	P3 R3: a rule on N matches acted on a message (a link's loss, x*, 
 ran.du.cell_off	sim	P3 R3 (KS-L2R-005): the DU's cell went off the air (du cell off), and the DU asked for the release of each UE it served; cell, released
 ran.du.cell_on	sim	P3 R3: the DU's cell is back on the air (du cell on); cell, active
 rrc.cell_lost	38.304 5.2.3	P3 R3: an RRC_IDLE UE stopped hearing its camped cell's broadcast and no longer camps there; cell
+ran.du.restart	sim	P3 R4: ksim-ctl du <name> restart in an all-in-one run: that DU stopped and started again, its cell off the air meanwhile; off_air_ms

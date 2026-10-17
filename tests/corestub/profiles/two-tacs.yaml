@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Adi Juliawan
+# SPDX-License-Identifier: LicenseRef-kaluza-sim-private
+#
+# The default profile with a second TA (P3 R4): the two-DU topologies put their second cell
+# on TAC 7 (as kaluza-core's wave 40 serves TAC 000007), and the accept's TAI list holds both.
+challenges: [ok]
+ea: 2
+ia: 2
+imeisv_request: true
+registration: accept
+tmsi: 1
+tacs: [1, 7]
+allowed_sst: [1]
+t3512_s: 3600
+deregistration: accept

@@ -26,6 +26,11 @@ set -u
 . "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/lib/ksim.sh"
 
 : "${DN_ADDR:=10.60.0.1}"
+if ! row_in_topology ksim-p3.faults.zero; then
+    echo "-- not a 1g run ($KSIM_RUN_TOPOLOGY): the fault rows are scored by a one-DU run"
+    summary "ksim-p3-faults"
+    exit 0
+fi
 
 echo "-- no fault set"
 n=$(ctl faults list | kv FAULTS)

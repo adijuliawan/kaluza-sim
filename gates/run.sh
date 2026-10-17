@@ -21,6 +21,8 @@
 #   KSIM_LAB=1    pass --lab (kaluza-uesim only; the guard enforces it)
 #   KSIM_TOPOLOGY_FILE
 #                 a topology instead of the core's (the privileged netns hook writes one)
+#   STUB_PROFILE  the stub's behaviour profile (tests/corestub/profiles; P3 R4: two-tacs.yaml for
+#                 the two-DU topologies)
 #   STUB_RELEASE_DELAY_MS
 #                 the stub's UE CONTEXT RELEASE COMMAND that late (P2 Q14 prep); the stub's
 #                 report after ksim stopped goes to <run>/stub-after.txt (NG_END and
@@ -130,7 +132,8 @@ if [ "${STUB:-0}" = 1 ]; then
     STUB_CTL="$KSIM_RUNS/$core-stub.sock"; export STUB_CTL
     "$STUB_BIN" --listen "$STUB_LISTEN" --master "$KSIM_MASTER" --block "$STUB_BLOCK" \
         --ctl "$STUB_CTL" ${STUB_N3:+--n3 "$STUB_N3"} ${STUB_DN_NETD:+--dn-netd "$STUB_DN_NETD"} \
-        ${STUB_RELEASE_DELAY_MS:+--release-delay-ms "$STUB_RELEASE_DELAY_MS"} > "$KSIM_RUNS/$core-stub.out" 2>&1 &
+        ${STUB_RELEASE_DELAY_MS:+--release-delay-ms "$STUB_RELEASE_DELAY_MS"} ${STUB_PROFILE:+--profile "$STUB_PROFILE"} \
+        > "$KSIM_RUNS/$core-stub.out" 2>&1 &
     stub_pid=$!
     i=0
     until grep -q '^CTL=' "$KSIM_RUNS/$core-stub.out" 2>/dev/null; do

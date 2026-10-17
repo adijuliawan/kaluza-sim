@@ -218,6 +218,7 @@ void CuCp::on_ng_event(LinkEvent e) {
         return;
     }
     ng_ready_ = false;
+    ng_setup_pending_ = false;
     // The UEs' NG contexts are gone with the association (TS 38.413 §8.7.1.1 does it explicitly; L10).
     std::vector<std::uint32_t> gone;
     for (auto& [cu, ue] : ues_) {
@@ -260,6 +261,9 @@ void CuCp::on_f1_event(LinkId link, LinkEvent e) {
     for (std::uint32_t cu : local) {
         ues_.erase(cu);
     }
+    if (!dus_.empty()) {
+        ran_configuration_update();   // P3 R4: the TAs the gNB serves are its DUs' (TS 38.413 §8.7.2)
+    }
 }
 
 void CuCp::ng_setup() {
@@ -276,6 +280,7 @@ void CuCp::ng_setup() {
         r.tas.push_back({tac, {{r.plmn, cfg_.slices}}});
     }
     r.paging_drx = cfg_.paging_drx;
+    ng_setup_pending_ = true;
     send_ngap(r, std::nullopt);
 }
 
@@ -355,8 +360,12 @@ void CuCp::handle(const f1ap::F1SetupRequest& m) {
     dus_[rx_link_] = DuInfo{m.du_id, cell.cgi, cell.tac};
     send_f1(f1ap::F1SetupResponse{m.transaction, cfg_.name, {cell.cgi}}, false);
     events_.emit("ran.f1.setup", cfg_.id, {{"du", m.du_name}, {"tac", str(cell.tac)}, {"dus", str(static_cast<std::int64_t>(dus_.size()))}});
+    // P3 R4: one NG SETUP at a time; a DU that came while it was out is in the RAN
+    // CONFIGURATION UPDATE that follows its response.
     if (ng_.up() && !ng_ready_) {
-        ng_setup();
+        if (!ng_setup_pending_) {
+            ng_setup();
+        }
     } else {
         ran_configuration_update();
     }
@@ -592,12 +601,14 @@ void CuCp::on_ngap(ByteView msg) {
 
 void CuCp::handle(const ngap::NgSetupResponse& m) {
     ng_ready_ = true;
+    ng_setup_pending_ = false;
     amf_name_ = m.amf_name;
     if (ng_retry_) {
         ex_.stop_timer(*ng_retry_);
         ng_retry_.reset();
     }
     events_.emit("ran.ng.setup", cfg_.id, {{"amf", m.amf_name}, {"capacity", str(m.capacity)}});
+    ran_configuration_update();   // P3 R4: a DU whose TAC is new came while the setup was out
 }
 
 const char* CuCp::phase_name(Phase p) noexcept {
@@ -623,6 +634,7 @@ std::vector<CuCpUeView> CuCp::ue_list() const {
 }
 
 void CuCp::handle(const ngap::NgSetupFailure& m) {
+    ng_setup_pending_ = false;
     const Millis wait = wait_of(m.time_to_wait);
     events_.emit("ran.ng.setup.failure", cfg_.id, {{"cause", m.cause.group + "/" + m.cause.value}, {"retry_ms", str(wait)}});
     ng_retry_ = ex_.start_timer(wait, [this, alive = alive_] {

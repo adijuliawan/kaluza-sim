@@ -369,6 +369,7 @@ private:
     IAssoc* e1_ = nullptr;
     bool e1_ready_ = false;
     bool ng_ready_ = false;
+    bool ng_setup_pending_ = false;   // P3 R4: an NG SETUP REQUEST is out, unanswered
     std::string amf_name_;
     std::optional<TimerId> ng_retry_;
     struct DuInfo {

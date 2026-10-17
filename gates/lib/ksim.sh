@@ -98,6 +98,31 @@ row_modes() {
         $1 == id { print $col; exit }' "$ROWS_SET"
 }
 
+# P3 R4: the run's shape for gates/rows/p3.tsv's topology column: 1g (one gNB, one DU) or 1g2d
+# (one gNB, two DUs), from the nodes the run lists. Set once, in KSIM_RUN_TOPOLOGY.
+set_run_topology() {
+    _dus=$(ctl nodes 2>/dev/null | grep -c '^NODE\.[0-9]*\.ROLE=du$')
+    case "$_dus" in
+        1) KSIM_RUN_TOPOLOGY=1g ;;
+        2) KSIM_RUN_TOPOLOGY=1g2d ;;
+        *) KSIM_RUN_TOPOLOGY="1g${_dus}d" ;;
+    esac
+}
+# row_topology ID: the row's topology (p3.tsv), empty in a row set without that column.
+row_topology() {
+    awk -F '\t' -v id="$1" '
+        $1 ~ /^#/ { next }
+        !col { for (i = 1; i <= NF; i++) if ($i == "topology") col = i; if (!col) exit; next }
+        $1 == id { print $col; exit }' "$ROWS_SET"
+}
+# row_in_topology ID: true when the run has the row's topology (or the row set has none).
+row_in_topology() {
+    _t=$(row_topology "$1")
+    [ -z "$_t" ] && return 0
+    [ -n "${KSIM_RUN_TOPOLOGY:-}" ] || set_run_topology
+    [ "$_t" = "$KSIM_RUN_TOPOLOGY" ]
+}
+
 # row_in_mode ID: true when the row's modes hold the run's (or it has none), for a gate that
 # must not act at all for a row the run cannot score: the real card's registration (P2 Q14, LW4).
 row_in_mode() {
@@ -115,6 +140,12 @@ row() {
     _id="$1"; _want="$2"; _got="$3"
     lag_guard
     _text=$(row_text "$_id") || abort "row $_id is not in $(basename "$ROWS_SET")"
+    if ! row_in_topology "$_id"; then
+        # P3 R4: another topology's row is scored by that topology's run; nothing is recorded
+        # here, so this run's SKIP cannot stand for it.
+        printf '  ----  %-66s %s\n' "$_text" "a $(row_topology "$_id") row, not this $KSIM_RUN_TOPOLOGY run's"
+        return 0
+    fi
     _modes=$(row_modes "$_id")
     if [ -n "$_modes" ] && [ "$_modes" != - ]; then
         [ -n "${KSIM_RUN_MODE:-}" ] || set_run_mode
