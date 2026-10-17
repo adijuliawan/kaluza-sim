@@ -92,3 +92,11 @@ add_library(ksim::codec_xnap ALIAS ksim_codec_xnap)
 target_include_directories(ksim_codec_xnap PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_codec_xnap PUBLIC ksim::platform PRIVATE ksim_codec_jer ksim::asn1_xnap ksim::warnings)
 ksim_layer(ksim_codec_xnap codec)
+
+# P3 R3: an AP PDU's message by name (msg/names.hpp), for the fault rules.
+add_library(ksim_codec_names STATIC msg/names.cpp)
+add_library(ksim::codec_names ALIAS ksim_codec_names)
+target_include_directories(ksim_codec_names PUBLIC ${PROJECT_SOURCE_DIR}/src)
+target_link_libraries(ksim_codec_names PUBLIC ksim::platform
+    PRIVATE ksim::codec_asn1 ksim::asn1_ngap ksim::asn1_f1ap ksim::asn1_e1ap ksim::asn1_xnap ksim::warnings)
+ksim_layer(ksim_codec_names codec)

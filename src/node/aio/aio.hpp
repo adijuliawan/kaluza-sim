@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "node/aio/capture.hpp"
+#include "node/aio/faults.hpp"
 #include "node/aio/metrics.hpp"
 #include "node/aio/run_dir.hpp"
 #include "node/aio/topology.hpp"
@@ -101,6 +102,7 @@ public:
     const Topology& topology() const noexcept { return topo_; }
     const std::string& run_dir() const noexcept { return run_dir_; }
     Capture* capture() noexcept { return capture_.get(); }
+    Faults& faults() noexcept { return *faults_; }   // P3 R3; any thread (it locks)
     const Metrics& metrics() const noexcept { return metrics_; }   // P2 Q7
     Millis max_lag_ms() const noexcept { return shard_->max_lag_ms(); }
 
@@ -171,8 +173,11 @@ private:
     void teardown_gnb();
     void teardown();                         // on the shard
     void du_to_air(const air::Frame& f);
+    void du_air_send(const air::Frame& f);
     void observe_kair(Metrics::Hop h, const air::Frame& f);
     void ue_to_air(std::size_t i, const air::Frame& f);
+    void ue_air_send(std::size_t i, const air::Frame& f);
+    Shard& ue_shard(std::size_t i) { return lanes_.empty() ? *shard_ : *lanes_[i % lanes_.size()].shard; }
 
     Topology topo_;
     std::string run_dir_;
@@ -183,6 +188,9 @@ private:
     std::unique_ptr<Capture> capture_;
     std::unique_ptr<Shard> shard_;
     std::unique_ptr<BlockingPool> blocking_;   // P2 Q1: PC/SC calls, made when a UE's card is pcsc:
+    // P3 R3: the faults set on this process's links; the wrappers below hold it.
+    std::unique_ptr<Faults> faults_;
+    std::shared_ptr<bool> air_alive_ = std::make_shared<bool>(true);   // delayed frames check it
     bool stopped_ = false;
 
     // On the shard.
@@ -191,12 +199,15 @@ private:
     std::unique_ptr<NetdUeNet> ue_net_;         // with netd ues: the UEs' TUN data plane
     std::unique_ptr<net::SctpClient> ng_;
     std::unique_ptr<TapAssoc> ng_tap_;
+    std::unique_ptr<FaultAssoc> ng_fault_;   // P3 R3: above the tap
     std::unique_ptr<MemAssocPair> f1_;
     std::unique_ptr<TapAssoc> f1_tap_;
     std::unique_ptr<TapAssoc> du_f1_tap_;   // P2 Q4: the DU's F1-C, captured when the CU-CP is a peer
+    std::unique_ptr<FaultAssoc> f1_fault_;      // P3 R3: the CU-CP's end, or the DU's when the CU-CP is a peer
     std::unique_ptr<MemAssocPair> e1_;
     std::unique_ptr<TapAssoc> e1_tap_;
     std::unique_ptr<TapAssoc> cuup_e1_tap_;   // P2 Q5: the CU-UP's E1, captured when the CU-CP is a peer
+    std::unique_ptr<FaultAssoc> e1_fault_;      // P3 R3: the CU-CP's end, or the CU-UP's when the CU-CP is a peer
     // P2 Q3, split: the real links of whichever roles this process hosts.
     std::unique_ptr<AssocSlot> f1_slot_;               // the CU-CP's F1-C
     std::unique_ptr<net::SctpListener> f1_listen_;

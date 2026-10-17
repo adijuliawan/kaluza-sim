@@ -166,6 +166,9 @@ public:
     /// Airplane mode: on, a registered UE de-registers as for switch-off and the
     /// radio goes off (the card keeps its state); off, the UE powers on again.
     Result<void> airplane(bool on);
+    /// P3 R3 (ksim-ctl ue rlf; KS-L2R-005): the radio link fails at once, as a sudden loss;
+    /// `why` is the RRC's reason (the air link's RLC giving up says so). Errc::closed in RRC_IDLE.
+    Result<void> radio_link_failure(const char* why = "radio link failure");
     Result<void> ps_establish(const proc::ue::SessionRequest& r);
     Result<void> ps_release(std::uint8_t psi);
     Result<void> ping(const PingRequest& p);

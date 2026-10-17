@@ -24,7 +24,20 @@ paths:
       responses: {"200": {$ref: "#/components/responses/Reply"}}
   /v1/faults:
     get:
-      summary: FAULTS=0 (fault injection is P3)
+      summary: >-
+        P3 R3: FAULTS (0 when none is set), and per rule FAULT.<id>.RULE, FAULT.<id>.ROW,
+        FAULT.<id>.HITS; a split run's supervisor merges its roles'
+      responses: {"200": {$ref: "#/components/responses/Reply"}}
+    post:
+      summary: >-
+        P3 R3: rule ("<link>.<dir> [msg=M] [ue=N] drop|dup|delay=MS [xN|x*] [pct=P]",
+        cli.md), row (the gate row it serves, default -), id (a split run's supervisor
+        gives one): FAULT_ID, RULE. Recorded in <run>/faults.tsv. Exit 2 for a rule it
+        cannot read or apply
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "400": {$ref: "#/components/responses/Reply"}}
+  /v1/faults/clear:
+    post:
+      summary: "P3 R3: id (or all, the default): CLEARED, FAULTS"
       responses: {"200": {$ref: "#/components/responses/Reply"}}
   /v1/info:
     get:
@@ -126,6 +139,13 @@ paths:
       summary: >-
         N12: state=on de-registers as for switch-off and turns the radio off; state=off
         powers the UE on again
+      parameters: [{$ref: "#/components/parameters/sel"}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
+  /v1/ue/{sel}/rlf:
+    post:
+      summary: >-
+        P3 R3 (KS-L2R-005): a radio link failure at once (rrc.connection_lost, radio link
+        failure); the UE's NAS then recovers its connection. Exit 6 in RRC_IDLE
       parameters: [{$ref: "#/components/parameters/sel"}]
       responses: {"200": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
   /v1/ue/{sel}/sms-send:
@@ -252,6 +272,14 @@ paths:
         2 s (ledger A-14); RESULT=STARTED, EVENT_SEQ (wait for ran.ng.setup after it)
       parameters: [{name: name, in: path, required: true, schema: {type: string}}]
       responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}}
+  /v1/du/{name}/cell:
+    post:
+      summary: >-
+        P3 R3 (KS-L2R-005): state=off takes the DU's cell off the air and asks for the
+        release of each UE it served (ran.du.cell_off); state=on puts it back
+        (ran.du.cell_on): CELL, CELL_ACTIVE. Exit 6 when it is in that state already
+      parameters: [{name: name, in: path, required: true, schema: {type: string}}]
+      responses: {"200": {$ref: "#/components/responses/Reply"}, "404": {$ref: "#/components/responses/Reply"}, "409": {$ref: "#/components/responses/Reply"}}
   /v1/stop:
     post:
       summary: Ends the run (STOPPING=1); the manifest records the end.

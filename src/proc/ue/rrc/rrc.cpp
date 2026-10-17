@@ -106,6 +106,39 @@ void UeRrc::supervise() {
     });
 }
 
+bool UeRrc::radio_link_failure(const char* why) {
+    if (state_ == RrcState::idle) {
+        return false;
+    }
+    lost(why);
+    return true;
+}
+
+void UeRrc::watch_cell() {
+    if (cell_watch_) {
+        return;
+    }
+    cell_watch_ = ex_.start_timer(cfg_.cell_loss / 2, [this, alive = alive_] {
+        if (!*alive) {
+            return;
+        }
+        cell_watch_.reset();
+        if (!camped_ || !radio_on_) {
+            return;
+        }
+        // TS 38.304 §5.2.3 in the ideal link: an RRC_IDLE UE that no longer hears its cell's
+        // broadcast has no suitable cell; it camps again on the next one it hears (KS-L2R-005).
+        if (state_ == RrcState::idle && ex_.now() - last_dl_ > cfg_.cell_loss) {
+            events_.emit("rrc.cell_lost", cfg_.id, {{"cell", str(cell_)}});
+            camped_ = false;
+            mib_ok_.erase(cell_);
+            candidates_.erase(cell_);
+            return;
+        }
+        watch_cell();
+    });
+}
+
 // ---- broadcast and paging (§5.2.2, §5.3.2) ---------------------------------------------------
 
 void UeRrc::on_frame(const air::Frame& f) {
@@ -211,6 +244,8 @@ void UeRrc::camp(std::uint32_t cell, ByteView sib1) {
     nci_ = c.nci;
     plmn_index_ = c.plmn_index;
     t300_ = c.t300;
+    last_dl_ = ex_.now();
+    watch_cell();
     mac_->camp(cell_);
     if (cfg_.tap) {
         cfg_.tap("nr-rrc.bcch.dl.sch", sib1);

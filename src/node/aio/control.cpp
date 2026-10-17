@@ -49,6 +49,19 @@ constexpr std::chrono::milliseconds kMaxWait{600'000};
 
 Reply unsound() { return Reply::fail(Exit::abort, "the node did not answer in time"); }
 
+// P3 R3: FAULTS=<n>, and per rule FAULT.<id>.RULE|ROW|HITS (cli.md faults list).
+Reply faults_reply(const std::vector<Faults::Active>& all) {
+    Reply r;
+    r.set("FAULTS", static_cast<std::int64_t>(all.size()));
+    for (const auto& a : all) {
+        const std::string k = "FAULT." + std::to_string(a.id);
+        r.set(k + ".RULE", rule_text(a.rule));
+        r.set(k + ".ROW", a.rule.row);
+        r.set(k + ".HITS", static_cast<std::int64_t>(a.hits));
+    }
+    return r;
+}
+
 std::chrono::milliseconds wait_ms(const Request& r, std::chrono::milliseconds fallback) {
     const std::string v = r.arg("wait_ms");
     if (v.empty() || v.find_first_not_of("0123456789") != std::string::npos || v.size() > 9) {
@@ -348,12 +361,46 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         r.set("CAP.SMS_NAS", "0");
         r.set("CAP.SUCI", "null");
         r.set("CAP.NETNS", t.netd.enabled && t.netd.ues ? "1" : "0");   // the TUN data plane (P1 N11)
-        r.set("CAP.FAULTS", "0");
+        r.set("CAP.FAULTS", "1");   // P3 R3
         return r;
     });
-    server.get("/v1/faults", [](const Request&) {
+    // P3 R3: fault injection (architecture.md section 9; cli.md faults). The registry locks, so
+    // these run on the HTTP thread; what a rule does runs on the shards that carry its link.
+    server.get("/v1/faults", [&aio](const Request&) { return faults_reply(aio.faults().list()); });
+    server.post("/v1/faults", [&aio](const Request& req) {
+        auto rule = parse_rule(req.arg("rule"));
+        if (!rule) {
+            return Reply::fail(Exit::usage, rule.error().what);
+        }
+        rule->row = req.arg("row", "-");
+        std::uint32_t id = 0;
+        try {
+            id = static_cast<std::uint32_t>(std::stoul(req.arg("id", "0")));
+        } catch (const std::exception&) {
+            return Reply::fail(Exit::usage, "faults: the id is a number");
+        }
+        auto set = aio.faults().set(*rule, id);
+        if (!set) {
+            return Reply::fail(Exit::usage, set.error().what);
+        }
         Reply r;
-        r.set("FAULTS", "0");   // fault injection is P3
+        r.set("FAULT_ID", static_cast<std::int64_t>(*set));
+        r.set("RULE", rule_text(*rule));
+        return r;
+    });
+    server.post("/v1/faults/clear", [&aio](const Request& req) {
+        Reply r;
+        const std::string id = req.arg("id");
+        if (id.empty() || id == "all") {
+            r.set("CLEARED", static_cast<std::int64_t>(aio.faults().clear_all()));
+        } else {
+            try {
+                r.set("CLEARED", aio.faults().clear(static_cast<std::uint32_t>(std::stoul(id))) ? "1" : "0");
+            } catch (const std::exception&) {
+                return Reply::fail(Exit::usage, "faults clear <id>|all");
+            }
+        }
+        r.set("FAULTS", static_cast<std::int64_t>(aio.faults().size()));
         return r;
     });
     server.get("/v1/info", [&aio, &t](const Request&) {
@@ -544,6 +591,10 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         const bool on = state == "on";
         return run_ue_command(aio, req,
                               UeCommand{[on](UeDevice& u) { return u.sim_trace(on); }, {}, {}, {}, "sim trace"});
+    });
+    // P3 R3 (KS-L2R-005): a sudden radio link failure.
+    server.post("/v1/ue/:sel/rlf", [&aio](const Request& req) {
+        return run_ue_command(aio, req, UeCommand{[](UeDevice& u) { return u.radio_link_failure(); }, {}, {}, {}, "rlf"});
     });
     server.post("/v1/ue/:sel/airplane", [&aio](const Request& req) {
         const std::string state = req.arg("state");
@@ -1278,6 +1329,27 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         r.set("EVENT_SEQ", static_cast<std::int64_t>(since));
         return r;
     });
+    // P3 R3 (KS-L2R-005; ksim-ctl du <name> cell on|off): the cell off the air and back.
+    server.post("/v1/du/:name/cell", [&aio, &t](const Request& req) {
+        if (req.params.at("name") != t.gnb_name + "-du" || !aio.hosts_du()) {
+            return Reply::fail(Exit::unknown, "no such DU");
+        }
+        const std::string state = req.arg("state");
+        if (state != "on" && state != "off") {
+            return Reply::fail(Exit::usage, "du <name> cell on|off");
+        }
+        auto s = aio.call<Reply>([&aio, on = state == "on"] {
+            Reply r;
+            if (aio.du().cell_powered() == on) {
+                return Reply::fail(Exit::wrong_state, on ? "the cell is on already" : "the cell is off already");
+            }
+            aio.du().cell_power(on);
+            r.set("CELL", on ? "on" : "off");
+            r.set("CELL_ACTIVE", aio.du().cell_active() ? "1" : "0");
+            return r;
+        });
+        return s ? *s : unsound();
+    });
     server.get("/v1/du/:name/ue-list", [&aio, &t](const Request& req) {
         if (req.params.at("name") != t.gnb_name + "-du" || !aio.hosts_du()) {
             return Reply::fail(Exit::unknown, "no such DU");
@@ -1285,6 +1357,7 @@ void bind_control(api::Server& server, AllInOne& aio, std::atomic<bool>& stop) {
         auto s = aio.call<Reply>([&aio] {
             Reply r;
             r.set("CELL_ACTIVE", aio.du().cell_active() ? "1" : "0");
+            r.set("CELL_POWERED", aio.du().cell_powered() ? "1" : "0");   // P3 R3: du cell off|on
             r.set("UES", static_cast<std::int64_t>(aio.du().ues()));
             r.set("UL_SDUS", static_cast<std::int64_t>(aio.du().stats().ul_sdus));
             r.set("DL_SDUS", static_cast<std::int64_t>(aio.du().stats().dl_sdus));

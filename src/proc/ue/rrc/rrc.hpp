@@ -63,6 +63,7 @@ struct RrcConfig {
     Millis t300_default = 1000;             // until SIB1 gives T300
     Millis keepalive = 200;                 // KAIR KEEPALIVE while connected (P1 N12)
     Millis rlf = 1000;                      // no downlink this long while connected: radio link failure
+    Millis cell_loss = 1000;                // P3 R3: the camped cell unheard this long in RRC_IDLE: lost
     std::optional<Bytes> nr_capability;     // the persona's UE-NR-Capability; a generic one if absent
     /// Each RRC message in clear as the UE sends or takes it, with Wireshark's
     /// channel name ("nr-rrc.ul.dcch", …) for the run's Uu capture. Broadcast
@@ -112,6 +113,9 @@ public:
     /// down is on the air: at once in RRC_CONNECTED, after RRCSetupComplete
     /// carried it from RRC_IDLE, or when that setup fails.
     void power_off_after_nas();
+    /// P3 R3 (KS-L2R-001, KS-L2R-005): a radio link failure now (TS 38.331 §5.3.10.3): the
+    /// UE's RLC gave up (max retransmissions), or ksim-ctl ue rlf. False when not connected.
+    bool radio_link_failure(const char* why);
     /// Uplink user data of QoS flow `qfi` in PDU session `psi`.
     Result<void> send_data(std::uint8_t psi, std::uint8_t qfi, Bytes ip);
 
@@ -153,6 +157,7 @@ private:
     void ul_nas(Bytes pdu);
     void go_idle();
     void supervise();
+    void watch_cell();   // P3 R3: the camped cell's broadcast, in RRC_IDLE
     void lost(const char* why);
 
     Executor& ex_;
@@ -187,6 +192,7 @@ private:
     Millis t300_ = 1000;
     std::optional<TimerId> t300_timer_;
     std::optional<TimerId> supervision_;
+    std::optional<TimerId> cell_watch_;
     Millis last_dl_ = 0;
     std::optional<std::uint16_t> s_tmsi_part2_;
     std::optional<Bytes> pending_nas_;

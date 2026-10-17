@@ -12,6 +12,7 @@ add_library(ksim_node STATIC
     aio/topology.cpp
     aio/run_dir.cpp
     aio/capture.cpp
+    aio/faults.cpp
     aio/guard.cpp
     aio/aio.cpp
     aio/control.cpp
@@ -19,7 +20,7 @@ add_library(ksim_node STATIC
 add_library(ksim::node ALIAS ksim_node)
 target_include_directories(ksim_node PUBLIC ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(ksim_node
-    PUBLIC ksim::proc ksim::net ksim::api ksim::uicc ksim::platform ksim::codec_air ksim::codec_ip ksim::codec_ngap ksim::crypto
+    PUBLIC ksim::proc ksim::net ksim::api ksim::uicc ksim::platform ksim::codec_air ksim::codec_ip ksim::codec_ngap ksim::codec_up ksim::codec_names ksim::crypto
     PRIVATE ksim::buildinfo ksim::warnings)
 ksim_layer(ksim_node node)
 if(KSIM_PCSC)

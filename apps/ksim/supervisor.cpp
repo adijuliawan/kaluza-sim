@@ -33,6 +33,7 @@
 #include "api/http.hpp"
 #include "api/reply.hpp"
 #include "api/wait.hpp"
+#include "node/aio/faults.hpp"
 #include "node/aio/run_dir.hpp"
 #include "node/aio/topology.hpp"
 #include "platform/clock.hpp"
@@ -196,6 +197,7 @@ private:
     std::mutex restart_mu_;
     std::atomic<bool> stopping_{false};
     std::atomic<bool> restarting_{false};
+    std::atomic<std::uint32_t> fault_ids_{0};   // P3 R3: one id per rule, the same in every role
     std::atomic<bool> reaping_{false};
     std::atomic<std::uint64_t> torn_lines_{0};
 };
@@ -526,7 +528,7 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
         to("GET", std::string("/v1/ue/:sel/") + p, "ue");
     }
     for (const char* p : {"power", "sim", "sim-trace", "airplane", "sms-send", "sms-memory", "service-request",
-                          "register", "deregister", "ps-establish", "ps-release", "ping", "exec"}) {
+                          "register", "deregister", "ps-establish", "ps-release", "ping", "exec", "rlf"}) {
         to("POST", std::string("/v1/ue/:sel/") + p, "ue");
     }
     // The gNB's.
@@ -536,11 +538,96 @@ void Supervisor::bind(api::Server& server, std::atomic<bool>& stop) {
     to("POST", "/v1/gnb/:name/up-policy", "cucp");   // P2 Q9
     to("POST", "/v1/gnb/:name/gbr-budget", "cucp");   // P2 Q11
     to("GET", "/v1/du/:name/ue-list", "du");
+    to("POST", "/v1/du/:name/cell", "du");   // P3 R3
     to("POST", "/v1/debug/stall", "du");   // P2 Q7: the DU's loop has timers that come due
     to("GET", "/v1/cuup/:name/bearers", "cuup");
-    server.get("/v1/faults", [](const Request&) {
+    // P3 R3: faults go to the role that carries the link (ngap, f1ap, e1ap: the CU-CP; n3, f1u:
+    // the CU-UP; uu: the DU for dl, the UE farm for ul, both for any: each applies a uu rule at
+    // the transmitter), each rule under one id the supervisor gives; a list merges the roles'
+    // and a clear goes to every role.
+    server.get("/v1/faults", [this](const Request&) {
         Reply r;
-        r.set("FAULTS", "0");   // fault injection is P3
+        std::set<std::string> ids;
+        for (const char* role : {"cucp", "cuup", "du", "ue"}) {
+            const Child* c = child(role);
+            if (c == nullptr || c->pid.load() <= 0) {
+                continue;
+            }
+            const Reply part = call(*c, "GET", "/v1/faults");
+            if (part.exit != Exit::ok) {
+                return Reply::fail(Exit::abort, std::string("the ") + role + " role did not list its faults");
+            }
+            for (const auto& [k, v] : part.kv.items()) {
+                if (k.rfind("FAULT.", 0) == 0) {
+                    r.kv[k] = v;
+                    ids.insert(k.substr(6, k.find('.', 6) - 6));
+                }
+            }
+        }
+        r.set("FAULTS", static_cast<std::int64_t>(ids.size()));
+        return r;
+    });
+    server.post("/v1/faults", [this](const Request& req) {
+        auto rule = node::parse_rule(req.arg("rule"));
+        if (!rule) {
+            return Reply::fail(Exit::usage, rule.error().what);
+        }
+        std::vector<const char*> roles;
+        if (rule->link == "ngap") {
+            roles = {"cucp"};
+        } else if (rule->link == "f1ap" || rule->link == "e1ap") {
+            // The CU-CP's end; when the CU-CP is the peer's, the DU's or the CU-UP's (ADR 0012).
+            roles = {child("cucp") != nullptr ? "cucp" : rule->link == "f1ap" ? "du" : "cuup"};
+        } else if (rule->link == "n3" || rule->link == "f1u") {
+            roles = {"cuup"};
+        } else if (rule->link == "uu") {
+            if (rule->dir != "ul") {
+                roles.push_back("du");
+            }
+            if (rule->dir != "dl") {
+                roles.push_back("ue");
+            }
+            if (rule->dir == "any" && rule->count != 0) {
+                return Reply::fail(Exit::usage, "faults: in a split run a uu rule on N matches names its direction");
+            }
+        }
+        const std::uint32_t id = ++fault_ids_;
+        Reply out;
+        for (const char* role : roles) {
+            Child* c = child(role);
+            if (c == nullptr) {
+                return Reply::fail(Exit::capability, std::string("faults: the ") + role + " is the peer's");
+            }
+            json body = json::object();
+            body["rule"] = req.arg("rule");
+            body["row"] = req.arg("row", "-");
+            body["id"] = std::to_string(id);
+            out = call(*c, "POST", "/v1/faults", body);
+            if (out.exit != Exit::ok) {
+                return out;
+            }
+        }
+        if (roles.empty()) {
+            return Reply::fail(Exit::usage, "faults: the link is ngap, f1ap, e1ap, uu, n3 or f1u");
+        }
+        return out;
+    });
+    server.post("/v1/faults/clear", [this](const Request& req) {
+        json body = json::object();
+        body["id"] = req.arg("id", "all");
+        std::int64_t cleared = 0;
+        for (const char* role : {"cucp", "cuup", "du", "ue"}) {
+            const Child* c = child(role);
+            if (c == nullptr || c->pid.load() <= 0) {
+                continue;
+            }
+            const Reply part = call(*c, "POST", "/v1/faults/clear", body);
+            if (part.kv.contains("CLEARED") && part.kv.at("CLEARED").is_string()) {
+                cleared = std::max(cleared, std::stol(part.kv.at("CLEARED").get<std::string>()));
+            }
+        }
+        Reply r;
+        r.set("CLEARED", cleared);
         return r;
     });
     server.get("/v1/nodes", [this](const Request&) {

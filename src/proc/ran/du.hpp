@@ -87,6 +87,7 @@ struct DuStats {
     std::uint64_t ddds_tx = 0;         // P2 Q4: DL DATA DELIVERY STATUS frames sent
     std::uint64_t si_tx = 0;           // P2 Q4: MIBs and SIB1s put on air
     std::uint64_t f1_errors = 0;       // F1AP messages refused or for no UE
+    std::uint64_t rlf = 0;             // P3 R3: UEs lost (silence, RLC max retransmissions, cell off)
 };
 
 class Du {
@@ -102,6 +103,14 @@ public:
     void on_frame(const air::Frame& f);
 
     bool cell_active() const noexcept { return active_; }
+    /// P3 R3 (KS-L2R-005; ksim-ctl du cell off|on): off takes the cell off the air, nothing
+    /// sent or heard, and asks for the release of every UE it served (cell-not-available); on
+    /// puts it back, broadcasting if F1 has it active.
+    void cell_power(bool on);
+    bool cell_powered() const noexcept { return powered_; }
+    /// P3 R3 (KS-L2R-001): the DU's RLC gave up on the UE with this C-RNTI (max retransmissions,
+    /// TS 38.322 §5.3.2): a radio link failure, reported in UE CONTEXT RELEASE REQUEST once.
+    void radio_link_failure(std::uint16_t rnti, const char* why);
     std::size_t ues() const noexcept { return ues_.size(); }
     /// P2 Q10: each UE's DRBs (by C-RNTI) and the QoS flows F1AP mapped to each.
     struct DrbView {
@@ -187,6 +196,13 @@ private:
     std::shared_ptr<bool> alive_;
 
     bool active_ = false;
+    bool powered_ = true;   // P3 R3: du cell off|on
+    bool on_air() const noexcept { return active_ && powered_; }
+    void air_out(air::Frame f) {
+        if (powered_) {
+            to_air_(std::move(f));
+        }
+    }
     std::uint8_t transaction_ = 0;
     std::optional<TimerId> setup_retry_;
     std::optional<TimerId> mib_timer_;

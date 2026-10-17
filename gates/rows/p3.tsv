@@ -16,9 +16,10 @@
 #   topology    1g: one gNB, one DU (the P1/P2 topologies); 1g2d: one gNB, two DUs of one cell each
 #               (D7); 3g: three gNBs of two DUs each, Xn mesh (design point a); oc: our gNB beside
 #               OCUDU's; 3g7: 3g with the third gNB's cells on TAC 000007
-#   milestone   where the row is first scored (R3..R20). R2's rows are scored from R4, whose
-#               topologies run one gNB with two DUs; R2 itself is proven by the virtual-time
-#               procedure tests (tests/procedure/net2_test.cpp)
+#   milestone   where the row is first scored (R3..R20). R2's rows and R3's cell-off-on are
+#               scored from R4, whose topologies run one gNB with two DUs; until then the
+#               virtual-time procedure tests prove them (tests/procedure/net2_test.cpp,
+#               faults_test.cpp)
 #   mutant      the KSIM_MUTATIONS switch that must fail the row ('-': interop rows, whose control
 #               is the peer; measured rows, whose control is the number; fault rows, whose control
 #               is the fault itself)
@@ -32,7 +33,7 @@ ksim-p3.ng.ran-config-update	kaluza-sim	-	the gNB sends RAN CONFIGURATION UPDATE
 ksim-p3.faults.zero	kaluza-sim	-	a run with no fault set prints FAULTS=0 and its manifest records none	faults	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g	R3	-	ksim-ctl faults list; manifest.json faults
 ksim-p3.faults.msg-drop	kaluza-sim	-	a message rule drops the matching PDU the number of times it says, and the drop is evented and in the manifest	faults	sim	sim	yes	stub	aio,split	1g	R3	-	event fault.hit; manifest.json faults; the PDU absent from the pcap
 ksim-p3.faults.link-loss	kaluza-sim	-	loss and delay set on a UE's air link are applied and measured; RLC AM's maximum retransmissions reached maps to RLF (KS-L2R-001)	faults	sim	sim	yes	stub	aio,split	1g	R3	-	event fault.link; ping loss and RTT; rrc.connection_lost reason
-ksim-p3.faults.cell-off-on	kaluza-sim	-	du cell off takes the cell off the air, its UEs lose it and the DU asks for their release; cell on brings it back and they camp again (KS-L2R-005)	faults	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R3	-	event ran.du.cell; ngap UEContextReleaseRequest radio-connection-with-ue-lost; rrc.camped
+ksim-p3.faults.cell-off-on	kaluza-sim	-	du cell off takes the cell off the air, its UEs lose it and the DU asks for their release; cell on brings it back and they camp again (KS-L2R-005)	faults	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R4	-	event ran.du.cell; ngap UEContextReleaseRequest radio-connection-with-ue-lost; rrc.camped
 ksim-p3.faults.ue-rlf	kaluza-sim	-	ue rlf makes the UE lose the radio link at once, as a battery pull or a sudden loss (KS-L2R-005)	faults	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g	R3	-	event rrc.connection_lost; ngap UEContextReleaseRequest
 ksim-p3.multi-du.f1	kaluza-sim	-	two DUs complete F1 Setup with one CU-CP, each serving its own cell	split	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R4	-	f1ap pcap F1SetupRequest/Response per DU
 ksim-p3.multi-du.f1-loss	kaluza-sim	-	losing one DU's F1 releases only that DU's UEs; the other DU's UEs keep their sessions	split	sim	sim	yes	stub,open5gs=allow,kaluza	aio,split	1g2d	R4	f1_loss_releases_all	ngap UEContextReleaseRequest per UE; ksim-ctl ue status

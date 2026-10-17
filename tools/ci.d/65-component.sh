@@ -15,6 +15,7 @@
 # build/component/split-last; the split E1 run (P2 Q5) as build/component/e1-last; the 100-UE
 # run's rows (P2 Q7) in build/component/scale-last. From P2 Q14 prep a teardown pass, aio and
 # split, against a stub that releases 2.5 s late: NG_END=shutdown, no release request repeated.
+# From P3 R3 the P3 gates, aio and split: build/component/p3-aio-last and p3-split-last.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 B="$ROOT/build/dev/apps"
@@ -171,6 +172,32 @@ for topo in aio-stub split-stub; do
     td=$(grep -E '^(NG_END|RELEASE_REQUESTS_REPEATED|ERROR_INDICATIONS)=' "$TDRUN/stub-after.txt" 2>/dev/null | sort | tr '\n' ' ')
     echo "TEARDOWN $topo: $td"
     [[ "$td" == "ERROR_INDICATIONS=0 NG_END=shutdown RELEASE_REQUESTS_REPEATED=0 " ]] || rc=1
+done
+# P3 R3: the phase's own gates (KSIM_PHASE=p3, gates/verification/ksim-p3-*.sh), aio and split,
+# each with the stub's verdicts, its capture check and the canary, kept for tools/p3_exit.py as
+# build/component/p3-aio-last and p3-split-last.
+for topo in aio-stub split-stub; do
+    mode=${topo%%-*}
+    echo "-- the P3 gates ($topo)"
+    KSIM_RUNS="$T/runs-p3-$mode" KSIM_MASTER="$T/keys/master.key" KSIM_KEK="$T/keys/kek.key" KSIM_SEALED="$T/cards" \
+        KSIM_SIM_TRACE=1 KSIM_PHASE=p3 KSIM_TOPOLOGY_FILE="$ROOT/topologies/$topo.yaml" \
+        sh "$ROOT/gates/run.sh" stub > "$T/p3-$mode.out" 2>&1 || rc=1
+    cat "$T/p3-$mode.out"
+    PRUN="$(sed -n 's/^RUN_DIR=//p' "$T/p3-$mode.out")"
+    if [[ -n "$PRUN" && -d "$PRUN" ]]; then
+        grep -qx 'FAILURES=0' "$PRUN/stub.txt" || { echo "COMPONENT: the stub failed the P3 $topo run"; rc=1; }
+        "$PY" -I "$ROOT/tools/pcap_check.py" "$PRUN" | tee "$T/p3-$mode-pcap.out" || rc=1
+        "$PY" -I "$ROOT/tools/secret_canary.py" --run-dir "$PRUN" --master "$T/keys/master.key" --block "$BLOCK" \
+            | tee "$T/p3-$mode-canary.out" || rc=1
+        grep -E '^(PCAP_[A-Z_]+|PYCRATE_FAILED|CANARY_RUN)=' "$T/p3-$mode-pcap.out" "$T/p3-$mode-canary.out" \
+            | sed 's/^[^:]*://' > "$PRUN/checks.txt"
+        cp "$T/p3-$mode.out" "$PRUN/gates.out"
+        rm -rf "$ROOT/build/component/p3-$mode-last"
+        cp -r "$PRUN" "$ROOT/build/component/p3-$mode-last"
+        find "$ROOT/build/component/p3-$mode-last" \( -name ctl.sock -o -name kair.sock \) -delete
+    else
+        echo "COMPONENT: no P3 $topo run directory"; rc=1
+    fi
 done
 echo "COMPONENT=$([[ $rc -eq 0 ]] && echo PASS || echo FAIL) RUN=build/component/last"
 exit "$rc"

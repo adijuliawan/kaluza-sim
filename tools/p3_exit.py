@@ -39,7 +39,7 @@ from p2_exit import Results, account, allow_ids, kv_file, mode_of, null_as  # no
 
 ROOT = Path(__file__).resolve().parents[1]
 # The last P3 milestone committed: rows of later milestones are not required yet.
-REACHED = "R2"
+REACHED = "R3"
 OCUDU_MODES = ("C6", "C7", "C8")
 
 
@@ -159,6 +159,20 @@ def main() -> int:
     print(f"V1_REQS UNBUILT={len(unbuilt)}{' ' + ' '.join(unbuilt) if unbuilt else ''}")
     if unbuilt and ms_key(REACHED) >= ms_key("R18"):
         problems.append(f"V1_REQS: {len(unbuilt)} v1 requirements not built")
+
+    # FAULTS (R3; ADR 0013 point 9): a rule set in a run serves a fault row, or the run is not an
+    # exit run: every 'set' line of every faults.tsv under a run names a ksim-p3.fault(s) row.
+    fault_rows = {r["id"] for r in rows if r["id"].startswith(("ksim-p3.fault.", "ksim-p3.faults."))}
+    stray = []
+    for run in rs.runs:
+        for f in sorted(run.rglob("faults.tsv")):
+            for line in f.read_text().splitlines():
+                c = line.split("\t")
+                if c[0] == "set" and (len(c) < 3 or c[2] not in fault_rows):
+                    stray.append(f"{run.name}:{c[1] if len(c) > 1 else '?'}")
+    print(f"FAULTS STRAY={len(stray)}{' ' + ' '.join(stray) if stray else ''}")
+    if stray:
+        problems.append(f"FAULTS: {len(stray)} faults set outside a fault row")
 
     m = kv_file(a.build / "mutants-run/last/summary.txt").get("MUTANTS_KILLED", "")
     print(f"MUTANTS={m or 'none'}")

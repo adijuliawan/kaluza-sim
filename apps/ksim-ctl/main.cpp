@@ -27,6 +27,8 @@
 //     ue <sel> sms-send <digits> <text> [--ucs2] [--srr] [--vp N] | sms-list | sms-memory full|available
 //     ue <sel> register --update
 //     ue <sel> sim info | sim read <EF> | sim trace on|off
+//     faults list | set <link>.<dir> [msg=M] [ue=N] drop|dup|delay=MS [xN|x*] [pct=P] [--row ID] | clear [<id>|all]
+//     ue <sel> rlf | du <name> cell on|off                              (P3 R3: faults, KS-L2R-005)
 //     netd list | setup-node <ns> [--parent P --addr A/N] | veth <ns> <A/N> | teardown <ns>
 //          | exec <ns> --log FILE -- <argv…>      (P2 Q7: ksim-netd for scripts, --netd PATH or
 //          $KSIM_NETD, default /run/ksim/netd.sock; exec prints PID= and does not wait)
@@ -205,7 +207,7 @@ Flags parse_flags(const std::vector<std::string>& args, std::size_t from) {
                                                  "integrity", "confidentiality", "rate-ul", "rate-dl", "preferred-integrity",
                                                  "preferred-confidentiality", "absent-integrity", "absent-confidentiality",
                                                  "integrity-possible", "qfi", "5qi", "precedence", "filter", "direction",
-                                                 "gfbr", "mfbr", "src", "sport"};
+                                                 "gfbr", "mfbr", "src", "sport", "row"};
     Flags f;
     for (std::size_t i = from; i < args.size(); ++i) {
         const std::string& a = args[i];
@@ -579,6 +581,9 @@ Reply ue_command(const Ctx& c, const std::string& ue, const Flags& f) {
         body["action"] = f.words[1];
         return call(c, "POST", base + "/sim", body);
     }
+    if (cmd == "rlf") {
+        return call(c, "POST", base + "/rlf", json::object());   // P3 R3: a sudden radio link failure
+    }
     if (cmd == "airplane" && f.words.size() >= 2 && (f.words[1] == "on" || f.words[1] == "off")) {
         json body = json::object();
         body["state"] = f.words[1];
@@ -717,7 +722,28 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
     if (verb == "nodes" || verb == "info" || verb == "version" || verb == "capabilities" || verb == "ues") {
         r = call(c, "GET", "/v1/" + verb);
     } else if (verb == "faults") {
-        r = call(c, "GET", "/v1/faults");
+        // P3 R3 (cli.md): faults list | set <rule> [--row ID] | clear [<id>|all].
+        if (f.words.empty() || f.words[0] == "list") {
+            r = call(c, "GET", "/v1/faults");
+        } else if (f.words[0] == "set" && f.words.size() >= 2) {
+            std::string rule;
+            for (std::size_t i = 1; i < f.words.size(); ++i) {
+                rule += (i > 1 ? " " : "") + f.words[i];
+            }
+            json body = json::object();
+            body["rule"] = rule;
+            if (f.has("row")) {
+                body["row"] = f.get("row");
+            }
+            r = call(c, "POST", "/v1/faults", body);
+        } else if (f.words[0] == "clear") {
+            json body = json::object();
+            body["id"] = f.words.size() >= 2 ? f.words[1] : "all";
+            r = call(c, "POST", "/v1/faults/clear", body);
+        } else {
+            r = Reply::fail(Exit::usage, "faults list | set <link>.<dir> [msg=M] [ue=N] drop|dup|delay=MS [xN|x*] [pct=P] "
+                                         "[--row ID] | clear [<id>|all]");
+        }
     } else if (verb == "stub") {
         // ksim-corestub (--socket): its report, or a network-side trigger for the gates.
         if (!f.words.empty() && (f.words[0] == "release" || f.words[0] == "ping-ue" || f.words[0] == "deregister" ||
@@ -816,8 +842,12 @@ int run(const Ctx& c, const std::vector<std::string>& in_args) {
             r = call(c, "GET", "/v1/du/" + encode(f.words[0]) + "/ue-list");
         } else if (f.words.size() >= 2 && f.words[1] == "restart") {
             r = call(c, "POST", "/v1/du/" + encode(f.words[0]) + "/restart");
+        } else if (f.words.size() >= 3 && f.words[1] == "cell" && (f.words[2] == "on" || f.words[2] == "off")) {
+            json body = json::object();   // P3 R3: the cell off the air and back (KS-L2R-005)
+            body["state"] = f.words[2];
+            r = call(c, "POST", "/v1/du/" + encode(f.words[0]) + "/cell", body);
         } else {
-            r = Reply::fail(Exit::usage, "du <name> ue-list|restart");
+            r = Reply::fail(Exit::usage, "du <name> ue-list|restart|cell on|off");
         }
     } else if (verb == "debug") {
         // P2 Q7: the watchdog's test (row ksim-p2.loop-lag-abort).

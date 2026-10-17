@@ -65,7 +65,12 @@ Result<Bytes> read_all(const std::string& path) {
 } // namespace
 
 AllInOne::AllInOne(Topology t, std::string run_dir)
-    : topo_(std::move(t)), run_dir_(std::move(run_dir)), events_(kEventRing, clock_) {}
+    : topo_(std::move(t)), run_dir_(std::move(run_dir)), events_(kEventRing, clock_),
+      faults_(std::make_unique<Faults>(events_, "run:faults", topo_.seed)) {
+    if (!run_dir_.empty()) {
+        faults_->record_to(run_dir_ + "/faults.tsv");   // P3 R3: a run with a fault says so
+    }
+}
 
 AllInOne::~AllInOne() { stop(); }
 
@@ -280,6 +285,7 @@ Result<void> AllInOne::build(std::string& why) {
         n3_ = std::make_unique<TapDatagram>(std::move(n3), [cap](const Endpoint& from, const Endpoint& to, ByteView p) {
             cap->gtpu(from, to, p);
         });
+        n3_ = std::make_unique<FaultDatagram>(std::move(n3_), *faults_, *shard_, "n3", "ul", "dl");   // P3 R3
     }
     if (topo_.role == Role::du) {
         // P2 Q3: the DU's end of KAIR, for the UE farm's shards (ADR 0011 point 2).
@@ -526,6 +532,11 @@ Result<void> AllInOne::build_gnb(std::string& why) {
     if (!all && f1_du != nullptr && !topo_.peer_cucp.empty()) {
         du_f1_tap_ = std::make_unique<TapAssoc>(*f1_du, [cap](bool tx, ByteView m) { cap->f1ap(tx, m); });
         f1_du = du_f1_tap_.get();   // P2 Q4: the peer's CU-CP captures for itself, not for us
+        f1_fault_ = std::make_unique<FaultAssoc>(*f1_du, *faults_, *shard_, "f1ap", "ul", "dl");   // P3 R3
+        f1_du = f1_fault_.get();
+    }
+    if (f1_tap_) {
+        f1_fault_ = std::make_unique<FaultAssoc>(*f1_tap_, *faults_, *shard_, "f1ap", "dl", "ul");   // P3 R3
     }
 
     // NG-C: the CU-CP's.
@@ -536,6 +547,7 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         ng_ = std::make_unique<net::SctpClient>(shard_->reactor(), *shard_, std::vector<Endpoint>{topo_.ng_bind},
                                                 std::vector<Endpoint>{topo_.amf}, opt, net::SctpBackoff{}, cucp_source);
         ng_tap_ = std::make_unique<TapAssoc>(*ng_, [cap](bool tx, ByteView m) { cap->ngap(tx, m); });
+        ng_fault_ = std::make_unique<FaultAssoc>(*ng_tap_, *faults_, *shard_, "ngap", "ul", "dl");   // P3 R3
     }
 
     // E1: the CU-UP's end and the CU-CP's.
@@ -576,6 +588,11 @@ Result<void> AllInOne::build_gnb(std::string& why) {
     if (!all && e1_up != nullptr && !topo_.peer_cucp.empty()) {
         cuup_e1_tap_ = std::make_unique<TapAssoc>(*e1_up, [cap](bool tx, ByteView m) { cap->e1ap(tx, m); });
         e1_up = cuup_e1_tap_.get();   // P2 Q5: the peer's CU-CP captures for itself, not for us
+        e1_fault_ = std::make_unique<FaultAssoc>(*e1_up, *faults_, *shard_, "e1ap", "ul", "dl");   // P3 R3
+        e1_up = e1_fault_.get();
+    }
+    if (e1_tap_) {
+        e1_fault_ = std::make_unique<FaultAssoc>(*e1_tap_, *faults_, *shard_, "e1ap", "dl", "ul");   // P3 R3
     }
 
     // F1-U: the CU-UP's end (captured, each datagram once) and the DU's.
@@ -615,6 +632,10 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         }
     }
 
+    if (cuup_f1u_) {
+        cuup_f1u_ = std::make_unique<FaultDatagram>(std::move(cuup_f1u_), *faults_, *shard_, "f1u", "dl", "ul");   // P3 R3
+    }
+
     if (hosts_cucp()) {
         proc::ran::CuCpConfig cc;
         cc.id = "gnb:" + topo_.gnb_name;
@@ -634,7 +655,8 @@ Result<void> AllInOne::build_gnb(std::string& why) {
         for (const auto& s : slices) {
             cc.slices.push_back(ngap::Snssai{s.sst, s.sd});
         }
-        cucp_ = std::make_unique<proc::ran::CuCp>(*shard_, events_, cc, *ng_tap_, *f1_tap_, e1_tap_.get());
+        cucp_ = std::make_unique<proc::ran::CuCp>(*shard_, events_, cc, *ng_fault_, *f1_fault_,
+                                                  e1_tap_ ? static_cast<IAssoc*>(e1_fault_.get()) : nullptr);
     }
     if (hosts_cuup()) {
         proc::ran::CuUpConfig upc;
@@ -698,6 +720,7 @@ void AllInOne::teardown_gnb() {
     du_f1u_.reset();
     cuup_f1u_.reset();
     f1u_net_.reset();
+    e1_fault_.reset();      // before the tap it wraps
     e1_tap_.reset();
     cuup_e1_tap_.reset();   // before the client it wraps
     e1_.reset();
@@ -707,8 +730,10 @@ void AllInOne::teardown_gnb() {
     if (ng_) {
         ng_->shutdown();
     }
+    ng_fault_.reset();
     ng_tap_.reset();
     ng_.reset();
+    f1_fault_.reset();
     f1_tap_.reset();
     du_f1_tap_.reset();     // before the client it wraps
     f1_.reset();
@@ -737,6 +762,35 @@ void AllInOne::du_to_air(const air::Frame& f) {
     if (shard_->now() < air_off_until_) {
         return;   // the cell is off the air while the gNB restarts
     }
+    if (faults_->on("uu")) {
+        // P3 R3: the downlink's faults, at its transmitter (the DU's RLC retransmits).
+        const FaultVerdict v = faults_->air("dl", f);
+        if (v.rlf) {
+            (void)shard_->post([this, rnti = f.rnti] {
+                if (du_) {
+                    du_->radio_link_failure(rnti, "rlc max retransmissions");
+                }
+            });
+        }
+        if (v.drop) {
+            return;
+        }
+        if (v.delay_ms > 0) {
+            shard_->start_timer(v.delay_ms, [this, f, alive = air_alive_] {
+                if (*alive) {
+                    du_air_send(f);
+                }
+            });
+            return;
+        }
+        if (v.duplicate) {
+            du_air_send(f);
+        }
+    }
+    du_air_send(f);
+}
+
+void AllInOne::du_air_send(const air::Frame& f) {
     auto wire = air::encode(f);
     if (!wire) {
         ++kair_errors_;
@@ -764,6 +818,36 @@ void AllInOne::du_to_air(const air::Frame& f) {
 }
 
 void AllInOne::ue_to_air(std::size_t i, const air::Frame& f) {
+    if (faults_->on("uu")) {
+        // P3 R3: the uplink's faults, at its transmitter (the UE's RLC retransmits), on its shard.
+        const FaultVerdict v = faults_->air("ul", f);
+        Shard& sh = ue_shard(i);
+        if (v.rlf) {
+            (void)sh.post([this, i, alive = air_alive_] {
+                if (*alive && i < ues_.size()) {
+                    (void)ues_[i]->radio_link_failure("rlc max retransmissions");
+                }
+            });
+        }
+        if (v.drop) {
+            return;
+        }
+        if (v.delay_ms > 0) {
+            sh.start_timer(v.delay_ms, [this, i, f, alive = air_alive_] {
+                if (*alive) {
+                    ue_air_send(i, f);
+                }
+            });
+            return;
+        }
+        if (v.duplicate) {
+            ue_air_send(i, f);
+        }
+    }
+    ue_air_send(i, f);
+}
+
+void AllInOne::ue_air_send(std::size_t i, const air::Frame& f) {
     auto wire = air::encode(f);
     if (!wire) {
         ++kair_errors_;
@@ -926,6 +1010,7 @@ Shard& AllInOne::shard_for(const std::string& selector) {
 }
 
 void AllInOne::teardown() {
+    *air_alive_ = false;   // P3 R3: frames a fault delayed are not sent any more
     stop_lanes();   // P2 Q7: the farm shards' UEs and KAIR ends, each on its shard
     kair_route_.clear();
     kair_peers_.clear();

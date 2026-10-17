@@ -278,6 +278,13 @@ Result<std::uint32_t> UeDevice::exec(const std::vector<std::string>& argv, std::
 
 void UeDevice::on_frame(const air::Frame& f) { rrc_->on_frame(f); }
 
+Result<void> UeDevice::radio_link_failure(const char* why) {
+    if (!rrc_->radio_link_failure(why)) {
+        return make_error(Errc::closed, 0, "the UE is not connected");
+    }
+    return {};
+}
+
 Result<void> UeDevice::power_on() {
     if (powered_) {
         return make_error(Errc::invalid_argument, 0, "the UE is already on");

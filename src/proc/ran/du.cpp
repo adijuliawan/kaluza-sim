@@ -77,7 +77,8 @@ void Du::supervise() {
                 continue;
             }
             ue.lost = true;
-            events_.emit("ran.du.rlf", cfg_.id, {{"du_ue", str(id)}, {"rnti", str(ue.rnti)}});
+            ++stats_.rlf;
+            events_.emit("ran.du.rlf", cfg_.id, {{"du_ue", str(id)}, {"rnti", str(ue.rnti)}, {"reason", "no uplink"}});
             if (!KSIM_MUTANT("no_release_on_radio_loss")) {
                 send_f1(f1ap::UeContextReleaseRequest{*ue.cu_ue, ue.du_ue, f1ap::Cause{"radioNetwork", "rl-failure-others"}},
                         true);
@@ -85,6 +86,52 @@ void Du::supervise() {
         }
         supervise();
     });
+}
+
+void Du::cell_power(bool on) {
+    if (on == powered_) {
+        return;
+    }
+    powered_ = on;
+    if (on) {
+        events_.emit("ran.du.cell_on", cfg_.id, {{"cell", str(cfg_.cell_handle)}, {"active", active_ ? "1" : "0"}});
+        if (active_) {
+            broadcast();
+            schedule_si(cfg_.mib_period, true);
+            schedule_si(cfg_.sib1_period, false);
+        }
+        return;
+    }
+    for (auto* t : {&mib_timer_, &sib1_timer_}) {
+        if (*t) {
+            ex_.stop_timer(**t);
+            t->reset();
+        }
+    }
+    // KS-L2R-005: its UEs have lost the cell; the DU asks for each one's release (TS 38.473 8.3.2).
+    std::int64_t released = 0;
+    for (auto& [id, ue] : ues_) {
+        if (!ue.cu_ue || ue.lost) {
+            continue;
+        }
+        ue.lost = true;
+        ++stats_.rlf;
+        ++released;
+        send_f1(f1ap::UeContextReleaseRequest{*ue.cu_ue, ue.du_ue, f1ap::Cause{"radioNetwork", "cell-not-available"}}, true);
+    }
+    events_.emit("ran.du.cell_off", cfg_.id, {{"cell", str(cfg_.cell_handle)}, {"released", str(released)}});
+}
+
+void Du::radio_link_failure(std::uint16_t rnti, const char* why) {
+    auto r = by_rnti_.find(rnti);
+    Ue* ue = r != by_rnti_.end() ? by_du(r->second) : nullptr;
+    if (ue == nullptr || !ue->cu_ue || ue->lost) {
+        return;
+    }
+    ue->lost = true;
+    ++stats_.rlf;
+    events_.emit("ran.du.rlf", cfg_.id, {{"du_ue", str(ue->du_ue)}, {"rnti", str(ue->rnti)}, {"reason", why}});
+    send_f1(f1ap::UeContextReleaseRequest{*ue->cu_ue, ue->du_ue, f1ap::Cause{"radioNetwork", "rl-failure-rlc"}}, true);
 }
 
 f1ap::NrCgi Du::cgi() const { return {ngap::plmn_id(cfg_.plmn.mcc, cfg_.plmn.mnc), cfg_.nci}; }
@@ -227,7 +274,7 @@ void Du::set_active(bool on) {
         return;
     }
     active_ = on;
-    if (on) {
+    if (on && powered_) {
         broadcast();
         schedule_si(cfg_.mib_period, true);
         schedule_si(cfg_.sib1_period, false);
@@ -290,7 +337,7 @@ void Du::send_mib() {
         b.sdus.push_back({0, air::RlcMode::tm, std::move(*wire)});
         b.seq = seq_++;
         ++stats_.si_tx;
-        to_air_(std::move(b));
+        air_out(std::move(b));
     }
 }
 
@@ -299,7 +346,7 @@ void Du::send_sib1() {
     si.sdus.push_back({0, air::RlcMode::tm, sib1_frame_});
     si.seq = seq_++;
     ++stats_.si_tx;
-    to_air_(std::move(si));
+    air_out(std::move(si));
 }
 
 void Du::send_announce() {
@@ -310,11 +357,11 @@ void Du::send_announce() {
     a.cell = air::CellInfo{cfg_.nci, cfg_.pci, cfg_.ssb_arfcn, {p[0], p[1], p[2]}, cfg_.tac};
     a.seq = seq_++;
     ++stats_.announces;
-    to_air_(std::move(a));
+    air_out(std::move(a));
 }
 
 void Du::broadcast() {
-    if (active_) {
+    if (on_air()) {
         send_announce();
         send_mib();
         send_sib1();
@@ -324,7 +371,7 @@ void Du::broadcast() {
 void Du::schedule_si(Millis period, bool mib) {
     auto& timer = mib ? mib_timer_ : sib1_timer_;
     timer = ex_.start_timer(period, [this, period, mib, alive = alive_] {
-        if (!*alive || !active_) {
+        if (!*alive || !on_air()) {
             return;
         }
         if (mib) {
@@ -340,7 +387,7 @@ void Du::schedule_si(Millis period, bool mib) {
 }
 
 void Du::handle(const f1ap::Paging& m) {
-    if (!active_ || std::find(m.cells.begin(), m.cells.end(), cgi()) == m.cells.end()) {
+    if (!on_air() || std::find(m.cells.begin(), m.cells.end(), cgi()) == m.cells.end()) {
         return;
     }
     auto pcch = rrc::encode(rrc::Paging{{m.s_tmsi}});
@@ -356,13 +403,13 @@ void Du::handle(const f1ap::Paging& m) {
     p.sdus.push_back({0, air::RlcMode::tm, std::move(*pcch)});
     p.seq = seq_++;
     events_.emit("ran.du.paging", cfg_.id, {{"pf", str(p.paging->pf_sfn)}});
-    to_air_(std::move(p));
+    air_out(std::move(p));
 }
 
 // ---- MAC: random access and SDUs -------------------------------------------------------------
 
 void Du::on_frame(const air::Frame& f) {
-    if (!active_ || f.cell_handle != cfg_.cell_handle) {
+    if (!on_air() || f.cell_handle != cfg_.cell_handle) {
         return;
     }
     switch (f.type) {
@@ -408,7 +455,7 @@ void Du::on_prach(const air::Frame& f) {
     r.rar = air::Rar{p.preamble, it->second.tc_rnti, 0, 0};
     r.seq = seq_++;
     ++stats_.rar;
-    to_air_(std::move(r));
+    air_out(std::move(r));
 }
 
 Result<Bytes> Du::cell_group(const std::set<std::uint8_t>& srbs, const std::vector<Ue::Drb>& drbs,
@@ -626,7 +673,7 @@ void Du::dl_sdu(const Ue& ue, std::uint8_t lcid, Bytes sdu) {
     d.sdus.push_back({lcid, lcid == 0 ? air::RlcMode::tm : air::RlcMode::am, std::move(sdu)});
     d.seq = seq_++;
     ++stats_.dl_sdus;
-    to_air_(std::move(d));
+    air_out(std::move(d));
 }
 
 Du::Ue* Du::by_du(std::uint32_t id) {
@@ -653,7 +700,7 @@ void Du::handle(const f1ap::DlRrcMessageTransfer& m) {
         m4.seq = seq_++;
         ue->contention.reset();
         ++stats_.dl_sdus;
-        to_air_(std::move(m4));
+        air_out(std::move(m4));
         return;
     }
     dl_sdu(*ue, m.srb, m.rrc);

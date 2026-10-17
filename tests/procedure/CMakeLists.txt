@@ -23,6 +23,11 @@ target_link_libraries(procedure_session PRIVATE ksim_corestub ksim::node ksim::p
 gtest_discover_tests(procedure_session DISCOVERY_MODE PRE_TEST)
 target_compile_definitions(procedure_session PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 
+add_executable(procedure_faults faults_test.cpp)
+target_link_libraries(procedure_faults PRIVATE ksim_corestub ksim::node ksim::proc ksim::uicc ksim::warnings GTest::gtest_main)
+target_compile_definitions(procedure_faults PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+gtest_discover_tests(procedure_faults DISCOVERY_MODE PRE_TEST)
+
 add_executable(procedure_net2 net2_test.cpp)
 target_link_libraries(procedure_net2 PRIVATE ksim_corestub ksim::node ksim::proc ksim::uicc ksim::radio ksim::warnings GTest::gtest_main)
 target_compile_definitions(procedure_net2 PRIVATE KSIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

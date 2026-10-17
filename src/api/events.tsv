@@ -41,7 +41,7 @@ rrc.reconfiguration.failure	38.331 5.3.5.8	an RRCReconfiguration the UE cannot c
 rrc.release	38.331 5.3.8.3	RRCRelease taken: RRC_IDLE
 rrc.capability.sent	38.331 5.6.1.3	UECapabilityInformation sent; octets (the UE-NR-Capability)
 rrc.integrity_failure	38.323 5.2.2.1	a PDCP integrity failure on an SRB (re-establishment is not in P1: the connection is lost); bearer, count
-rrc.connection_lost	38.331 5.3.11	the UE left RRC_CONNECTED on its own (integrity failure, bearers before AS security, a reconfiguration it cannot follow); reason
+rrc.connection_lost	38.331 5.3.11	the UE left RRC_CONNECTED on its own (integrity failure, bearers before AS security, a reconfiguration it cannot follow, a radio link failure: no downlink, its RLC's max retransmissions, ue rlf); reason
 rrc.decode_error	38.331 5.7.3	a DL-DCCH message the UE could not decode; bearer, what
 rrc.encode_error	sim	a message the UE's builders refused (a sim bug); what
 ran.f1.setup	38.473 8.2.3	F1 Setup done: at the CU-CP (du, tac, dus: the DUs set up now) and at the DU (cu, cell_active)
@@ -147,7 +147,7 @@ nas.sr.abort	24.501 5.6.1.7	a service request ended without an accept; why=T3517
 nas.sr.blocked	24.501 5.6.1.7	a service request the UE may not start; why=T3346
 nas.dereg.network	24.501 5.5.2.3.2	a network-initiated DEREGISTRATION REQUEST taken and accepted; reregistration, cause
 rrc.power	sim	the UE's radio switched on or off; on=1|0
-ran.du.rlf	38.473 8.3.2	the DU stopped hearing a UE (radio link supervision, ledger A-12): it asks the CU for the release; du_ue, rnti
+ran.du.rlf	38.473 8.3.2	the DU lost a UE: it stopped hearing it (radio link supervision, ledger A-12) or its RLC gave up (max retransmissions, P3 R3): it asks the CU for the release; du_ue, rnti, reason
 ran.gnb.restart	sim	ksim-ctl gnb restart: the DU, CU-CP and CU-UP stopped and started again, the cell off the air meanwhile; off_air_ms
 ue.power	sim	the UE device switched on or off; state=on|off, mode
 nas.auth.eap.response	24.501 5.4.1.2.2.3	an EAP-response to an EAP-request/AKA'-challenge; subtype=challenge|authentication-reject|synchronization-failure|client-error|notification, error, why, sent (0 when the third error in a row ended the procedure instead)
@@ -176,3 +176,9 @@ sms.mt.duplicate	24.011 5.3.2.1	a CP-DATA repeated on an MT transaction the UE a
 sms.memory	24.011 6.3.2	sms-memory: full or available; full, network_told (the network had a #22)
 sms.discard	24.011 9	a CP or RP message the UE could not use; what
 ue.sim.trace	sim	sim trace on or off: the card's APDUs go to the run's sim.pcapng as GSMTAP-SIM, redacted (sim-uicc.md 6); on
+fault.set	sim	P3 R3: a fault rule was set on this process's links (ADR 0013 point 9); id, rule, row
+fault.clear	sim	P3 R3: a fault rule was cleared; id, hits
+fault.hit	sim	P3 R3: a rule on N matches acted on a message (a link's loss, x*, is counted, not evented); id, link, dir, message, action, hits, spent
+ran.du.cell_off	sim	P3 R3 (KS-L2R-005): the DU's cell went off the air (du cell off), and the DU asked for the release of each UE it served; cell, released
+ran.du.cell_on	sim	P3 R3: the DU's cell is back on the air (du cell on); cell, active
+rrc.cell_lost	38.304 5.2.3	P3 R3: an RRC_IDLE UE stopped hearing its camped cell's broadcast and no longer camps there; cell
