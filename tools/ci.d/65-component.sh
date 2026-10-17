@@ -128,6 +128,16 @@ for topo in aio-stub-nea1 split-stub-nea1; do
         KSIM_PHASE=p2 KSIM_TOPOLOGY_FILE="$ROOT/topologies/$topo.yaml" \
         sh "$ROOT/gates/run.sh" stub "$ROOT/gates/verification/ksim-p2-security.sh" > "$T/$topo.out" 2>&1 || rc=1
     cat "$T/$topo.out"
+    # Kept for tools/p2_exit.py (P2 Q16): build/component/nea1-aio-last, nea1-split-last.
+    NRUN="$(sed -n 's/^RUN_DIR=//p' "$T/$topo.out")"
+    keep="$ROOT/build/component/nea1-${topo%%-*}-last"
+    rm -rf "$keep"
+    if [[ -n "$NRUN" && -d "$NRUN" ]]; then
+        cp -r "$NRUN" "$keep"
+        find "$keep" \( -name ctl.sock -o -name kair.sock \) -delete
+    else
+        echo "COMPONENT: no $topo run directory"; rc=1
+    fi
 done
 
 # P2 Q5: the E1 gate in split mode (topologies/split-stub-e1.yaml, a 15 s UE

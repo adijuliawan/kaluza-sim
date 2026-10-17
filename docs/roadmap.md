@@ -54,6 +54,8 @@
 - **Cards:** the PC/SC backend, the card bridge for the VM, and `ksim-sim burn` (the user burns one spare sysmoISIM in the sim range).
 - **Scale and measurement:** 100 UEs; farm shards; the loop-lag watchdog and metrics v0 move here from P3 (ADR 0009 point 6 amended by ADR 0011); a throughput harness measured on the dev PC and inside kaluza-uesim, never across the lab.
 
+**P2 closed on 2026-10-17** (`tools/p2_exit.sh`: P2_EXIT=PASS); the resume point is [`docs/handoff/2026-10-17-p2-close.md`](handoff/2026-10-17-p2-close.md).
+
 **P3 scope:**
 - **Radio:** `ksim-radio` and its replicas; TR 38.901 pathloss; measurements A1–A5; RLF and re-establishment; cell selection and reselection; PLMN selection; paging DRX (P1 stamps PF/PO without enforcing them, ledger A-11).
 - **Handover:** Xn, N2 and intra-CU, with forwarding, End Marker, RAN status transfer and NH/NCC.

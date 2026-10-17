@@ -79,6 +79,14 @@ P2's rows are `gates/rows/p2.tsv` ([ADR 0011](adr/0011-p2-runtime-shape.md), [AD
 | Performance | each `requirements.md` §3.5 target met on kaluza-uesim (window LW3), or the user's recorded decision |
 | The rest | every P2 stub row PASS; the 100-UE rows; the PC/SC rows (vpcd in CI, the real card); every mutant killed; no malformed frame; no canary hit; no exit run with NULL AS algorithms |
 
+*As built (P2 Q16):* `tools/p2_exit.sh` (`tools/p2_exit.py`; CI's hook 91 runs its `--stub-only` part) reads each run's mode from its manifest. It requires these (core, mode) pairs, the ones the table names; the other pairs a row's modes column allows are where it *can* run, not where it must:
+- the stub in split mode;
+- Open5GS and kaluza-core in split mode;
+- C3 on the stub and on kaluza-core;
+- C4 and C5 on the stub, as plan Q5 has them: each E1 row of the mode, and every row the C4 and C5 runs score (the session and data-plane gates).
+
+A row the stub run skips in inject mode (the UE's TUN) counts when it passes in netns mode in the same mode on a real core. In C4 and C5, which no core runs, those rows are named (INJECT_ONLY) rather than counted. The card rows count in any mode, since a card is a UE's card whatever the RAN: PC/SC and the bridge's refusals from hook 57, the real card on the stub, Open5GS and kaluza-core. On kaluza-core only the VM is reached, so the bridge row meets the PC/SC row there. The performance rows come from kaluza-uesim's newest report. A KF accounts for a row while it is open; a closed finding's rows must pass.
+
 Rows the cores cannot serve are scored where they can be (the user, 2026-10-15, and kaluza-core-df's facts): reflective QoS and the UP security policy on the stub (and Open5GS where its SMF sends the IE), GBR on the stub and Open5GS. On kaluza-core those sessions record the gNB default they get.
 
 With OCUDU's CU-CP (C3, C5) there is no ksim verb to release a UE, so the gates wait for OCUDU's own inactivity release (`gates/lib/ksim.sh`, `ran_release`). A row whose evidence is in OCUDU's own NGAP, the release request's cause, is scored from its capture once `gates/run.sh` has stopped it (`peer_row`, `gates/lib/peer_rows.sh`): OCUDU writes its captures only when it exits (KS-PLAT-B58).
